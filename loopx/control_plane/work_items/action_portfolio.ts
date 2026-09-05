@@ -10,6 +10,12 @@ import {
 
 import type { JsonObject } from "../effect_program.ts";
 import {
+  ACTION_PORTFOLIO_PLANNING_PACKET_REQUEST_SCHEMA,
+  ACTION_PORTFOLIO_PLANNING_PACKET_RESULT_SCHEMA,
+  ACTION_PORTFOLIO_SELECTION_REQUEST_SCHEMA,
+  ACTION_PORTFOLIO_SELECTION_RESULT_SCHEMA,
+} from "../coordination/coordination_state_contract.generated.ts";
+import {
   decodeTodoPlanningInventory,
   projectTodoPlanningInventory,
   projectTodoPlanningInventoryDetail,
@@ -23,13 +29,13 @@ export const ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v2";
 export const ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION =
   "quota_action_portfolio_request_v1";
 export const ACTION_SELECTION_QUALIFICATION_SCHEMA_VERSION =
-  "action_selection_qualification_v0";
+  ACTION_PORTFOLIO_SELECTION_RESULT_SCHEMA;
 export const ACTION_SELECTION_QUALIFICATION_REQUEST_SCHEMA_VERSION =
-  "action_selection_qualification_request_v0";
+  ACTION_PORTFOLIO_SELECTION_REQUEST_SCHEMA;
 export const QUOTA_PLANNING_PACKET_SCHEMA_VERSION =
-  "quota_planning_packet_v0";
+  ACTION_PORTFOLIO_PLANNING_PACKET_RESULT_SCHEMA;
 export const QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION =
-  "quota_planning_packet_request_v0";
+  ACTION_PORTFOLIO_PLANNING_PACKET_REQUEST_SCHEMA;
 
 const MAX_ALTERNATIVE_ACTIONS = 3;
 const DEFAULT_MAX_ALTERNATIVE_ACTIONS = 2;

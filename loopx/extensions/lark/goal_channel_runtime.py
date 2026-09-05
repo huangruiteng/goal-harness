@@ -22,6 +22,7 @@ from .goal_channel_contracts import (
     quota_selects_human_gate,
     read_goal_channel_binding,
     save_goal_binding,
+    serialize_goal_binding_mutation,
     semantic_key,
     write_human_gate_auto_notify_marker,
 )
@@ -78,6 +79,7 @@ def _resolve_kanban_config_path(
     return project_root / path
 
 
+@serialize_goal_binding_mutation
 def configure_lark_goal_channel_automation(
     *,
     registry: Mapping[str, Any],
@@ -484,6 +486,7 @@ def sync_lark_goal_channel(
     )
 
 
+@serialize_goal_binding_mutation
 def notify_lark_goal_channel_gate(
     *,
     registry: Mapping[str, Any],

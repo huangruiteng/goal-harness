@@ -94,6 +94,15 @@
 .personal-sidebar-title-actions button:hover { background: #fff; color: var(--pw-text); box-shadow: 0 1px 3px rgb(30 28 20 / 12%); }
 .personal-goal-list { display: grid; gap: 2px; }
 .personal-goal-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px 28px; align-items: center; gap: 2px; border-radius: 11px; }
+.personal-goal-row:has(.personal-goal-move-actions) { grid-template-columns: minmax(0, 1fr) 52px 28px; }
+.personal-goal-row[data-reorder-goal] > .personal-goal-link { cursor: grab; user-select: none; }
+.personal-goal-row[data-reorder-goal] > .personal-goal-link:active { cursor: grabbing; }
+.personal-goal-row.is-drop-before { box-shadow: 0 -2px var(--color-link, #0070f3); }
+.personal-goal-row.is-drop-after { box-shadow: 0 2px var(--color-link, #0070f3); }
+.personal-goal-move-actions { display: flex; }
+.personal-goal-move-actions button { display: grid; place-items: center; min-width: 26px; min-height: 44px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.personal-goal-move-actions button:disabled { opacity: .35; cursor: default; }
+.personal-goal-move-actions button:not(:disabled):hover { background: var(--color-surface-soft, #f2f2f2); }
 .personal-goal-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 44px; padding: 7px 5px 7px 10px; border-radius: 11px; }
 .personal-goal-lifecycle { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pw-faint); cursor: pointer; }
 .personal-goal-lifecycle:hover { background: #fff; color: var(--pw-text); box-shadow: 0 1px 3px rgb(30 28 20 / 12%); }
@@ -655,6 +664,9 @@
 .personal-capability-detail h2 { margin: 2px 0 4px; font-size: 17px; }
 .personal-capability-detail p { margin: 0; color: var(--pw-muted); font-size: 12px; line-height: 1.55; }
 .personal-capability-value-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px 18px; }
+.personal-capability-raw-values { border-top: 1px solid var(--pw-line); }
+.personal-capability-raw-values > summary { cursor: pointer; padding: 16px 18px; color: var(--pw-text); font-size: 12px; }
+.personal-capability-raw-values > summary:focus-visible { outline: 2px solid var(--pw-blue); outline-offset: -2px; }
 .personal-capability-value-grid section { min-width: 0; }
 .personal-capability-value-grid strong, .personal-capability-field-summary > strong { font-size: 11px; }
 .personal-capability-value-grid pre { overflow: auto; min-height: 72px; max-height: 220px; margin: 7px 0 0; padding: 11px; border: 1px solid var(--pw-line); border-radius: 9px; background: #faf9f6; color: var(--pw-text); font-size: 10.5px; line-height: 1.5; }
@@ -790,6 +802,12 @@
 .personal-task-lane-scroll > button > small, .personal-task-card > button > small { font-size: 12px; line-height: 16px; }
 .personal-task-lane-scroll > button > strong, .personal-task-card > button > strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 20px; }
 .personal-task-card { position: relative; }
+.personal-completed-window { position: relative; flex-shrink: 0; }
+.personal-completed-row { position: absolute; inset-inline: 0; padding-bottom: 8px; }
+.personal-completed-row > button { height: 100%; width: 100%; }
+.personal-completed-row > button > strong { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.personal-completed-footer { flex-shrink: 0; padding: 12px 4px; color: var(--pw-muted); font-size: 12px; text-align: center; }
+.personal-completed-footer button { min-height: 32px; border: 1px solid var(--pw-line); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
 .personal-task-card > button { width: 100%; display: grid; align-items: start; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .personal-task-card-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s ease; }
 .personal-task-card:hover .personal-task-card-actions, .personal-task-card:focus-within .personal-task-card-actions { opacity: 1; }

@@ -41,6 +41,7 @@ import {
   COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
   executeCoordinationTodoClaim,
 } from "./todo_claim.ts";
+import { editCoordinationTodo, TODO_COMPATIBILITY_EDIT_RESULT_SCHEMA } from "./todo_compatibility_edit.ts";
 
 export const LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA =
   "loopx_local_coordination_todo_claim_request_v0";
@@ -574,6 +575,27 @@ export async function claimLocalCoordinationTodo(
       decision_read_from_provider: true,
       legacy_fallback_used: false,
     };
+  }
+}
+
+/** Embedded file adapter; no Markdown input or projection write is accepted. */
+export async function editLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local compatibility edit");
+    const {runtime_root, ...request} = input;
+    const root = runtimeRoot(runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    return {...await editCoordinationTodo(store, request),
+      source_authority: "file_v0", decision_read_from_provider: true, legacy_fallback_used: false};
+  } catch (error) {
+    return {schema_version: TODO_COMPATIBILITY_EDIT_RESULT_SCHEMA, status: "failed",
+      reason_code: "invalid_local_compatibility_edit", changed: false,
+      reason: error instanceof Error ? error.message : "invalid local compatibility edit"};
   }
 }
 

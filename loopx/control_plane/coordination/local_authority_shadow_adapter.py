@@ -28,6 +28,17 @@ from ...paths import resolve_runtime_root
 from ...registry import find_registry_goal
 from ..effect_runtime import effect_runtime_result
 from . import local_authority_shadow_outbox as outbox
+from .coordination_state_contract_generated import (
+    LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_RESULT_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_READ_RESULT_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_TRANSACTION_EVIDENCE_SCHEMA,
+)
 from .local_authority_shadow_projection import (
     LEASE_PARTITION,
     PARTITIONS,
@@ -41,10 +52,6 @@ from .local_authority_shadow_projection import (
 from .runtime_shadow import resolve_coordination_runtime_shadow_config
 
 
-LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA = "loopx_local_authority_shadow_config_v0"
-LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA = "loopx_local_authority_shadow_request_v0"
-LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA = "loopx_local_authority_shadow_projection_v0"
-LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA = "loopx_local_authority_shadow_evidence_v0"
 _CONFIG_FIELDS = {"schema_version", "mode"}
 _PROJECTION_ATTEMPTS = 3
 _CONFLICT_RETRY_ATTEMPTS = 3
@@ -521,15 +528,7 @@ __all__ = [
 # behind instead of guessing.
 # ---------------------------------------------------------------------------
 
-LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA_V1 = "loopx_local_authority_shadow_evidence_v1"
-LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA = (
-    "loopx_coordination_runtime_shadow_commit_entry_request_v0"
-)
-LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_RESULT_SCHEMA = (
-    "loopx_coordination_runtime_shadow_commit_entry_result_v0"
-)
-LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA = "loopx_coordination_runtime_shadow_outbox_read_v0"
-LOCAL_AUTHORITY_SHADOW_READ_RESULT_SCHEMA = "loopx_coordination_runtime_shadow_outbox_read_result_v0"
+LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA_V1 = LOCAL_AUTHORITY_SHADOW_TRANSACTION_EVIDENCE_SCHEMA
 INLINE_DRAIN_MAX_ENTRIES = 16
 INLINE_DRAIN_BUDGET_SECONDS = 2.0
 INLINE_DRAIN_LOCK_TIMEOUT_SECONDS = 0.25

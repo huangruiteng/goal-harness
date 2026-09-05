@@ -22,12 +22,8 @@ PROFILE = {
 
 
 def _projection_scale(run: dict[str, object]) -> str:
-    return delivery_signal_read_model.delivery_batch_scale_for_run(
-        run,
-        test_only_hints=status_module.DELIVERY_BATCH_SCALE_TEST_ONLY_CLASSIFICATION_HINTS,
-        multi_surface_hints=status_module.DELIVERY_BATCH_SCALE_MULTI_SURFACE_CLASSIFICATION_HINTS,
-        implementation_hints=status_module.DELIVERY_BATCH_SCALE_IMPLEMENTATION_CLASSIFICATION_HINTS,
-    )
+    return delivery_signal_read_model.delivery_batch_scale_for_run(run)
+
 
 
 def _projection_outcome(run: dict[str, object], profile: dict[str, object] | None = None) -> str:

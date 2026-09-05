@@ -52,6 +52,8 @@ executable=$5
 setpriv_bin=$6
 init_bin=$7
 shift 7
+runtime_file_count=$1
+shift
 
 mount --make-rprivate /
 sandbox_root="$work_dir/.sandbox-root"
@@ -149,6 +151,11 @@ bind_runtime_file() {
 }
 bind_runtime_file "$executable"
 bind_runtime_file "$init_bin"
+while [ "$runtime_file_count" -gt 0 ]; do
+    bind_runtime_file "$1"
+    shift
+    runtime_file_count=$((runtime_file_count - 1))
+done
 
 mkdir -p "$sandbox_root/.old-root"
 cd "$sandbox_root"
@@ -482,6 +489,30 @@ def build_native_codex_isolation_envelope(
         )
     if init == resolved_private_root or resolved_private_root in init.parents:
         raise NativeCodexIsolationError("native_codex_init_inside_private_root")
+    # Standalone Codex invokes these companions after app-server startup.
+    # Bind exact files, never their containing distribution directory.
+    runtime_files: list[Path] = []
+    for candidate in (
+        resolved_executable.parent / "codex-resources" / "bwrap",
+        resolved_executable.parent.parent / "codex-resources" / "bwrap",
+        resolved_executable.with_name("codex-code-mode-host"),
+    ):
+        if not candidate.exists() and not candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise NativeCodexIsolationError("native_codex_companion_invalid") from exc
+        if resolved != candidate or not resolved.is_file():
+            raise NativeCodexIsolationError("native_codex_companion_invalid")
+        if any(
+            root is not None and (resolved == root or root in resolved.parents)
+            for root in (resolved_private_root, resolved_workspace)
+        ):
+            raise NativeCodexIsolationError(
+                "native_codex_companion_inside_restricted_root"
+            )
+        runtime_files.append(resolved)
     mutable_roots = [resolved_work_dir]
     if resolved_workspace is not None:
         mutable_roots.append(resolved_workspace)
@@ -511,6 +542,8 @@ def build_native_codex_isolation_envelope(
         str(resolved_executable),
         str(setpriv),
         str(init),
+        str(len(runtime_files)),
+        *(str(path) for path in runtime_files),
         *(str(value) for value in process_args),
     )
     return NativeCodexIsolationEnvelope(

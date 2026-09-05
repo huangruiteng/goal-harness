@@ -5,6 +5,12 @@ import { join, resolve } from "node:path";
 import type { JsonObject } from "../effect_program.ts";
 import { durableWriteJson } from "../effect_runtime_io.ts";
 import { authorityUnicodeCompare, canonicalAuthorityBytes } from "./authority_store_codec.ts";
+import {
+  LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA,
+} from "./coordination_state_contract.generated.ts";
 
 /**
  * Lease-partition side of the local authority shadow outbox.
@@ -16,14 +22,12 @@ import { authorityUnicodeCompare, canonicalAuthorityBytes } from "./authority_st
  * returned on the capture object so the writer can attach typed evidence.
  */
 
-export const LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA =
-  "loopx_coordination_runtime_shadow_binding_v0";
-export const LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA =
-  "loopx_local_authority_shadow_outbox_entry_v0";
-export const LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA =
-  "loopx_local_authority_shadow_outbox_commit_v0";
-export const LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA =
-  "loopx_local_authority_shadow_drain_cursor_v0";
+export {
+  LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA,
+};
 export const LEASE_PARTITION = "leases";
 const ENTRY_FILE = /^(\d{10})-(local-shadow-tx-[0-9a-f]{64})\.(prepared|committed)\.json$/u;
 const LEASE_FILE = /^[A-Za-z0-9_.-]+\.json$/u;

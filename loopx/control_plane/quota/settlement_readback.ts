@@ -29,6 +29,7 @@ import {
   receiptBoundReplayPhase,
 } from "./settlement_phase.ts";
 import { isTurnScopedSettlementOutcome } from "../work_items/delivery_outcome.ts";
+import { decodeRefreshRetry, refreshRecovery, type RefreshRetryRequest } from "./refresh_recovery.ts";
 
 export const QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA =
   "loopx_quota_settlement_readback_request_v0";
@@ -51,6 +52,7 @@ interface ReadbackRequest {
   replan_obligation_id: string | null;
   infer_turn_instance_id: boolean;
   allow_unbound_binding: boolean;
+  refresh_retry: RefreshRetryRequest | null;
 }
 
 interface ResultBundle extends JsonObject {
@@ -124,6 +126,7 @@ function decodeRequest(value: unknown): ReadbackRequest {
     ),
     infer_turn_instance_id: request.infer_turn_instance_id,
     allow_unbound_binding: request.allow_unbound_binding,
+    refresh_retry: decodeRefreshRetry(request.refresh_retry),
   };
 }
 
@@ -681,6 +684,7 @@ function failedReadback(
     completion_event: null,
     monitor_phase: null,
     replay_phase: null,
+    refresh_recovery: null,
   };
 }
 
@@ -767,6 +771,14 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
     workspace_causality: workspaceCausality,
     semantic_replan_guard: projectSemanticReplanGuard(receiptDetails),
     writeback_run: writebackRun,
+    refresh_recovery: request.refresh_retry === null ? null : refreshRecovery(
+      request.refresh_retry, writebackRun, writeback.failure === null,
+      workspaceCausality?.requirement,
+      writebackRun !== null && runs.slice(runs.indexOf(writebackRun) + 1).some((run) =>
+        run.goal_id === identity.goal_id && run.agent_id === identity.agent_id &&
+        (jsonObject(run.agent_vision) !== null || jsonObject(run.vision_checkpoint)?.required === true)
+      ),
+    ),
     spend_run: spendRun,
     heartbeat_receipt: heartbeatReceipt,
     writeback_event: writebackEvent,

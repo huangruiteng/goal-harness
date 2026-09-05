@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .control_plane.runtime.runtime_projection_route import resolve_goal_source_runtime_route
+from .control_plane.runtime.runtime_projection_route import (
+    resolve_goal_source_runtime_route,
+)
 from .extensions.lark.goal_channel import (
     default_goal_channel_binding_path,
     default_goal_channel_target_path,
@@ -22,7 +24,10 @@ from .extensions.lark.goal_topic_connections import (
     list_lark_connections,
     list_lark_group_chats,
 )
-from .extensions.lark.presentation.kanban import CommandRunner, default_subprocess_runner
+from .extensions.lark.presentation.kanban import (
+    CommandRunner,
+    default_subprocess_runner,
+)
 from .history import load_registry
 from .paths import resolve_runtime_root
 from .registry import registry_goals
@@ -73,7 +78,11 @@ def build_goal_repository_contexts(
             ["git", "-C", str(project), "branch", "--show-current"]
         )
         branch = _compact_text(branch_result.get("stdout"), limit=160)
-        label = identity.split("/", 1)[1] if identity.startswith("git:") and "/" in identity else goal_id
+        label = (
+            identity.split("/", 1)[1]
+            if identity.startswith("git:") and "/" in identity
+            else goal_id
+        )
         rows.append(
             {
                 "goal_id": goal_id,
@@ -223,7 +232,9 @@ class LarkChatRequestMixin:
                 )
                 source_registry_path = Path(str(route["source_registry"]))
                 if source_registry_path.parent.name == ".loopx":
-                    paths[goal_id] = default_goal_channel_binding_path(source_registry_path)
+                    paths[goal_id] = default_goal_channel_binding_path(
+                        source_registry_path
+                    )
             except (OSError, ValueError):
                 continue
         return paths
@@ -274,7 +285,11 @@ class LarkChatRequestMixin:
         try:
             snapshot = self._lark_setup_manager().snapshot(setup_id)
         except KeyError:
-            self._send_error("Lark App setup was not found", status=404, error_code="lark_app_setup_not_found")
+            self._send_error(
+                "Lark App setup was not found",
+                status=404,
+                error_code="lark_app_setup_not_found",
+            )
             return
         self._send_json({"ok": True, **snapshot})
 
@@ -282,7 +297,11 @@ class LarkChatRequestMixin:
         try:
             snapshot = self._lark_setup_manager().cancel(setup_id)
         except KeyError:
-            self._send_error("Lark App setup was not found", status=404, error_code="lark_app_setup_not_found")
+            self._send_error(
+                "Lark App setup was not found",
+                status=404,
+                error_code="lark_app_setup_not_found",
+            )
             return
         self._send_json({"ok": True, **snapshot})
 
@@ -294,7 +313,9 @@ class LarkChatRequestMixin:
         app_ref = _compact_text(query.get("app_ref", [""])[0], limit=100)
         keyword = _compact_text(query.get("query", [""])[0], limit=120)
         if not app_ref:
-            self._send_error("app_ref is required", status=400, error_code="lark_app_required")
+            self._send_error(
+                "app_ref is required", status=400, error_code="lark_app_required"
+            )
             return
         try:
             chats = list_lark_group_chats(
@@ -338,7 +359,8 @@ class LarkChatRequestMixin:
                     cli_bin=cli_bin,
                     runtime_health=(
                         self.server.lark_goal_topic_runtime.health_snapshot()
-                        if getattr(self.server, "lark_goal_topic_runtime", None) is not None
+                        if getattr(self.server, "lark_goal_topic_runtime", None)
+                        is not None
                         else None
                     ),
                 ),
@@ -369,13 +391,21 @@ class LarkChatRequestMixin:
             app_ref = _compact_text(body.get("app_ref"), limit=100)
             chat_id = _compact_text(body.get("chat_id"), limit=160)
             chat_name = _compact_text(body.get("chat_name"), limit=120)
-            incoming_mode = _compact_text(body.get("incoming_mode"), limit=40) or "mentions"
+            incoming_mode = (
+                _compact_text(body.get("incoming_mode"), limit=40) or "mentions"
+            )
             agent_id = _compact_text(body.get("agent_id"), limit=160) or None
             capture_scope = _compact_text(body.get("capture_scope"), limit=40) or None
-            ingress_mode = _compact_text(body.get("ingress_mode"), limit=40) or "async_inbox"
-            reply_mode = _compact_text(body.get("reply_mode"), limit=40) or "topic_reply"
+            ingress_mode = (
+                _compact_text(body.get("ingress_mode"), limit=40) or "async_inbox"
+            )
+            reply_mode = (
+                _compact_text(body.get("reply_mode"), limit=40) or "topic_reply"
+            )
             if not goal_id or not app_ref or not chat_id or not chat_name:
-                raise ValueError("goal_id, app_ref, chat_id, and chat_name are required")
+                raise ValueError(
+                    "goal_id, app_ref, chat_id, and chat_name are required"
+                )
             registry, binding_path = self._goal_channel_context(goal_id)
             session_id: str | None = None
             if ingress_mode in {"live_steering", "session_queue"}:
@@ -422,7 +452,9 @@ class LarkChatRequestMixin:
             return
         if not packet.get("ok"):
             packet["error"] = _compact_text(
-                packet.get("public_summary") or packet.get("blocker") or "Lark connection failed"
+                packet.get("public_summary")
+                or packet.get("blocker")
+                or "Lark connection failed"
             )
         elif body.get("execute") is True:
             self._refresh_lark_goal_topic_runtime()
@@ -431,12 +463,22 @@ class LarkChatRequestMixin:
     def _lark_disconnect(self) -> None:
         query = parse_qs(urlparse(self.path).query)
         goal_id = _compact_text(query.get("goal_id", [""])[0], limit=160)
-        if not goal_id:
-            self._send_error("goal_id is required", status=400, error_code="goal_required")
+        connection_id = _compact_text(query.get("connection_id", [""])[0], limit=160)
+        if not goal_id or not connection_id:
+            self._send_error(
+                "goal_id and connection_id are required",
+                status=400,
+                error_code="connection_required",
+            )
             return
         try:
             _registry, binding_path = self._goal_channel_context(goal_id)
-            packet = disconnect_lark_goal_topic(binding_path=binding_path, goal_id=goal_id)
+            packet = disconnect_lark_goal_topic(
+                binding_path=binding_path,
+                goal_id=goal_id,
+                connection_id=connection_id,
+                registry_path=binding_path.parent / "registry.json",
+            )
         except (OSError, ValueError) as exc:
             self._send_error(str(exc), status=400, error_code="invalid_lark_connection")
             return

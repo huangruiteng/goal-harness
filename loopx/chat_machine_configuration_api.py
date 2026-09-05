@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from .capabilities.configuration_ui import build_capability_configuration_catalog
+from .configuration_catalog import build_configuration_capability_descriptors
 from .capabilities.machine_configuration.builtins import (
     build_builtin_machine_configuration_registry,
 )
@@ -63,7 +64,8 @@ def _public_payload(
     projected["available_namespaces"] = list(registry.namespace_ids)
     projected["namespace_catalog"] = namespace_catalog
     projected["capability_catalog"] = build_capability_configuration_catalog(
-        machine_namespaces=namespace_catalog["namespaces"]
+        machine_namespaces=namespace_catalog["namespaces"],
+        goal_features=build_configuration_capability_descriptors(),
     )
     return projected
 

@@ -31,7 +31,11 @@ native creation, archival, receipt replay, and store reopen are tested without
 Markdown metadata. Python only adapts the typed read result to the compatibility
 summary. This is a contract checkpoint, not a completed CLI lifecycle cutover.
 
-After explicit promotion, `todo claim` now crosses once into a TS-owned
+The default Markdown and explicitly promoted `todo claim` paths now share one
+TypeScript claim decision for actor, registration, role, status, archive,
+exclusion, and existing-owner checks; the Python legacy writer only commits
+that decision while holding its lock. After explicit promotion, claim crosses
+once into the same TS-owned
 transaction for both native and v0 records. New claims require active, open
 Todos and the current actor/lease checks. Exact operation retries recover the
 original claim receipt before current-state eligibility; observation time and
@@ -50,6 +54,76 @@ Default Markdown capture still emits v0; this PR neither rewrites stored heads
 nor auto-promotes a goal. The schema split is not permission to drop v0
 provenance or change legacy ordering during a later migration.
 
+### Long-goal persistence is part of the migration payoff
+
+The product target is at least ten elapsed days per goal, not a short-lived
+transaction demo. The shared-authority RFC's
+[Section 7.2](./shared-goal-authority-state-provider-v0.md#72-ten-day-goals-local-storage-qualification-target-proposal)
+owns the workload, performance budgets, retention and actual-soak acceptance;
+keep changing capacity numbers there rather than duplicating them here.
+
+Start a cohesive local-persistence slice alongside the provider-first Todo
+caller: qualify an embedded transactional store (SQLite first candidate),
+bounded live head/receipt lookup, crash-safe checkpoints and exact historical
+readback. File-v0 remains the conformance/import baseline. Merely replacing
+Python with TypeScript, swapping databases while retaining ever-growing heads,
+or passing accelerated volume tests is not ten-day continuity evidence.
+Local promotion waits for both volume and elapsed-time qualification; it does
+not wait for a PostgreSQL service and never expires receipts at day ten.
+
+### Delivery semantics: correctness before migration
+
+The delivery-history boundary now treats `classification`, `health_check`, and
+`recommended_action` as narrative. They cannot create or discharge a
+follow-through obligation, prove an outcome, or classify delivery scale.
+For example, `unblocked after dependency update` is not a blocker receipt and
+`implemented network protocol parser` is not preparation-only evidence.
+
+The owning modules remain `control_plane/work_items/delivery_outcome.py`,
+`delivery_signals.py`, and `outcome_followthrough.py`. This is a correctness
+prerequisite inside the existing owner, not a new capability/provider or a
+completed TypeScript transaction migration. It deletes keyword inference and
+its status constants without adding a runtime crossing, schema, or service.
+The existing typed blocker-settlement predicate is reused rather than copied.
+
+The acceptance invariant is **narrative non-interference**: holding typed
+fields and configuration fixed, rewriting narrative or adding an unvalidated
+`compact_evidence` / `case_result` object cannot change delivery semantics or
+its follow-through obligation. Classification remains visible as a history
+label; no legacy prediction is retained without a concrete display consumer.
+
+- Valid explicit outcome, turn-kind, and scale fields retain their meanings.
+  An explicit blocker kind remains readable. A scoped typed blocked observation
+  must pass the existing work-item/evidence binding before it resolves a gap
+  into blocker writeback. A bare `outcome_gap` is insufficient.
+- Missing or unsupported historical delivery fields remain unknown; unknown
+  stops consecutive small-scale/outcome-gap evidence streaks and never counts
+  as success or as an inferred failure. Missing outcome with no configured
+  floor retains the `not_configured` presentation sentinel.
+- New delivery claims use explicit enums through the existing writer APIs
+  (for example `refresh-state --delivery-outcome ... --delivery-batch-scale ...`).
+  State-only refresh remains legal without a delivery claim; this patch does
+  not require every status refresh to declare progress. Existing write-time
+  enum rejection, settlement evidence, quota, and gate checks remain in force.
+- Legacy outcome-marker/hint configuration remains readable and preserves
+  whether an outcome floor is configured. Its words no longer classify runs.
+  No persisted history is rewritten and no new default-off flag restores the
+  erroneous behavior. This intentionally changes status, handoff/review, and
+  quota decisions previously derived from untyped historical labels.
+
+Within this delivery domain, the migration unit is the complete
+delivery-history-to-obligation projection, including scale/outcome streaks and
+its status/quota consumers. This defines the slice boundary without displacing
+the provider-first Todo sequence below.
+It must cross at most once per bounded history batch, delete the replaced
+Python decision path, preserve independently reviewed typed cases, and retain
+narrative-mutation regressions through the real CLI. Transport-only golden
+parity is insufficient because the old inference was incorrect. Separately
+inventory writers still omitting material-result fields and retire obsolete
+marker/hint configuration with an explicit compatibility plan. Exact legacy
+lifecycle classification codes and unrelated cadence policies are outside this
+slice; they must not be reported as migrated or globally free of prose rules.
+
 ### Next delivery sequence
 
 1. **One provider-first Todo transaction family.** Route native create, claim,
@@ -57,10 +131,23 @@ provenance or change legacy ordering during a later migration.
    the existing TS authority owner. Deliver coherent vertical slices with the
    real CLI caller, replay/CAS/error tests, and removal of the replaced Python
    decisions. A schema or constants-only PR does not satisfy this exit.
+   A single-command slice (for example `todo update --text/--note` through a
+   shared compatibility editor) is a validation milestone for synthetic or
+   qualification goals, never a real-goal promotion: once a goal is promoted,
+   every other legacy writer is still fenced fail-closed. Promoting a live goal
+   therefore waits until the write-command family its agents actually use routes
+   through the same unified TS commit authority (per-command patch types on one
+   entry point, not parallel adapters) and until capture/projection outbox
+   delivery is flushed. The deletion payoff lands only when the in-place
+   Markdown editor is replaced by a pure projection renderer behind that one
+   entry point.
+
 2. **Qualification before activation.** Join that path with the shared-authority
    RFC's explicit v0 import, consumer parity, writer fencing, capture/projection
-   outbox recovery, bounded retention, and fenced export. File qualification
-   does not wait for PostgreSQL service readiness. No default authority flip.
+   outbox recovery and fenced export. Integrate the local-persistence slice
+   above, including historical receipt retention, volume and >=10-day soak
+   evidence. File-v0 conformance is insufficient for long-goal promotion. No
+   default authority flip or dependency on PostgreSQL service readiness.
 3. **Retire the bridge, then converge entrypoints.** Delete the replaced
    reference aggregate and Python facades when their last callers switch;
    reuse the same kernel from native CLI/App and optional daemon. Report

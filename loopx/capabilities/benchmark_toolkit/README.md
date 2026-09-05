@@ -130,6 +130,16 @@ and PID namespaces, `pivot_root`, and `tini`. It runs `tini` as the isolated PID
 so long-lived workers reap orphaned command subprocesses, and fails closed when
 its roots overlap or the init resolves from a mutable task/profile/work root.
 
+Standalone Codex distributions also need their runtime companions after startup.
+The envelope now exposes existing `codex-resources/bwrap` files beside the resolved
+executable or at its distribution root, plus adjacent `codex-code-mode-host`, as
+individual read-only mounts. It does not expose the containing directories or
+unrelated neighboring files. Companions must be regular, non-symlinked files
+outside the private controller and task workspace roots; invalid candidates fail
+closed. Codex's own companion verification remains unchanged. Runners must stage
+the executable and companions outside private roots before constructing the
+envelope; executable-only custom launchers remain supported.
+
 ```python
 from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
     build_native_codex_isolation_envelope,

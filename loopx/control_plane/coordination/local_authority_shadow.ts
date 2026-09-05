@@ -21,15 +21,26 @@ import {
   TODO_CANONICAL_READ_RECORD_FIELDS,
 } from "./coordination_projection.ts";
 import { FileAuthorityStore } from "./file_authority_store.ts";
+import {
+  LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_RESULT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OBSERVATION_RECEIPT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_READ_RESULT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA,
+} from "./coordination_state_contract.generated.ts";
 
-export const LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA =
-  "loopx_local_authority_shadow_request_v0";
-export const LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA =
-  "loopx_local_authority_shadow_projection_v0";
-export const LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA =
-  "loopx_local_authority_shadow_evidence_v0";
-export const LOCAL_AUTHORITY_SHADOW_OBSERVATION_RECEIPT_SCHEMA =
-  "loopx_local_authority_shadow_observation_receipt_v0";
+export {
+  LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OBSERVATION_RECEIPT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA,
+};
 
 const REQUEST_FIELDS = new Set([
   "schema_version",
@@ -346,19 +357,13 @@ export async function recordLocalAuthorityShadow(
 // ---------------------------------------------------------------------------
 
 export const LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA_V1 =
-  "loopx_coordination_runtime_shadow_projection_v0";
-export const LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_commit_entry_request_v0";
-export const LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_commit_entry_result_v0";
-export const LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_outbox_read_v0";
-export const LOCAL_AUTHORITY_SHADOW_READ_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_outbox_read_result_v0";
-export const LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA_V1 =
-  "loopx_coordination_runtime_shadow_outbox_event_v0";
-export const LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA =
-  "loopx_coordination_runtime_shadow_outbox_receipt_v0";
+  LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA;
+export { LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA };
+export { LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_RESULT_SCHEMA };
+export { LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA };
+export { LOCAL_AUTHORITY_SHADOW_READ_RESULT_SCHEMA };
+export const LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA_V1 = LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA;
+export { LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA };
 
 const SHADOW_PARTITIONS = ["todos", "leases"] as const;
 const ENTRY_RESOLUTIONS = [

@@ -1760,6 +1760,7 @@ export function PersonalWorkspacePage({
             {selectedGoal && selectedGoalTab === "tasks" ? (
               <GoalTasksView
                 canLoadCompleted={!readOnly}
+                historyEnabled={!readOnly}
                 goal={selectedGoal}
                 items={items}
                 onDraftTaskFromMessage={readOnly ? undefined : (reply) => {
@@ -1912,6 +1913,7 @@ export function PersonalWorkspacePage({
       )}
       sidebar={(
         <GoalSidebar
+          key={statusSourceControl?.activeSource.statusUrl ?? "/status.json"}
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
           goalArchiveLoadState={goalArchiveLoadState}

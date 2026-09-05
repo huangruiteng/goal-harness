@@ -19,7 +19,7 @@ from .capabilities.change_quality.policy import (
     CHANGE_QUALITY_POLICY_SCHEMA_VERSION,
     change_quality_goal_policy_summary,
 )
-from .configuration_catalog import build_goal_configuration_catalog
+from .configuration_catalog import DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN, build_goal_configuration_catalog
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .control_plane.agents.legacy_migration import (
     completed_peer_agent_runtime_migration,
@@ -71,7 +71,6 @@ WAITING_ON_CHOICES = (
 )
 
 MULTI_SUBAGENT_FEATURE_CHOICES = ("off", "enabled")
-DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
 AGENT_MODEL_CHOICES = tuple(model.value for model in AgentRuntimeModel)
 
 

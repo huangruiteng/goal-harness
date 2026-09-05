@@ -1,4 +1,10 @@
 import type { JsonObject } from "../effect_program.ts";
+import {
+  REPLAN_SETTLEMENT_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+  REPLAN_SETTLEMENT_LIFECYCLE_REENTRY_RESULT_SCHEMA,
+  REPLAN_SETTLEMENT_REQUEST_SCHEMA as GENERATED_REPLAN_SETTLEMENT_REQUEST_SCHEMA,
+  REPLAN_SETTLEMENT_RESULT_SCHEMA,
+} from "../coordination/coordination_state_contract.generated.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
@@ -10,13 +16,13 @@ import {
 } from "../todos/completion_fence.ts";
 
 export const REPLAN_SETTLEMENT_REQUEST_SCHEMA =
-  "loopx_replan_settlement_request_v0";
+  GENERATED_REPLAN_SETTLEMENT_REQUEST_SCHEMA;
 export const REPLAN_SETTLEMENT_CONTRACT_SCHEMA =
-  "replan_settlement_contract_v0";
+  REPLAN_SETTLEMENT_RESULT_SCHEMA;
 export const TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA =
-  "loopx_todo_lifecycle_reentry_request_v0";
+  REPLAN_SETTLEMENT_LIFECYCLE_REENTRY_REQUEST_SCHEMA;
 export const TODO_LIFECYCLE_REENTRY_SCHEMA =
-  "todo_lifecycle_settlement_reentry_v0";
+  REPLAN_SETTLEMENT_LIFECYCLE_REENTRY_RESULT_SCHEMA;
 
 interface TodoSettlementBinding extends JsonObject {
   kind: "todo";

@@ -28,7 +28,10 @@ coordination 路径使用同一份语言中立的 `coordination_state_contract_v
 仅将 typed read result 适配为兼容 summary。这是 contract 检查点，不是已经完成的
 CLI lifecycle cutover。
 
-显式 promotion 后，`todo claim` 现在只跨一次 runtime 边界，由 TS 事务同时处理原生
+默认 Markdown 与显式 promotion 两条 `todo claim` 路径现在都由同一个 TS claim
+decision 处理 actor、registration、role、status、archive、exclusion 与现有 owner
+检查；Python legacy writer 只在持锁后提交该 decision。显式 promotion 后，claim
+只跨一次 runtime 边界，由同一 TS 事务同时处理原生
 和 v0 记录。新 claim 要求 active、open Todo，并检查当前 actor/lease；同一 operation
 的重试先恢复原 claim receipt，再考虑当前资格。观测时间和当前注册信息不属于请求
 身份。回放 receipt 不续租，也不表示当前仍持有任务。非 preview 的成功 `no_change`
@@ -42,15 +45,75 @@ CLI lifecycle cutover。
 输出 v0；本 PR 不改写已存 head，也不自动晋升 goal。schema 分层不等于允许后续迁移
 丢失 v0 provenance 或改变旧排序。
 
+### 长程持久化也是迁移收益的一部分
+
+产品目标是单个 goal 至少持续十个自然日。shared-authority RFC 的
+[第 7.2 节](./shared-goal-authority-state-provider-v0.zh-CN.md#72-十天-goal本地存储资格化目标提案)
+统一维护负载、性能预算、保留策略和真实 soak 验收；变化的容量数字不在此重复维护。
+
+与 provider-first Todo caller 同期推进完整本地持久化切片：资格化嵌入式事务存储
+（SQLite 为首选候选）、有界 live head/receipt lookup、crash-safe checkpoint 与精确
+历史 readback。file-v0 保留作 conformance/import 基线。只把 Python 改为 TypeScript、
+换数据库但保留不断增长的 head，或只通过加速容量测试，都不证明十天连续性。
+本地晋升等待容量与自然时间双重资格化，不等待 PostgreSQL 服务，也不在第十天使
+receipt 过期。
+
+### 交付语义：先修正规则，再迁移
+
+交付历史边界将 `classification`、`health_check` 与 `recommended_action` 视为
+叙述文本。它们不能生成或解除 follow-through obligation，不能证明 outcome，也
+不能判定交付规模。例如，`unblocked after dependency update` 不构成 blocker
+receipt，`implemented network protocol parser` 不构成仅完成准备工作的证据。
+
+规则继续由 `control_plane/work_items/delivery_outcome.py`、`delivery_signals.py`
+和 `outcome_followthrough.py` 持有。本批在既有 owner 中完成正确性前置修复，不新增
+capability/provider，也不宣称完成 TypeScript 事务迁移。删除关键词推断与 status
+常量，不增加 runtime crossing、schema 或 service；复用已有 typed blocker
+settlement 判定，不复制证据绑定规则。
+
+验收不变量是**叙述非干涉**：固定 typed fields 与配置，改写叙述或增加未经验证的
+`compact_evidence` / `case_result` 对象，都不能改变交付语义与后续执行义务。
+classification 保留为历史标签；没有明确展示消费者时，不保留旧预测逻辑。
+
+- 合法的显式 outcome、turn kind 和 scale 保持原有语义。显式 blocker kind
+  继续可读。带作用域的 typed blocked observation 必须通过既有 work-item/evidence
+  绑定检查，才能将 gap 判定为 blocker writeback；只有 `outcome_gap` 不够。
+- 历史字段缺失或不受支持时保持 unknown。unknown 中断连续小规模／outcome-gap
+  证据计数，不视为成功或推断出的失败。未配置 floor 且没有 outcome 时，保留
+  `not_configured` 展示哨兵值。
+- 新交付声明通过现有 writer API 写显式 enum，例如
+  `refresh-state --delivery-outcome ... --delivery-batch-scale ...`。
+  纯状态刷新仍可不声明交付；本批不强迫每次刷新声明进展。既有写入 enum 校验、
+  settlement evidence、quota 和 gate 检查继续有效。
+- 旧 outcome-marker/hint 配置继续可读，并保留 floor 是否配置的含义；配置中的
+  词语不再分类 run。不改写持久历史，也不新增开关恢复错误行为。此前由未结构化
+  历史标签推导的 status、handoff/review 和 quota 决策会发生明确的行为变化。
+
+交付领域的迁移单元是完整的 delivery-history-to-obligation projection，包含规模／结果
+连续计数与 status/quota 消费者。这定义该领域的切片边界，不改变下文 provider-first
+Todo 的交付顺序。每批有界历史最多跨 runtime 一次，删除被替代的
+Python decision，保留独立审阅的 typed case，并通过真实 CLI 验证叙述变异用例。
+旧推断本身错误，因此只有传输 golden parity 不够。另行盘点仍缺少 material-result
+字段的 writer，并用明确兼容计划退役旧 marker/hint 配置。本批不迁移精确的旧
+lifecycle classification code 或其他 cadence policy，不能宣称全局已无文本规则。
+
 ### 下一步交付顺序
 
 1. **一组 provider-first Todo 完整事务。** 原生 create、claim、update、
    complete-with-successor、archive 及相关 lease effect 经过现有 TS authority owner。
    每个内聚的纵向切片包含真实 CLI caller、replay/CAS/error 测试，并删除被替代的
    Python decision。仅统一 schema 或常量不满足退出条件。
+   单命令切片（例如通过同一兼容 editor 的 `todo update --text/--note`）只是
+   合成/资格化 goal 的验证里程碑，不是真实 goal 的 promote：一旦 promote，其余
+   legacy writer 仍被 fence 以 fail-closed 拦截。因此活跃 goal 的 promote 要等
+   到其 agent 实际使用的写命令族都经由同一个统一 TS 提交权威（同一入口的分命令
+   patch 类型，而不是平行 adapter），并且 capture/projection outbox 落盘接通之后。
+   删除的收益只在该入口背后的 in-place Markdown editor 被纯投影 renderer 替代时兑现。
+
 2. **先资格化，再启用。** 与 shared-authority RFC 的显式 v0 import、consumer
-   parity、writer fencing、capture/projection outbox recovery、有界 retention、
-   fenced export 汇合。file 资格化不等待 PostgreSQL service 就绪；不默认切换 authority。
+   parity、writer fencing、capture/projection outbox recovery 和 fenced export 汇合。
+   集成上述本地持久化切片，包含历史 receipt 保留、容量与 >=10 天 soak 证据。
+   file-v0 conformance 不足以支持长程晋升；不默认切换 authority，也不依赖 PostgreSQL service。
 3. **删除 bridge，再收敛入口。** 最后一个 caller 切换后，删除被替代的 reference
    aggregate 与 Python facade；native CLI/App 和可选 daemon 复用同一 kernel。
    每个切片报告删除的 product LOC、新增 bridge LOC、crossings 与剩余删除条件。

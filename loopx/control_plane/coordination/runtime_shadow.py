@@ -27,6 +27,7 @@ from .coordination_state_contract_generated import (
     COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
     COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA as RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA_VERSION,
     COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA,
 )
 
 
@@ -166,7 +167,7 @@ def build_todo_runtime_shadow_projection(
         ).encode("utf-8")
     ).hexdigest()
     return {
-        "schema_version": "loopx_coordination_runtime_shadow_projection_v0",
+        "schema_version": LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA,
         "goal_id": goal_id,
         "source_authority": "legacy_markdown_and_task_lease",
         "todos": compact,

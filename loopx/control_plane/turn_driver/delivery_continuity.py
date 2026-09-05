@@ -4,6 +4,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from ..coordination.coordination_state_contract_generated import (
+    DELIVERY_BOUNDARY_RESULT_SCHEMA,
+    DELIVERY_CONTINUITY_RESULT_SCHEMA,
+    DELIVERY_ROUTING_REQUEST_SCHEMA,
+    DELIVERY_ROUTING_RESULT_SCHEMA,
+)
 from ..todos.contract import (
     TODO_STATUS_OPEN,
     normalize_todo_claimed_by,
@@ -12,10 +18,6 @@ from ..todos.contract import (
 )
 from ..todos.projection import todo_item_task_class
 
-DELIVERY_CONTINUITY_RESULT_SCHEMA = "loopx_delivery_continuity_result_v0"
-DELIVERY_BOUNDARY_RESULT_SCHEMA = "loopx_delivery_boundary_result_v0"
-DELIVERY_ROUTING_REQUEST_SCHEMA = "loopx_delivery_routing_request_v0"
-DELIVERY_ROUTING_RESULT_SCHEMA = "loopx_delivery_routing_result_v0"
 DELIVERY_BOUNDARY_IN_FLIGHT = "in_flight_continuation"
 DELIVERY_BOUNDARY_SEMANTIC_CLOSEOUT = "semantic_closeout"
 DELIVERY_BOUNDARY_VALUES = (

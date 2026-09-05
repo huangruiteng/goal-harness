@@ -156,6 +156,10 @@ from .cli_commands.shared_goal_alignment import (
     handle_shared_goal_alignment_command,
     register_shared_goal_alignment_command,
 )
+from .cli_commands.reliability_diagnostics import (
+    handle_reliability_diagnostics_command,
+    register_reliability_diagnostics_commands,
+)
 from .cli_rollout import append_cli_rollout_event
 from .capabilities.project_skill_delivery.cli import (
     handle_project_skill_command,
@@ -253,6 +257,8 @@ def build_parser() -> LoopXArgumentParser:
     register_canary_commands(sub, add_subcommand_format)
 
     register_capability_commands(sub, add_subcommand_format)
+
+    register_reliability_diagnostics_commands(sub, add_subcommand_format)
 
     register_extension_commands(sub, add_subcommand_format)
 
@@ -442,6 +448,16 @@ def main(argv: list[str] | None = None) -> int:
     if capability_result is not None:
         return capability_result
 
+    reliability_diagnostics_result = handle_reliability_diagnostics_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if reliability_diagnostics_result is not None:
+        return reliability_diagnostics_result
+
     extension_result = handle_extension_command(
         args,
         runtime_root_arg=args.runtime_root,
@@ -583,6 +599,13 @@ def main(argv: list[str] | None = None) -> int:
 
     decision_context_result = handle_decision_context_command(
         args,
+        runtime_root=(
+            effective_runtime_root(registry_path, args.runtime_root)
+            if args.command == "decision-context"
+            and args.decision_context_command
+            in {"recall-context", "prepare-evidence", "prepare-review"}
+            else None
+        ),
         output_format=output_format,
         print_payload=print_payload,
     )

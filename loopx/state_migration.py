@@ -9,11 +9,13 @@ from typing import Any
 
 from .global_registry import write_json
 from .registry import registry_goals
+from .control_plane.coordination.coordination_state_contract_generated import (
+    LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA as AUTHORITY_SHADOW_CONFIG_SCHEMA,
+)
 
 
 LEGACY_RUNTIME_ROOT = Path.home() / ".codex" / "goal-harness"
 LEGACY_GLOBAL_REGISTRY = LEGACY_RUNTIME_ROOT / "registry.global.json"
-AUTHORITY_SHADOW_CONFIG_SCHEMA = "loopx_local_authority_shadow_config_v0"
 MIGRATION_SHADOW_SEED_EVIDENCE_SCHEMA = "loopx_state_migration_shadow_seed_evidence_v0"
 _SHADOW_EVIDENCE_OUTCOMES = {
     "captured",

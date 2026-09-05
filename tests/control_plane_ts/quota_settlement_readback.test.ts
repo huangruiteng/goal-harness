@@ -181,6 +181,23 @@ function request(runtimeRoot: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
+test("refresh recovery admission never survives a failed Turn identity", async () => {
+  const root = await fixture({ guard: false, writeback: true });
+  try {
+    const result = await readQuotaSettlement(request(root, {
+      refresh_retry: {
+        vision: null, unchanged_reason: "Existing vision applies.", merge_patch: false,
+        workspace_requested: false, mutation: {}, delivery_outcome: "outcome_progress",
+        delivery_batch_scale: null, delivery_boundary: null, progress_observation: null,
+      },
+    }));
+    assert.equal(result.refresh_recovery, null);
+    assert.equal(result.writeback_run, null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function appendSpendRun(runtimeRoot: string, extra: Record<string, unknown>) {
   await appendFile(
     join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),

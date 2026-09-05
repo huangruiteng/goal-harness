@@ -8,17 +8,24 @@ import {
 } from "../runtime_decode.ts";
 
 import type { JsonObject } from "../effect_program.ts";
+import {
+  TODO_RESUME_EVALUATION_REQUEST_SCHEMA,
+  TODO_RESUME_EVALUATION_RESULT_SCHEMA,
+  TODO_RESUME_EXTERNAL_WAIT_REQUEST_SCHEMA,
+  TODO_RESUME_EXTERNAL_WAIT_RESULT_SCHEMA,
+  TODO_RESUME_NORMALIZE_REQUEST_SCHEMA,
+} from "../coordination/coordination_state_contract.generated.ts";
 
 export const TODO_RESUME_NORMALIZE_REQUEST_SCHEMA_VERSION =
-  "todo_resume_normalize_request_v0";
+  TODO_RESUME_NORMALIZE_REQUEST_SCHEMA;
 export const TODO_RESUME_EVALUATION_REQUEST_SCHEMA_VERSION =
-  "todo_resume_evaluation_request_v0";
+  TODO_RESUME_EVALUATION_REQUEST_SCHEMA;
 export const TODO_RESUME_EVALUATION_SCHEMA_VERSION =
-  "todo_resume_evaluation_v0";
+  TODO_RESUME_EVALUATION_RESULT_SCHEMA;
 export const TODO_EXTERNAL_WAIT_REQUEST_SCHEMA_VERSION =
-  "todo_external_wait_request_v0";
+  TODO_RESUME_EXTERNAL_WAIT_REQUEST_SCHEMA;
 export const TODO_EXTERNAL_WAIT_TRANSITION_SCHEMA_VERSION =
-  "todo_external_wait_transition_v0";
+  TODO_RESUME_EXTERNAL_WAIT_RESULT_SCHEMA;
 
 export const TODO_RESUME_KINDS = [
   "todo_done",

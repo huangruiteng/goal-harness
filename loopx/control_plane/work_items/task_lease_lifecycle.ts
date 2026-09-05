@@ -64,9 +64,10 @@ import {
   type LeaseOutboxCapture,
   type LocalAuthorityShadowBinding,
 } from "../coordination/local_authority_shadow_outbox.ts";
+import { TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA } from "../coordination/coordination_state_contract.generated.ts";
 
 export const TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION =
-  "loopx_task_lease_lifecycle_native_v0";
+  TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA;
 export const TASK_LEASE_LIFECYCLE_RECEIPT_SCHEMA =
   "task_lease_lifecycle_receipt_v0";
 export const TASK_LEASE_FENCE_RECEIPT_SCHEMA = "task_lease_fence_receipt_v0";

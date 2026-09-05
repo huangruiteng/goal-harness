@@ -14,11 +14,7 @@ import { projectEditableCapabilityConfiguration } from "../../data/capability-co
 import { useWorkspaceI18n } from "./i18n";
 import { CapabilityConfigurationFields } from "./capability-configuration-fields";
 import { localizeCapability, localizedCapabilityFieldCopy } from "./capability-localization";
-import { CapabilityCatalogNavigation, CapabilityDetailHeader } from "./capability-workbench";
-
-function formattedValue(value: Record<string, unknown> | undefined) {
-  return value ? JSON.stringify(value, null, 2) : "—";
-}
+import { canEditCapability, CapabilityCatalogNavigation, CapabilityConfigurationSummary, CapabilityDetailHeader, CapabilityEditorStatus, CapabilityEffectiveSource } from "./capability-workbench";
 
 type CapabilityCatalogProps = Readonly<{
   catalog: CapabilityConfigurationCatalog;
@@ -174,9 +170,7 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProp
   }
 
   const supportsGoal = localizedSelected.available_scopes.includes("goal");
-  const editorAvailable = supportsGoal
-    && localizedSelected.configuration_editor.editable
-    && localizedSelected.configuration_editor.writable_scopes.includes("goal");
+  const editorAvailable = canEditCapability(localizedSelected, "goal");
   const readOnlyReason = localizedSelected.configuration_editor.read_only_reason
     ?? (!supportsGoal ? t("capabilities.machineOnly") : t("capabilities.previewOnly"));
 
@@ -209,31 +203,9 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProp
       <article className="personal-capability-detail">
         <CapabilityDetailHeader capability={selected} locale={locale} />
 
-        <div className="personal-capability-value-grid">
-          <section>
-            <strong>{t("capabilities.goalValue")}</strong>
-            <pre>{formattedValue(localizedSelected.current)}</pre>
-          </section>
-          <section>
-            <strong>{localizedSelected.machine_current ? t("capabilities.machineValue") : t("capabilities.defaultValue")}</strong>
-            <pre>{formattedValue(localizedSelected.machine_current ?? localizedSelected.default)}</pre>
-          </section>
-        </div>
-
-        {localizedSelected.effective_configuration ? (
-          <p className="personal-capability-effective-source">
-            <ShieldCheck aria-hidden size={15} />
-            <span><strong>{t("capabilities.effectiveSource")}</strong>{t(`capabilities.source.${localizedSelected.effective_configuration.source}`)}</span>
-          </p>
-        ) : null}
-
-        <section className={`personal-capability-editor-status ${editorAvailable ? "is-preview" : "is-read-only"}`}>
-          {editorAvailable ? <ShieldCheck aria-hidden size={18} /> : <AlertTriangle aria-hidden size={18} />}
-          <div>
-            <strong>{editorAvailable ? t("capabilities.editorPrepared") : t("capabilities.readOnly")}</strong>
-            <p>{editorAvailable ? t("capabilities.revisionLockedReady") : readOnlyReason}</p>
-          </div>
-        </section>
+        <CapabilityEffectiveSource source={localizedSelected.effective_configuration?.source} t={t} />
+        <CapabilityEditorStatus available={editorAvailable} t={t}
+          description={readOnlyReason} />
 
         {editorAvailable ? (
           <section className="personal-capability-field-summary">
@@ -263,6 +235,10 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProp
             </button>
           </footer>
         ) : null}
+        <CapabilityConfigurationSummary key={selected.capability_id} values={[
+          { label: t("capabilities.goalValue"), value: localizedSelected.current },
+          { label: t(localizedSelected.machine_current ? "capabilities.machineValue" : "capabilities.defaultValue"), value: localizedSelected.machine_current ?? localizedSelected.default },
+        ]} t={t} />
       </article>
     </div>
   );

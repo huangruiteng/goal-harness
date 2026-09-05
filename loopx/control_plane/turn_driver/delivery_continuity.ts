@@ -1,4 +1,16 @@
 import type { JsonObject } from "../effect_program.ts";
+import {
+  DELIVERY_BOUNDARY_RESULT_SCHEMA,
+  DELIVERY_CONTINUITY_RESULT_SCHEMA,
+  DELIVERY_ROUTING_REQUEST_SCHEMA,
+  DELIVERY_ROUTING_RESULT_SCHEMA,
+} from "../coordination/coordination_state_contract.generated.ts";
+export {
+  DELIVERY_BOUNDARY_RESULT_SCHEMA,
+  DELIVERY_CONTINUITY_RESULT_SCHEMA,
+  DELIVERY_ROUTING_REQUEST_SCHEMA,
+  DELIVERY_ROUTING_RESULT_SCHEMA,
+} from "../coordination/coordination_state_contract.generated.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
@@ -11,15 +23,6 @@ import {
   decodeOptionalMaterialDeliveryOutcome,
   type MaterialDeliveryOutcome,
 } from "../work_items/delivery_outcome.ts";
-
-export const DELIVERY_CONTINUITY_RESULT_SCHEMA =
-  "loopx_delivery_continuity_result_v0";
-export const DELIVERY_BOUNDARY_RESULT_SCHEMA =
-  "loopx_delivery_boundary_result_v0";
-export const DELIVERY_ROUTING_REQUEST_SCHEMA =
-  "loopx_delivery_routing_request_v0";
-export const DELIVERY_ROUTING_RESULT_SCHEMA =
-  "loopx_delivery_routing_result_v0";
 
 export const DELIVERY_BOUNDARIES = [
   "in_flight_continuation",

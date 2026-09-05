@@ -67,6 +67,7 @@ from .extensions.runtime import (
     resolve_extension_activation,
 )
 from .history import load_registry
+from .chat_completed_todos import CompletedTodoPages, CompletedTodoRequestMixin
 from .paths import resolve_runtime_root
 from .release_manifest import release_runtime_identity
 from .registry import registry_goals, resolve_state_file
@@ -425,6 +426,7 @@ class ChatHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.completed_todo_pages = CompletedTodoPages()
 
     def server_close(self) -> None:
         if hasattr(self, "lark_app_setup_manager"):
@@ -437,6 +439,7 @@ class ChatHTTPServer(ThreadingHTTPServer):
 
 
 class ChatRequestHandler(
+    CompletedTodoRequestMixin,
     AttachedSessionRequestMixin,
     SshSourceRequestMixin,
     GoalSubagentConfigurationRequestMixin,
@@ -1304,7 +1307,8 @@ class ChatRequestHandler(
                 }
             )
         get_dispatch = {
-            CHAT_COMPLETED_TODOS_PATH: self._completed_todos,
+            CHAT_COMPLETED_TODOS_PATH: self._active_completed_todos,
+            "/api/chat/completed-todos": self._completed_todos,
             CHAT_SESSIONS_PATH: self._list_sessions,
             CHAT_ACTIONS_PATH: self._action_list,
             CHAT_GOAL_CONTEXTS_PATH: self._goal_contexts,

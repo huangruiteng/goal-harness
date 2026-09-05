@@ -629,6 +629,16 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
   await page.route("**/api/chat/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/chat/completed-todos") {
+      const total = url.searchParams.get("goal_id") === "progress-projection" ? 4087 : 0;
+      const offset = Number(url.searchParams.get("cursor") || 0);
+      const items = Array.from({ length: Math.min(40, total - offset) }, (_, position) => {
+        const index = offset + position;
+        return { todo_id: `todo_history_${index}`, text: index < 3 ? `Completed ${String.fromCharCode(65 + index)}` : `Completed historical Task ${index + 1}`, claimed_by: "example-agent", evidence: null, priority: null, task_class: "advancement_task" };
+      });
+      await route.fulfill({ json: { ok: true, total, items, next_cursor: offset + 40 < total ? String(offset + 40) : null } });
+      return;
+    }
     const periodicConfiguration = {
       schema_version: "periodic_report_machine_defaults_v0",
       enabled: true,
@@ -653,7 +663,9 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
       },
       capability_catalog: {
         schema_version: "capability_configuration_catalog_v0",
-        capabilities: [periodicReportCapability({ machineCurrent: periodicConfiguration })],
+        capabilities: goalCapabilityCatalog().map((capability) => capability.capability_id === "periodic_report"
+          ? periodicReportCapability({ machineCurrent: periodicConfiguration })
+          : capability),
       },
       changed_namespaces: [],
       machine_configuration: {
@@ -860,12 +872,14 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     }
     if (url.pathname === "/api/chat/lark/connections" && request.method() === "POST") {
       const body = request.postDataJSON();
+      const connectionId = `lark-${body.goal_id}-${body.agent_id ?? "default"}`;
       if (body.execute) {
         const fixture = require(resolve(repoRoot, "examples/status.example.json"));
         const goal = (fixture.run_history?.goals ?? []).find((item) => item.id === body.goal_id);
-        runtime.larkConnections = runtime.larkConnections.filter((item) => item.goal_id !== body.goal_id);
+        runtime.larkConnections = runtime.larkConnections.filter((item) => item.connection_id !== connectionId);
         runtime.larkConnections.push({
           agent_id: body.agent_id ?? null,
+          connection_id: connectionId,
           app_label: "LoopX Mew", app_ref: body.app_ref, chat_name: body.chat_name, enabled: true,
           capture_scope: body.capture_scope,
           event_count: 0, health_error_code: "lark_event_delivery_unverified",
@@ -885,8 +899,8 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
       return;
     }
     if (url.pathname === "/api/chat/lark/connections" && request.method() === "DELETE") {
-      const goalId = url.searchParams.get("goal_id");
-      runtime.larkConnections = runtime.larkConnections.filter((item) => item.goal_id !== goalId);
+      const connectionId = url.searchParams.get("connection_id");
+      runtime.larkConnections = runtime.larkConnections.filter((item) => item.connection_id !== connectionId);
       await route.fulfill({ contentType: "application/json", json: { ok: true, status: "disconnected" }, status: 200 });
       return;
     }
@@ -1269,6 +1283,44 @@ async function main() {
     if (await page.locator(".personal-global-rail").count()) throw new Error("Old icon rail is visible");
     if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Active Goal directory did not exclude stopped Goals");
     const stoppedDirectory = page.locator(".personal-stopped-goals");
+    // Real pointer gestures against the shipped sidebar, not synthetic drag events.
+    const activeRows = page.locator('.personal-goal-list:not(.is-stopped) .personal-goal-row');
+    const readOrder = () => activeRows.evaluateAll(rows => rows.map(row => row.dataset.reorderGoal));
+    const initialOrder = await readOrder();
+    const firstLink = activeRows.nth(0).locator('.personal-goal-link');
+    const start = await firstLink.boundingBox();
+    const end = await activeRows.nth(2).boundingBox();
+    const beforeDragUrl = page.url();
+    await page.mouse.move(start.x + 40, start.y + start.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(end.x + 40, end.y + end.height - 4, { steps: 12 });
+    await page.locator('.is-drop-after').waitFor();
+    await page.mouse.up();
+    const expectedOrder = [initialOrder[1], initialOrder[2], initialOrder[0], ...initialOrder.slice(3)];
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(expectedOrder)) throw new Error('Pointer Goal reorder failed');
+    if (page.url() !== beforeDragUrl) throw new Error('Dragging accidentally selected a Goal');
+    await page.reload({ waitUntil: 'networkidle' });
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(expectedOrder)) throw new Error('Goal order did not survive reload');
+    // Escape cancels rather than committing a partially completed gesture.
+    const cancelStart = await activeRows.first().locator('.personal-goal-link').boundingBox();
+    const cancelEnd = await activeRows.nth(2).boundingBox();
+    await activeRows.first().locator('.personal-goal-link').focus();
+    await page.mouse.move(cancelStart.x + 40, cancelStart.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(cancelEnd.x + 40, cancelEnd.y + cancelEnd.height - 4, { steps: 8 });
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(expectedOrder)) throw new Error('Cancelled drag changed order');
+    await page.getByRole('button', { name: '调整 Goal 顺序', exact: true }).click();
+    const up = activeRows.nth(2).getByRole('button', { name: /^上移 / });
+    await up.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(initialOrder)) throw new Error('Keyboard Goal reorder failed or lost focus');
+    if (!(await activeRows.first().getByRole('button', { name: /^上移 / }).isDisabled())) throw new Error('First Goal can move beyond list boundary');
+    await page.screenshot({ path: resolve(outputDir, 'goal-reorder-controls.png'), fullPage: false, animations: 'disabled' });
+    await page.getByRole('button', { name: '调整 Goal 顺序', exact: true }).click();
+    await page.screenshot({ path: resolve(outputDir, 'goal-reorder-default.png'), fullPage: false, animations: 'disabled' });
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
     await page.waitForFunction(() => document.querySelectorAll(".personal-stopped-goals .personal-goal-row").length === 2, null, { timeout: 3_000 });
     await stoppedDirectory.locator("summary").click();
@@ -1837,9 +1889,33 @@ async function main() {
     const progressColumn = page.locator(".personal-object-list", { hasText: "待执行 / 进行中" });
     if ((await progressColumn.locator(".personal-task-card").count()) !== 2) throw new Error("Id-less long Todo was duplicated across compact and full projections");
     const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
-    await completedColumn.getByText("42", { exact: true }).waitFor({ state: "visible" });
+    const taskLaneScrollers = page.locator('.personal-task-kanban .personal-task-lane-scroll');
+    if (await taskLaneScrollers.count() !== 4) throw new Error('Every desktop Task lane must own a scroll region');
+    for (let laneIndex = 0; laneIndex < 4; laneIndex += 1) {
+      if (await taskLaneScrollers.nth(laneIndex).evaluate(element => getComputedStyle(element).overflowY) !== 'auto') {
+        throw new Error(`Task lane ${laneIndex + 1} does not support independent scrolling`);
+      }
+    }
+    await completedColumn.getByText("4087", { exact: true }).waitFor({ state: "visible" });
     await completedColumn.getByText("Completed A", { exact: true }).waitFor({ state: "visible" });
     if (await completedColumn.getByText("Completed Monitor", { exact: true }).count()) throw new Error("Completed continuous monitor leaked into the completed Tasks column");
+    const historyScroll = completedColumn.locator('.personal-task-lane-scroll');
+    for (let batch = 1; batch < 103; batch += 1) {
+      const response = page.waitForResponse(response => response.url().includes('/api/chat/completed-todos?') && response.url().includes(`cursor=${batch * 40}`));
+      await historyScroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      await response;
+      await page.waitForFunction(minimum => {
+        const window = document.querySelector('[data-testid="completed-task-lane"] .personal-completed-window');
+        return window && Number.parseFloat(window.style.height) >= minimum;
+      }, Math.min(4087, (batch + 1) * 40) * 148);
+      if (await completedColumn.locator('.personal-completed-row').count() > 20) throw new Error('Completed history DOM grew with accumulated pages');
+    }
+    await historyScroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await completedColumn.getByText('Completed historical Task 4087', { exact: true }).waitFor();
+    await completedColumn.getByText('已显示全部完成记录', { exact: true }).waitFor();
+    await page.screenshot({ path: resolve(outputDir, 'completed-history-4087.png'), fullPage: false, animations: 'disabled' });
+    await historyScroll.evaluate(element => { element.scrollTop = 0; });
+    await completedColumn.getByText('Completed A', { exact: true }).waitFor();
     await page.locator(".personal-goal-link", { hasText: "Multi Agent Projection" }).click();
     const multiAgentHeader = await page.locator(".personal-channel-title p").innerText();
     if (!multiAgentHeader.includes("2 个工作 Agent") || multiAgentHeader.includes("codex-older-lane ·")) {
@@ -1928,6 +2004,7 @@ async function main() {
     if (await page.locator(".personal-workspace-shell").count()) throw new Error("Unified Goal capability action did not open the Settings surface");
     await page.getByRole("heading", { level: 2, name: "周期报告", exact: true }).waitFor({ state: "visible" });
     const goalCapabilityOrder = await page.locator(".personal-capability-list button small").allTextContents();
+    if (await page.locator(".personal-capability-editor-status").count()) throw new Error("Editable Goal settings must not show internal editor-contract notices");
     const expectedGoalCapabilities = [
       "change_quality_qualification", "explore_graph", "explore_harness", "lark_event_inbox",
       "lark_kanban_heartbeat_sync", "local_authority_shadow", "multi_subagent",
@@ -1986,6 +2063,7 @@ async function main() {
     if (multiSubagentApply?.expected_plan_revision !== "sha256:goal-plan-multi_subagent") {
       throw new Error(`Unified Goal capability apply lost its reviewed sub-agent revision: ${JSON.stringify(multiSubagentApply)}`);
     }
+    await page.locator(".personal-capability-raw-values > summary").click();
     await page.locator(".personal-capability-value-grid section").first().getByText(/validation/u).waitFor({ state: "visible" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
     await page.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
@@ -2007,6 +2085,21 @@ async function main() {
     await page.getByRole("button", { name: /机器配置/ }).click();
     await page.getByRole("heading", { level: 1, name: "机器配置", exact: true }).waitFor({ state: "visible" });
     await page.getByRole("heading", { level: 2, name: "周期报告", exact: true }).waitFor({ state: "visible" });
+    const machineCatalog = page.getByRole("navigation", { name: "机器能力目录" });
+    if (await page.locator(".personal-capability-editor-status").count()) throw new Error("Editable machine settings must not show internal editor-contract notices");
+    if (await machineCatalog.getByRole("button").count() !== goalCapabilityCatalog().length) {
+      throw new Error("Machine settings hid Goal-only capabilities from the shared catalog");
+    }
+    const requestsBeforeReadOnly = api.machineConfigurationRequests.length;
+    await machineCatalog.getByRole("button", { name: /multi_subagent/ }).click();
+    await page.getByText(/此能力目前仅支持 Goal 级配置/u).waitFor({ state: "visible" });
+    if (await page.getByRole("button", { name: "预览变更", exact: true }).count()
+        || await page.locator("#machine-configuration-json").count()
+        || await page.getByLabel(/^启用$/u).count()
+        || api.machineConfigurationRequests.length !== requestsBeforeReadOnly) {
+      throw new Error("Goal-only capability exposed a machine mutation path");
+    }
+    await machineCatalog.getByRole("button", { name: /periodic_report/ }).click();
     for (const label of [/^启用$/u, /^报告 Profile/u, /^Goal Channel 路由/u, /^时区/u]) {
       await page.getByLabel(label).waitFor({ state: "visible" });
     }
@@ -2029,6 +2122,16 @@ async function main() {
     await page.getByRole("radio", { name: /English/ }).click();
     await page.getByRole("button", { name: /Machine configuration/ }).click();
     await page.getByRole("heading", { level: 2, name: "Periodic reports", exact: true }).waitFor({ state: "visible" });
+    const rawValues = page.locator(".personal-capability-raw-values");
+    if (await rawValues.getAttribute("open") !== null) throw new Error("Raw JSON must be collapsed by default");
+    if (!await page.locator(".personal-capability-actions").evaluate((actions) => Boolean(actions.compareDocumentPosition(document.querySelector(".personal-capability-raw-values")) & Node.DOCUMENT_POSITION_FOLLOWING))) {
+      throw new Error("Readable configuration actions must precede raw JSON diagnostics");
+    }
+    await rawValues.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await rawValues.locator("pre").first().waitFor({ state: "visible" });
+    await page.keyboard.press("Enter");
+    if (await rawValues.getAttribute("open") !== null) throw new Error("Raw JSON keyboard collapse failed");
     for (const label of [/^Enabled$/u, /^Report profile/u, /^Goal Channel route/u, /^Timezone/u]) {
       await page.getByLabel(label).waitFor({ state: "visible" });
     }
@@ -2067,6 +2170,10 @@ async function main() {
     if (JSON.stringify(ingressOptions) !== JSON.stringify(["live_steering", "session_queue", "async_inbox"])) throw new Error(`Lark Agent ingress modes drifted: ${JSON.stringify(ingressOptions)}`);
     await ingressGroup.getByLabel("异步收件箱").check();
     await connectDialog.getByLabel("目标 Agent").waitFor({ state: "visible" });
+    await connectDialog.getByLabel("绑定到 Goal").selectOption("multi-agent-projection");
+    const agentOptions = await connectDialog.getByLabel("目标 Agent").locator("option").evaluateAll((items) => items.map((item) => item.value));
+    if (JSON.stringify([...agentOptions].sort((left, right) => left.localeCompare(right))) !== JSON.stringify(["codex-latest-lane", "codex-older-lane"])) throw new Error(`Lark omitted a peer Agent: ${JSON.stringify(agentOptions)}`);
+    await connectDialog.getByLabel("目标 Agent").selectOption("codex-older-lane");
     await connectDialog.getByLabel("回复方式").selectOption("topic_reply");
     await page.screenshot({ path: resolve(outputDir, "lark-routing-modes.png"), fullPage: false, animations: "disabled" });
     await connectDialog.getByRole("button", { name: "连接", exact: true }).click();
@@ -2085,6 +2192,7 @@ async function main() {
     if (api.larkWrites.length !== 1 || api.larkWrites[0].execute !== true) throw new Error("Lark connect did not perform exactly one approved external write");
     if (api.larkWrites[0].capture_scope !== "configured_chat_all" || api.larkWrites[0].incoming_mode !== "all") throw new Error(`Lark capture mode was not projected: ${JSON.stringify(api.larkWrites[0])}`);
     if (api.larkWrites[0].ingress_mode !== "async_inbox" || !api.larkWrites[0].agent_id) throw new Error(`Lark Agent inbox mode lost its Agent binding: ${JSON.stringify(api.larkWrites[0])}`);
+    if (api.larkWrites[0].agent_id !== "codex-older-lane" || api.larkWrites[0].goal_id !== "multi-agent-projection") throw new Error("Lark replaced the selected peer with the default Agent");
     if (api.larkWrites[0].reply_mode !== "topic_reply") throw new Error(`Lark reply mode was not projected: ${JSON.stringify(api.larkWrites[0])}`);
     Object.assign(api.larkConnections[0], {
       event_count: 1,
@@ -2113,7 +2221,22 @@ async function main() {
     if (await editDialog.getByLabel("接收范围").inputValue() !== "configured_chat_all") throw new Error("Lark edit mode did not restore capture_scope");
     if (!await editDialog.getByRole("group", { name: "Agent 入站方式" }).getByLabel("异步收件箱").isChecked()) throw new Error("Lark edit mode did not restore ingress_mode");
     if (await editDialog.getByLabel("目标 Agent").inputValue() !== api.larkWrites[0].agent_id) throw new Error("Lark edit mode did not restore agent_id");
+    await editDialog.getByLabel("目标 Agent").selectOption("codex-latest-lane");
+    await editDialog.getByRole("button", { name: "保存连接", exact: true }).click();
+    await editDialog.waitFor({ state: "hidden" });
+    if (api.larkWrites.length !== 2 || api.larkConnections.length !== 2) throw new Error("Peer Agent route did not coexist");
+    if (!api.larkConnections.some((item) => item.agent_id === "codex-older-lane") || !api.larkConnections.some((item) => item.agent_id === "codex-latest-lane")) throw new Error("One-click Goal Channel lost a peer Agent route");
+    const removedConnection = api.larkConnections.find((item) => item.agent_id === "codex-older-lane");
+    const originalAgent = removedConnection.agent_id;
+    removedConnection.agent_id = "removed-peer";
+    await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await page.locator(".personal-lark-table-row", { hasText: "removed-peer" }).getByRole("button", { name: /配置/ }).click();
+    await editDialog.getByRole("alert").filter({ hasText: "不会自动替换" }).waitFor({ state: "visible" });
+    if (!(await editDialog.getByRole("button", { name: "保存连接", exact: true }).isDisabled())) throw new Error("Removed recipient remained connectable");
+    if (await editDialog.getByLabel("目标 Agent").inputValue() !== "removed-peer") throw new Error("Removed recipient silently fell back to another Agent");
     await editDialog.getByRole("button", { name: "取消" }).click();
+    removedConnection.agent_id = originalAgent;
     await page.screenshot({ path: resolve(outputDir, "lark-goal-connections.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
     await selectProductReleaseGoal();

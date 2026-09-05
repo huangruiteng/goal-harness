@@ -884,23 +884,27 @@ Item fields:
   `post_handoff_latest_run` identifies that latest seen run by timestamp and
   classification, and `delivery_batch_scale` labels whether the observed
   delivery is test-only, single-surface, multi-surface, implementation-shaped,
-  or still unknown. Status prefers an explicit compact run field such as
-  `delivery_batch_scale=multi_surface` over classification-name inference, so
-  a verified browser-smoke-plus-docs artifact is not misclassified as
-  `test_only` merely because the classification contains `smoke`.
+  or still unknown. Delivery scale and outcome come only from explicit typed
+  fields. Classification names, health text, recommendations, and the mere
+  presence of evidence objects never establish delivery semantics.
+  `delivery_turn_kind` comes from an explicit kind, the explicit outcome, or
+  a scoped typed blocker observation accepted by the existing settlement
+  predicate. `outcome_gap` alone does not prove blocker writeback.
   `post_handoff_recent_runs` is a compact newest-first slice of recent
-  post-handoff work runs, and `post_handoff_small_scale_streak` counts the
-  leading `test_only` / `single_surface` / `unknown` scale streak so heartbeat
-  jobs and review packets can request a larger validated delivery batch only
-  after repeated small-scale follow-through. When
-  `project_asset.execution_profile.outcome_floor` declares outcome markers or
-  surface-only hints, compact runs may also include `delivery_outcome`
-  (`outcome_progress`, `surface_only`, or `outcome_gap`), and status also
-  honors an explicit refresh-state `delivery_outcome` before falling back to
-  marker/hint inference. `primary_goal_outcome` is accepted as a compatible
-  progress label for refresh-state records that want to mirror the default
-  execution profile wording. `post_handoff_outcome_gap_streak` counts
-  consecutive work runs that did not advance the declared outcome floor.
+  post-handoff work runs. `post_handoff_small_scale_streak` counts only leading
+  explicit `test_only` / `single_surface` scales; unknown breaks the streak.
+  Explicit `delivery_outcome` values are `outcome_progress`, `surface_only`,
+  `outcome_gap`, and `primary_goal_outcome`. Missing or invalid historical
+  semantics stay unknown. A missing outcome with no configured floor retains
+  the internal `not_configured` sentinel and is omitted from the compact run.
+  Legacy outcome-marker/hint lists retain floor-configuration compatibility,
+  but their words no longer classify runs. With that floor configured,
+  `post_handoff_outcome_gap_streak` counts only consecutive explicit
+  `surface_only` / `outcome_gap` outcomes; unknown breaks the streak.
+  Follow-through obligations require typed fields, never narrative inference.
+  New delivery claims use the existing writer enum fields; state-only refresh
+  without a delivery claim remains legal. This deliberately changes decisions
+  previously inferred from old untyped labels without rewriting run history.
   `quota_slot_spent` events do not count as post-handoff work.
 - `operator_question`: optional human-facing gate to show in the LoopX
   operator view. This is the canonical place for user/controller judgment.

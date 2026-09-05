@@ -35,11 +35,16 @@ from .local_authority_shadow_projection import (
     sha256_digest,
     text_digest,
 )
+from .coordination_state_contract_generated import (
+    LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA,
+)
 
 
-OUTBOX_ENTRY_SCHEMA = "loopx_local_authority_shadow_outbox_entry_v0"
-OUTBOX_COMMIT_SCHEMA = "loopx_local_authority_shadow_outbox_commit_v0"
-DRAIN_CURSOR_SCHEMA = "loopx_local_authority_shadow_drain_cursor_v0"
+OUTBOX_ENTRY_SCHEMA = LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA
+OUTBOX_COMMIT_SCHEMA = LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA
+DRAIN_CURSOR_SCHEMA = LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA
 SOURCE_MARKDOWN = "markdown_active_state"
 SOURCE_STATE_EVENT_LOG = "state_event_log"
 SOURCE_TASK_LEASE = "task_lease_record"

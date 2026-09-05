@@ -110,7 +110,12 @@ assert.match(header, /personal-goal-tools-trigger/, "Goal details and capability
 assert.match(header, /onOpenGoalDetail[\s\S]*onOpenGoalCapabilities/, "The unified Goal entry preserves both existing details and capability settings");
 assert.match(page, /onOpenGoalCapabilities=.*tab: "capabilities"/, "The unified Goal entry opens the selected Goal capability settings directly");
 assert.match(goalCapabilitySettings, /fetchGoalConfiguration\(goalId\)/, "Goal capability settings inspect the selected Goal through the path-free API");
-assert.match(goalCapabilitySettings, /personal-capability-editor-status/, "Goal capability settings distinguish editable contracts from read-only capabilities");
+assert.match(capabilityWorkbench, /personal-capability-editor-status/, "Shared capability details distinguish editable contracts from read-only capabilities");
+for (const settings of [goalCapabilitySettings, machineSettings]) {
+  assert.match(settings, /<CapabilityEditorStatus/, "Both scopes use the shared editor status");
+  assert.match(settings, /<CapabilityConfigurationSummary/, "Both scopes use the shared value and provenance view");
+  assert.match(settings, /canEditCapability\(/, "Both scopes enforce the same editor availability contract");
+}
 assert.match(goalCapabilitySettings, /previewGoalConfiguration\(goalId/, "Goal capability changes start with a typed preview");
 assert.match(goalCapabilitySettings, /preview\.plan_revision/, "Goal capability apply is locked to the reviewed plan revision");
 assert.match(goalCapabilitySettings, /applyGoalConfiguration\(/, "Goal capability settings apply only through the revision-locked API");
@@ -430,7 +435,7 @@ assert.match(larkSettings, /t\("lark\.connections"\)/, "Lark management exposes 
 for (const label of ["Connect Lark App", "Group chat", "Bind to Goal", "Create Goal topic automatically", "Topic reply"]) {
   assert.match(i18n, new RegExp(label), `English locale contains ${label}`);
 }
-assert.match(i18n, /One Lark App · many Goals · one topic per Goal/, "Connection cardinality is explicit");
+assert.match(i18n, /One Lark App · many Goals · one isolated route per Agent/, "Connection cardinality is explicit");
 assert.match(larkSettings, /lark_message_permissions_required/, "Missing message permissions receive an actionable error");
 assert.match(larkSettings, /selectedApp\?\.reply_ready/, "Connect stays disabled until automatic replies are healthy");
 assert.match(larkSettings, /lark\.health\.unavailable/, "Existing unhealthy connections expose localized reply health");
@@ -450,6 +455,8 @@ assert.match(larkSettings, /lark\.health\.notAddressed/, "Ignored unaddressed me
 assert.match(larkSettings, /lark\.health\.routeMismatch/, "Route mismatches receive an actionable connection repair hint");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*false/s, "Connect flow previews before execution");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*true/s, "Connect flow performs the approved external write");
+assert.match(larkSettings, /connectAllAgents[\s\S]*targetAgentIds[\s\S]*for \(const targetAgentId of targetAgentIds\)/, "One guided action can connect every registered Agent through isolated routes");
+assert.match(i18n, /Connect every registered Agent/, "Multi-Agent Goal Channel onboarding is explicit");
 assert.match(i18n, /Register another Lark App/, "App chooser exposes localized Feishu registration");
 assert.match(larkSettings, /startLarkAppSetup/, "Registration starts through the local setup API");
 assert.match(larkSettings, /fetchLarkAppSetup/, "Registration polls the local setup session");
@@ -465,7 +472,8 @@ assert.match(status, /recent_completed_advancement_items/, "The status schema ac
 assert.match(model, /doneTodoCount\??:/, "A Goal exposes the payload completed-Todo count");
 assert.match(dashboard, /personalAgentTodoFacts/, "Goal projection derives completion facts from the payload, not open-only item lists");
 assert.match(dashboard, /agentTodos:\s*\[\.\.\.goalAgentTodos,\s*\.\.\.agentTodoFacts\.recentCompleted\]/, "Recent completed Todos stay visible in the Goal board");
-assert.match(tasks, /Math\.max\(goal\.doneTodoCount \?\? 0, doneAgentTodos\.length\)/, "The completed column counts payload completions instead of open-only items");
+assert.match(tasks, /<CompletedTaskLane/, "Completed history is owned by its paginated lane");
+assert.match(source("./completed-task-lane.tsx"), /setTotal\(page\.total\)/, "The history count comes from the scoped full-history page, not its visible window");
 assert.doesNotMatch(tasks, /<span>\{doneAgentTodos\.length\}<\/span>/, "The completed column never reports a false zero");
 assert.match(
   dashboard,

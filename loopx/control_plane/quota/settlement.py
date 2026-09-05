@@ -37,6 +37,33 @@ QUOTA_SETTLEMENT_READBACK_RESULT_SCHEMA = (
 SEMANTIC_REPLAN_GUARD_SCHEMA = "semantic_replan_guard_v0"
 
 
+def render_refresh_recovery_markdown(payload: dict[str, Any]) -> str | None:
+    """Present an admitted recovery result without deriving settlement policy."""
+    recovery = payload.get("refresh_recovery") or {}
+    if recovery.get("decision") not in {"replay", "repair_receipt", "reject"}:
+        return None
+    lines = [
+        "# LoopX State Refresh",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- recovery: `{recovery['decision']}`",
+        f"- reason: `{recovery.get('reason')}`",
+        "- appended: `False` — original writeback preserved; no new delivery or spend.",
+    ]
+    checkpoint = payload.get("vision_checkpoint") or {}
+    if checkpoint:
+        lines.append(
+            f"- vision_checkpoint: `{checkpoint.get('decision')}`; satisfied={checkpoint.get('satisfied')}"
+        )
+    if payload.get("error"):
+        lines.append(str(payload["error"]))
+    elif checkpoint.get("satisfied") is False:
+        lines.append(
+            "Retry the same refresh command and Turn with --vision-unchanged-reason if an existing vision still applies, or --agent-vision-json for a valid vision patch. Do not repeat work or begin a new Turn for this checkpoint."
+        )
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True, slots=True)
 class QuotaSettlementReadback:
     identity: SettlementResult[SettlementIdentity]
@@ -56,6 +83,8 @@ class QuotaSettlementReadback:
     completion_event: dict[str, Any] | None
     monitor_phase: ReceiptBoundMonitorPhase | None
     replay_phase: ReceiptBoundReplayPhase | None
+    refresh_recovery: dict[str, Any] | None = None
+
 
 __all__ = [
     "SETTLEMENT_IDENTITY_SCHEMA_VERSION",
@@ -143,6 +172,7 @@ def read_heartbeat_settlement(
     replan_obligation_id: str | None = None,
     infer_turn_instance_id: bool = False,
     allow_unbound_binding: bool = False,
+    refresh_retry: dict[str, Any] | None = None,
 ) -> QuotaSettlementReadback | None:
     """Read one complete heartbeat settlement through the TS domain owner."""
 
@@ -159,6 +189,11 @@ def read_heartbeat_settlement(
                 "replan_obligation_id": replan_obligation_id,
                 "infer_turn_instance_id": infer_turn_instance_id,
                 "allow_unbound_binding": allow_unbound_binding,
+                **(
+                    {"refresh_retry": refresh_retry}
+                    if refresh_retry is not None
+                    else {}
+                ),
             },
         )
     except EffectRuntimeRejected as exc:
@@ -202,6 +237,7 @@ def read_heartbeat_settlement(
             payload.get("semantic_replan_guard")
         ),
         writeback_run=_optional_readback_record(payload.get("writeback_run")),
+        refresh_recovery=_optional_readback_record(payload.get("refresh_recovery")),
         spend_run=_optional_readback_record(payload.get("spend_run")),
         heartbeat_receipt=_optional_readback_record(payload.get("heartbeat_receipt")),
         writeback_event=_optional_readback_record(payload.get("writeback_event")),

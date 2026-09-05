@@ -7,6 +7,7 @@ import subprocess
 
 import pytest
 
+from loopx.control_plane.agents import delivery_workspace
 from loopx.control_plane.coordination.coordination_state_contract import (
     CoordinationStateContractError,
     TODO_CANONICAL_READ_RECORD_FIELDS,
@@ -17,7 +18,33 @@ from loopx.control_plane.coordination.coordination_state_contract import (
     TODO_PROJECTION_METADATA_FIELDS,
 )
 from loopx.control_plane.coordination.coordination_state_contract_generated import (
+    DELIVERY_BOUNDARY_RESULT_SCHEMA,
+    DELIVERY_CONTINUITY_RESULT_SCHEMA,
+    DELIVERY_ROUTING_REQUEST_SCHEMA,
+    DELIVERY_ROUTING_RESULT_SCHEMA,
+    DELIVERY_WORKSPACE_SNAPSHOT_LEGACY_SNAPSHOT_SCHEMA,
+    DELIVERY_WORKSPACE_SNAPSHOT_REQUEST_SCHEMA,
+    DELIVERY_WORKSPACE_SNAPSHOT_RESULT_SCHEMA,
+    DELIVERY_WORKSPACE_SNAPSHOT_SNAPSHOT_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA,
     LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+    LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+)
+from loopx.control_plane.turn_driver import delivery_continuity
+from loopx.control_plane.coordination.local_authority_shadow_adapter import (
+    LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA as BRIDGE_SHADOW_EVIDENCE_SCHEMA,
+    LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA as BRIDGE_SHADOW_REQUEST_SCHEMA,
+)
+from loopx.control_plane.coordination.local_authority_shadow_outbox import (
+    OUTBOX_ENTRY_SCHEMA,
+)
+from loopx.control_plane.coordination.runtime_shadow import (
+    build_todo_runtime_shadow_projection,
+)
+from loopx.control_plane.coordination.legacy_writer_fence import (
+    LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA as BRIDGE_WRITE_CHECK_REQUEST_SCHEMA,
 )
 from loopx.control_plane.coordination.local_authority import (
     LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA as BRIDGE_LIST_REQUEST_SCHEMA,
@@ -25,6 +52,27 @@ from loopx.control_plane.coordination.local_authority import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("change", ["missing", "unknown", "wrong_type", "duplicate"])
+def test_generator_rejects_invalid_protocol_contract(change, tmp_path, monkeypatch) -> None:
+    generator = runpy.run_path(str(ROOT / "scripts/generate_coordination_state_contract.py"))
+    load = generator["load_contract"]
+    contract = load()
+    protocol = contract["task_lease_protocol"]
+    if change == "missing":
+        del protocol["acquire_request_schema"]
+    elif change == "unknown":
+        protocol["future_schema"] = "loopx_future_v0"
+    elif change == "wrong_type":
+        protocol["acquire_request_schema"] = True
+    else:
+        protocol["acquire_request_schema"] = protocol["lifecycle_request_schema"]
+    path = tmp_path / "contract.json"
+    path.write_text(json.dumps(contract), encoding="utf-8")
+    monkeypatch.setitem(load.__globals__, "CONTRACT_PATH", path)
+    with pytest.raises(ValueError, match="task lease protocol"):
+        load()
 
 
 def test_generated_coordination_bindings_are_current() -> None:
@@ -41,6 +89,10 @@ def test_generated_coordination_bindings_are_current() -> None:
         ("local_authority_protocol", "mutation_request_schema", "across families"),
         ("local_authority_protocol", "promotion_receipt_schema", "across families"),
         ("runtime_shadow_protocol", "inspect_request_schema", "must be unique"),
+        ("local_authority_shadow_protocol", "outbox_entry_schema", "across families"),
+        ("task_lease_protocol", "acquire_request_schema", "across families"),
+        ("capability_hook_protocol", "intent_schema", "across families"),
+        ("replan_settlement_protocol", "result_schema", "across families"),
     ],
 )
 def test_generator_rejects_protocol_identity_collisions(
@@ -124,6 +176,45 @@ def test_domain_projection_split_keeps_archival_as_a_task_fact() -> None:
 
 def test_python_bridge_uses_generated_local_authority_protocol_schemas() -> None:
     assert BRIDGE_LIST_REQUEST_SCHEMA == LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA
+
+
+def test_python_shadow_bridges_use_generated_protocol_schemas() -> None:
+    assert BRIDGE_SHADOW_REQUEST_SCHEMA == LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA
+    assert BRIDGE_SHADOW_EVIDENCE_SCHEMA == LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA
+    assert OUTBOX_ENTRY_SCHEMA == LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA
+    assert (
+        build_todo_runtime_shadow_projection(goal_id="goal_contract", todos=[])[
+            "schema_version"
+        ]
+        == "loopx_coordination_runtime_shadow_projection_v0"
+    )
+    assert BRIDGE_WRITE_CHECK_REQUEST_SCHEMA == LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA
+
+
+def test_python_delivery_continuity_uses_generated_protocol_schemas() -> None:
+    assert delivery_continuity.DELIVERY_CONTINUITY_RESULT_SCHEMA == DELIVERY_CONTINUITY_RESULT_SCHEMA
+    assert delivery_continuity.DELIVERY_BOUNDARY_RESULT_SCHEMA == DELIVERY_BOUNDARY_RESULT_SCHEMA
+    assert delivery_continuity.DELIVERY_ROUTING_REQUEST_SCHEMA == DELIVERY_ROUTING_REQUEST_SCHEMA
+    assert delivery_continuity.DELIVERY_ROUTING_RESULT_SCHEMA == DELIVERY_ROUTING_RESULT_SCHEMA
+
+
+def test_python_delivery_workspace_uses_generated_protocol_schemas() -> None:
+    assert (
+        delivery_workspace.DELIVERY_WORKSPACE_SCHEMA_VERSION
+        == DELIVERY_WORKSPACE_SNAPSHOT_SNAPSHOT_SCHEMA
+    )
+    assert (
+        delivery_workspace.LEGACY_DELIVERY_WORKSPACE_SCHEMA_VERSION
+        == DELIVERY_WORKSPACE_SNAPSHOT_LEGACY_SNAPSHOT_SCHEMA
+    )
+    assert (
+        delivery_workspace.DELIVERY_WORKSPACE_REQUEST_SCHEMA
+        == DELIVERY_WORKSPACE_SNAPSHOT_REQUEST_SCHEMA
+    )
+    assert (
+        delivery_workspace.DELIVERY_WORKSPACE_RESULT_SCHEMA
+        == DELIVERY_WORKSPACE_SNAPSHOT_RESULT_SCHEMA
+    )
 
 
 def test_record_validation_rejects_required_fields_outside_declared_fields() -> None:

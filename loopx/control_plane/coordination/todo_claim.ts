@@ -16,6 +16,8 @@ export const COORDINATION_TODO_CLAIM_RESULT_SCHEMA =
   "loopx_coordination_todo_claim_result_v0";
 export const COORDINATION_TODO_CLAIM_RECEIPT_SCHEMA =
   "loopx_coordination_todo_claim_receipt_v0";
+export const COORDINATION_TODO_CLAIM_DECISION_SCHEMA =
+  "loopx_coordination_todo_claim_decision_v0";
 
 export interface CoordinationTodoClaimInput {
   readonly goal_id: string;
@@ -32,6 +34,28 @@ export interface CoordinationTodoClaimInput {
 export type CoordinationTodoClaimResult = JsonObject & {
   readonly schema_version: typeof COORDINATION_TODO_CLAIM_RESULT_SCHEMA;
 };
+
+export interface CoordinationTodoClaimAcceptedDecision extends JsonObject {
+  readonly schema_version: typeof COORDINATION_TODO_CLAIM_DECISION_SCHEMA;
+  readonly status: "accepted";
+  readonly owner: string;
+  readonly actor: string | null;
+  readonly mode: "single_agent_compatibility" | "registered_peer_actor";
+  readonly mutation_authority: JsonObject;
+}
+
+export interface CoordinationTodoClaimRejectedDecision extends JsonObject {
+  readonly schema_version: typeof COORDINATION_TODO_CLAIM_DECISION_SCHEMA;
+  readonly status: "rejected";
+  readonly reason_code: string;
+  readonly reason: string;
+}
+
+export type CoordinationTodoClaimDecision =
+  | CoordinationTodoClaimAcceptedDecision
+  | CoordinationTodoClaimRejectedDecision;
+
+type ClaimRejection = CoordinationTodoClaimRejectedDecision | null;
 
 function normalizeAgent(value: unknown, label: string): string {
   if (typeof value !== "string") {
@@ -59,85 +83,155 @@ function normalizeRegisteredAgents(value: readonly string[]): string[] {
   return normalized;
 }
 
+function normalizeExcludedAgents(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new AuthorityStoreProtocolError("todo.excluded_agents must be an array");
+  }
+  const normalized = value.map((agent, index) =>
+    normalizeAgent(agent, `todo.excluded_agents[${index}]`)
+  );
+  if (new Set(normalized).size !== normalized.length) {
+    throw new AuthorityStoreProtocolError(
+      "todo.excluded_agents must contain unique public-safe agent ids",
+    );
+  }
+  return normalized;
+}
+
 function failure(code: string, reason: string, detail: JsonObject = {}): CoordinationTodoClaimResult {
   return {
+    ...detail,
     schema_version: COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
     status: "failed",
     reason_code: code,
     reason,
-    ...detail,
   };
 }
 
-function claimAuthority(
-  todo: JsonObject,
+function decisionFailure(
+  code: string,
+  reason: string,
+  detail: JsonObject = {},
+): CoordinationTodoClaimRejectedDecision {
+  return {
+    ...detail,
+    schema_version: COORDINATION_TODO_CLAIM_DECISION_SCHEMA,
+    status: "rejected",
+    reason_code: code,
+    reason,
+  };
+}
+
+function rejectInvalidClaimActor(
   input: CoordinationTodoClaimInput,
-): { owner: string; actor: string | null; mode: string } | CoordinationTodoClaimResult {
-  const registered = input.registered_agents;
-  const owner = input.claimed_by;
-  const actor = input.actor_agent_id;
+): ClaimRejection {
+  const { registered_agents: registered, claimed_by: owner, actor_agent_id: actor } = input;
   if (!registered.includes(owner)) {
-    return failure("actor_not_registered", "claimed_by is not registered for this goal", {
-      claimed_by: owner,
-    });
+    return decisionFailure(
+      "actor_not_registered",
+      "claimed_by is not registered for this goal",
+      { claimed_by: owner },
+    );
   }
   if (actor !== null && !registered.includes(actor)) {
-    return failure("actor_not_registered", "actor_agent_id is not registered for this goal", {
-      actor_agent_id: actor,
-    });
+    return decisionFailure(
+      "actor_not_registered",
+      "actor_agent_id is not registered for this goal",
+      { actor_agent_id: actor },
+    );
   }
   if (registered.length > 1 && actor === null) {
-    return failure("actor_required", "multi-agent Todo claim requires actor_agent_id");
+    return decisionFailure(
+      "actor_required",
+      "multi-agent Todo claim requires actor_agent_id",
+    );
   }
-  if (actor !== null && actor !== owner) {
-    return failure(
+  return actor !== null && actor !== owner
+    ? decisionFailure(
       "claim_actor_mismatch",
       "Todo claim requires claimed_by to match actor_agent_id",
       { actor_agent_id: actor, claimed_by: owner },
-    );
-  }
+    )
+    : null;
+}
+
+function rejectIneligibleTodo(
+  todo: JsonObject,
+  input: CoordinationTodoClaimInput,
+): ClaimRejection {
   if (todo.role !== "agent") {
-    return failure("todo_not_agent", "claimed_by is only valid for agent Todos");
+    return decisionFailure("todo_not_agent", "claimed_by is only valid for agent Todos");
   }
   if (input.expected_role !== null && input.expected_role !== todo.role) {
-    return failure("todo_role_mismatch", "Todo does not have the requested role", {
-      requested_role: input.expected_role,
-      todo_role: todo.role,
-    });
-  }
-  if (todo.status !== "open") {
-    return failure("todo_not_open", "Todo claim requires status=open", {
-      todo_status: todo.status,
-    });
-  }
-  if (todo.archive_state !== "active") {
-    return failure("todo_archived", "Todo claim requires an active Todo");
-  }
-  if (typeof todo.removed_continuation_policy === "string" &&
-      todo.removed_continuation_policy.length > 0) {
-    return failure(
-      "removed_continuation_policy",
-      "Todo uses a removed continuation policy and must be repaired before claiming",
+    return decisionFailure(
+      "todo_role_mismatch",
+      "Todo does not have the requested role",
+      { requested_role: input.expected_role, todo_role: todo.role },
     );
   }
-  const excluded = Array.isArray(todo.excluded_agents) ? todo.excluded_agents : [];
+  if (todo.status !== "open") {
+    return decisionFailure(
+      "todo_not_open",
+      "Todo claim requires status=open",
+      { todo_status: todo.status },
+    );
+  }
+  if (todo.archive_state !== "active") {
+    return decisionFailure("todo_archived", "Todo claim requires an active Todo");
+  }
+  return typeof todo.removed_continuation_policy === "string" &&
+      todo.removed_continuation_policy.length > 0
+    ? decisionFailure(
+      "removed_continuation_policy",
+      "Todo uses a removed continuation policy and must be repaired before claiming",
+    )
+    : null;
+}
+
+export function evaluateCoordinationTodoClaimDecision(
+  todo: JsonObject,
+  input: CoordinationTodoClaimInput,
+): CoordinationTodoClaimDecision {
+  const registered = input.registered_agents;
+  const owner = input.claimed_by;
+  const actor = input.actor_agent_id;
+  const rejection = rejectInvalidClaimActor(input) ?? rejectIneligibleTodo(todo, input);
+  if (rejection !== null) return rejection;
+  const excluded = normalizeExcludedAgents(todo.excluded_agents);
   if (excluded.includes(owner)) {
-    return failure("actor_excluded", "claiming agent is excluded from this Todo", {
-      actor_agent_id: owner,
-    });
+    return decisionFailure(
+      "actor_excluded",
+      "claiming agent is excluded from this Todo",
+      { actor_agent_id: owner },
+    );
   }
   const existing = typeof todo.claimed_by === "string" && todo.claimed_by.length > 0
     ? normalizeAgent(todo.claimed_by, "todo.claimed_by")
     : null;
   if (existing !== null && existing !== owner) {
-    return failure("claim_owner_mismatch", "Todo is already claimed by another agent", {
-      claim_owner: existing,
-    });
+    return decisionFailure(
+      "claim_owner_mismatch",
+      "Todo is already claimed by another agent",
+      { claim_owner: existing },
+    );
   }
+  const mode = registered.length <= 1 ? "single_agent_compatibility" : "registered_peer_actor";
   return {
+    schema_version: COORDINATION_TODO_CLAIM_DECISION_SCHEMA,
+    status: "accepted",
     owner,
     actor,
-    mode: registered.length <= 1 ? "single_agent_compatibility" : "registered_peer_actor",
+    mode,
+    mutation_authority: {
+      schema_version: "todo_mutation_authority_v0",
+      command: "claim",
+      mode,
+      actor_agent_id: actor,
+      todo_id: todo.todo_id,
+      registered_agent_count: registered.length,
+      ...(mode === "registered_peer_actor" ? { claim_owner: existing } : {}),
+    },
   };
 }
 
@@ -269,16 +363,22 @@ export async function executeCoordinationTodoClaim(
     });
   }
 
-  let authority: ReturnType<typeof claimAuthority>;
+  let authority: ReturnType<typeof evaluateCoordinationTodoClaimDecision>;
   try {
-    authority = claimAuthority(todo, input);
+    authority = evaluateCoordinationTodoClaimDecision(todo, input);
   } catch (error) {
     return failure(
       "invalid_coordination_todo_claim",
       error instanceof Error ? error.message : "invalid Todo claim",
     );
   }
-  if (typeof authority.owner !== "string") return authority as CoordinationTodoClaimResult;
+  if (authority.status !== "accepted" || typeof authority.owner !== "string") {
+    return failure(
+      typeof authority.reason_code === "string" ? authority.reason_code : "invalid_coordination_todo_claim",
+      typeof authority.reason === "string" ? authority.reason : "Todo claim was rejected",
+      authority,
+    );
+  }
 
   const handoffMode = typeof head.head.handoff_mode === "string"
     ? head.head.handoff_mode
@@ -295,17 +395,10 @@ export async function executeCoordinationTodoClaim(
     );
   }
 
-  const mutationAuthority = {
-    schema_version: "todo_mutation_authority_v0",
-    command: "claim",
-    mode: authority.mode,
-    actor_agent_id: authority.actor,
-    todo_id: input.todo_id,
-    registered_agent_count: input.registered_agents.length,
-    ...(authority.mode === "registered_peer_actor"
-      ? { claim_owner: typeof todo.claimed_by === "string" ? todo.claimed_by : null }
-      : {}),
-  };
+  const mutationAuthority = canonicalAuthorityObject(
+    authority.mutation_authority,
+    "Todo claim mutation authority",
+  );
   const updatedAt = input.now.toISOString().replace(/\.\d{3}Z$/u, "Z");
   const changed = todo.claimed_by !== authority.owner;
   const result = {

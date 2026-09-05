@@ -17,6 +17,7 @@ from ..coordination.authority_core import (
     decide,
 )
 from ..coordination.local_snapshot import todo_snapshot_from_mapping
+from ..effect_runtime import effect_runtime_result
 from .contract import (
     normalize_todo_claimed_by,
     normalize_todo_decision_outcome,
@@ -180,6 +181,65 @@ def _raise_core_authority_rejection(
     )
 
 
+def _authorize_typescript_claim(
+    *,
+    goal_id: str,
+    todo: Mapping[str, Any],
+    core_todo: TodoSnapshot,
+    registered_agents: list[str],
+    actor: str | None,
+    requested_owner: str | None,
+) -> dict[str, Any]:
+    payload = effect_runtime_result(
+        "todo.claim.decide",
+        {
+            "goal_id": goal_id,
+            "todo_id": core_todo.todo_id,
+            "todo": {
+                "todo_id": core_todo.todo_id,
+                "role": core_todo.role,
+                "status": core_todo.status,
+                "archive_state": str(todo.get("archive_state") or "active"),
+                "claimed_by": core_todo.claimed_by,
+                "excluded_agents": sorted(core_todo.excluded_agents),
+                "removed_continuation_policy": todo.get(
+                    "removed_continuation_policy"
+                ),
+            },
+            "claimed_by": requested_owner,
+            "actor_agent_id": actor,
+            "expected_role": core_todo.role,
+            "registered_agents": registered_agents,
+        },
+    )
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript Todo claim decision shape mismatch")
+    if payload.get("status") != "accepted":
+        code = str(payload.get("reason_code") or "claim_rejected")
+        if code in {
+            "actor_not_registered",
+            "actor_required",
+            "actor_excluded",
+            "claim_owner_mismatch",
+            "claim_actor_mismatch",
+        }:
+            _raise_core_authority_rejection(
+                code=code,
+                goal_id=goal_id,
+                registered_agents=registered_agents,
+                command="claim",
+                actor=actor,
+                requested_owner=requested_owner,
+                todo=core_todo,
+                action="claim",
+            )
+        raise ValueError(str(payload.get("reason") or "Todo claim was rejected"))
+    mutation_authority = payload.get("mutation_authority")
+    if not isinstance(mutation_authority, Mapping):
+        raise RuntimeError("TypeScript Todo claim authority shape mismatch")
+    return dict(mutation_authority)
+
+
 def authorize_todo_lifecycle_mutation(
     *,
     registry_path: Path,
@@ -206,6 +266,15 @@ def authorize_todo_lifecycle_mutation(
     )
     requested_owner = normalize_todo_claimed_by(requested_claimed_by)
     effective_action = str(authority_action or command).strip().lower()
+    if command == "claim":
+        return _authorize_typescript_claim(
+            goal_id=goal_id,
+            todo=todo,
+            core_todo=core_todo,
+            registered_agents=registered_agents,
+            actor=normalized_actor,
+            requested_owner=requested_owner,
+        )
     try:
         core_action = TodoAction(command)
     except ValueError as exc:

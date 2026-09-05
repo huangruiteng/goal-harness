@@ -1546,6 +1546,7 @@ export async function fetchLarkGroupChats(appRef: string, query?: string) {
 
 export type LarkGoalConnection = {
   agent_id: string | null;
+  connection_id: string;
   app_label: string;
   app_ref: string;
   capture_scope: LarkCaptureScope;
@@ -1575,6 +1576,7 @@ const larkConnectionsSchema = z.object({
   ok: z.literal(true),
   connections: z.array(z.object({
     agent_id: z.string().nullable().default(null),
+    connection_id: z.string(),
     app_label: z.string(),
     app_ref: z.string(),
     capture_scope: z.enum(["addressed_only", "configured_chat_all"]).default("addressed_only"),
@@ -1648,9 +1650,10 @@ export async function connectLarkGoalTopic(options: {
   );
 }
 
-export async function disconnectLarkGoalTopic(goalId: string) {
+export async function disconnectLarkGoalTopic(goalId: string, connectionId: string) {
+  const params = new URLSearchParams({ goal_id: goalId, connection_id: connectionId });
   return goalChannelOperationSchema.parse(
-    await requestJson<unknown>(`/api/chat/lark/connections?goal_id=${encodeURIComponent(goalId)}`, {
+    await requestJson<unknown>(`/api/chat/lark/connections?${params.toString()}`, {
       method: "DELETE",
     }),
   );

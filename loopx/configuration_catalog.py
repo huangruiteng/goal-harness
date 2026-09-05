@@ -6,6 +6,28 @@ from typing import Any
 
 from .capabilities.configuration_ui import build_capability_configuration_catalog
 
+DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
+
+
+def build_configuration_capability_descriptors() -> list[dict[str, Any]]:
+    """Discover the same features as Goal settings without inventing Goal state.
+
+    Only static descriptor fields cross this boundary: no current values,
+    Goal-specific commands, or synthetic effective configuration.
+    """
+    catalog = build_goal_configuration_catalog(
+        goal_id="",
+        settings={},
+        feature_summary={},
+        default_multi_subagent_max_children=DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN,
+        explore_harness_profiles=(),
+    )
+    fields = ("feature_id", "display_name", "availability", "effect", "documentation")
+    return [
+        {key: feature[key] for key in fields if key in feature}
+        for feature in catalog["features"]
+    ]
+
 
 def _configure_command(
     goal_id: str,

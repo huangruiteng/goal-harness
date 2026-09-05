@@ -51,7 +51,6 @@ STATUS_FORBIDDEN_DEPENDENCY_PREFIXES = (
     "loopx.benchmark_adapters",
     "loopx.presentation",
 )
-STATUS_OUTWARD_DEPENDENCY_DEBT: set[tuple[str, str]] = set()
 
 
 def _module_name(path: Path) -> str:
@@ -319,7 +318,7 @@ def test_public_facade_compatibility_entries_have_contract_evidence() -> None:
     )
 
 
-def test_status_outward_dependency_debt_only_shrinks() -> None:
+def test_status_has_no_forbidden_outward_dependencies() -> None:
     outward_dependencies = {
         (_module_name(STATUS_MODULE), dependency)
         for dependency in _resolved_imports(STATUS_MODULE)
@@ -329,15 +328,9 @@ def test_status_outward_dependency_debt_only_shrinks() -> None:
         )
     }
 
-    unexpected = outward_dependencies - STATUS_OUTWARD_DEPENDENCY_DEBT
-    stale_debt = STATUS_OUTWARD_DEPENDENCY_DEBT - outward_dependencies
-    assert not unexpected, (
-        "loopx.status must not gain new benchmark-adapter or presentation dependencies; "
-        f"unexpected edges: {sorted(unexpected)}"
-    )
-    assert not stale_debt, (
-        "remove resolved loopx.status edges from STATUS_OUTWARD_DEPENDENCY_DEBT; "
-        f"stale entries: {sorted(stale_debt)}"
+    assert not outward_dependencies, (
+        "loopx.status must not depend on benchmark-adapter or presentation layers; "
+        f"unexpected edges: {sorted(outward_dependencies)}"
     )
 
 

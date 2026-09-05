@@ -34,7 +34,7 @@ decision path.
 
 The native domain alternative now separates Markdown location metadata while
 retaining archival semantics. Appendix C's Todo domain/projection decision
-records the compatibility boundary and the next file-first qualification plan;
+records the compatibility boundary and the next local qualification plan;
 the existing v0 capture and persisted heads are not silently migrated.
 
 This does not promote a provider or make the whole active-state Markdown file
@@ -944,6 +944,147 @@ index. Window size is a deployment parameter; 16 was measured.
 
 Until the owner accepts this amendment (Section 12 Q5), `retain_all_v0`
 remains in force and the Stage 3 verbs ship on it unchanged.
+
+### 7.2 Ten-day goals: local storage qualification target (proposal)
+
+A supported goal must remain executable for **at least ten elapsed days**, across
+process restarts, sleeping hosts, delayed receipts, and binary upgrades, without
+manual history truncation or a storage-driven goal reset. Ten days is a minimum
+qualification horizon, not a receipt expiry or a maximum goal lifetime. This
+amendment sets the product target; no current provider is declared qualified by
+this text, and `retain_all_v0` remains the shipped rule until a reviewed cutover.
+
+#### Workload and cost model
+
+Elapsed time alone is not a capacity specification. The initial local qualification
+matrix uses the following **proposed workloads**, not measured usage or promises:
+
+| Profile | Workload per goal | Qualification horizon |
+| --- | --- | --- |
+| Minimum continuity | Three continuously leased Todos, TTL 600 s, renewal every 300 s: 864 renewals/day before other writes | 10 days; 8,640 renewals plus lifecycle/receipt traffic |
+| Local design target | Eight registered agents; four concurrent writers on distinct Todos plus same-Todo races; up to 1,000 active Todo/lease/gate records; 10,000 committed transactions/day including renewals, receipts and capture | 10 days; 100,000 commits; 30-day / 300,000-commit headroom run |
+| Payload and backlog axes | Live projection 8 KiB, 64 KiB and 1 MiB; new event/receipt payload up to 4 KiB per commit; 5:1 reads/writes; 10 commits/s bursts for 60 s; 24 h of projection-consumer lag | Exercise each axis separately and the combined local target; count retries/conflicts separately from commits |
+
+Each fixture declares active versus archived records, serialized sizes, command
+mix, index size, and capture fan-out; a model Turn can cause several commits.
+Keep live-state size fixed when isolating history growth, then grow live state
+separately. No goal-wide unbounded list of completed Todos or receipts may be
+hidden inside the supposedly fixed live projection.
+
+For the current `FileAuthorityStore`, a fixed projection of P bytes retained in
+each of N transactions costs approximately P*N final history bytes and
+P*N*(N+1)/2 cumulative document-publication bytes, before head, event, receipt,
+and envelope overhead. Normal reads also decode and validate the full chain.
+With P=15 KiB, the renewal-only case gives about **534 GiB** of cumulative
+publication at day 10 and **4.69 TiB** at day 30. The former 380 MiB estimate was
+only N*P at day 30, not the cumulative rewrite of retained projections. These
+are analytical payload estimates, not physical SSD writes or measured latency;
+growing receipt indexes inside every projection can make the model worse.
+
+#### Preferred local direction and compatibility boundary
+
+Qualify an **embedded transactional store, with SQLite as the first candidate**,
+behind the existing TypeScript `AuthorityStore` owner. A local goal must not
+require a PostgreSQL service. The file-v0 provider remains a conformance/import
+baseline; no general-purpose ten-day promotion may rely on its full-history
+rewrite. SQLite is a design preference pending durability, dependency/package,
+Windows/macOS/Linux and supported Node-version qualification, not a new shipped
+provider id or default flip. A segmented file log remains the comparison option;
+PostgreSQL remains the independent shared-service path.
+
+A database swap alone is insufficient. The complete slice must:
+
+- Atomically publish current state, operation/digest uniqueness, original
+  receipts, ordered cursor, and any projection outbox entry. Use indexed
+  operation lookup and cursor paging. Preserve the existing ambiguous-commit,
+  CAS, lineage, and domain fencing semantics; storage never decides Todo policy.
+- Keep live head independent of total history. Use periodic verified checkpoints
+  plus committed state deltas or immutable state blocks; retain original receipts
+  outside the hot head. Bound both replay tail and index/root metadata. A head
+  containing every sealed-segment pointer is still unbounded, and scanning a
+  receipt-segment chain for old retries is not an indexed lookup.
+- Preserve the logical `scanCommitted` contract: it currently returns a full
+  projection for each transaction. Reconstruct the exact version from checkpoint
+  and deltas with bounded paging, or version the contract and migrate every
+  consumer explicitly. Do not silently remove historical projections. Existing
+  events have not been proven sufficient to reconstruct them; canonical state
+  deltas need independent equivalence checks.
+- Move the authority's growing in-head receipt index through an explicit versioned
+  migration, together with provider storage. Preserve request-digest conflict
+  detection and byte-equivalent original receipt fields after checkpointing,
+  restart, and later unrelated commits. Caching cannot be the correctness path.
+
+This is one local persistence slice with real CLI callers and consumer readback,
+not separate leaf-helper ports or a second semantic kernel. It includes the
+capture outbox and paginated archived-Todo/history reads needed by status/quota;
+other stores and raw artifacts are measured separately, not claimed fixed by it.
+
+#### Proposed acceptance budgets
+
+On a declared local SSD host, report OS/filesystem, CPU/RAM, Node/database versions,
+durability settings, sample count, p50/p95/p99, lock wait, RSS, database/WAL/archive
+size, and logical bytes written. Include cold CLI startup separately from warm
+store service time; never disable fsync/checkpoint safety to pass.
+
+For the 64 KiB live-state axis at 10,000 versus 100,000 commits:
+
+- Warm head load and indexed original-receipt read p95 <= 50 ms; durable commit
+  p95 <= 100 ms. History-growth p95 ratio <= 2 with the same live state and load.
+- Warm scan of 100 transactions p95 <= 250 ms; cold open plus first authoritative
+  read <= 2 s; bounded crash recovery <= 30 s. Full archive integrity audit is
+  separate and may be linear, but normal startup may not require it.
+- Storage work adds <= 200 ms p95 to a complete CLI mutation against the matched
+  10,000-commit baseline. Measure full status/quota latency too; do not hide a
+  history scan in a compatibility consumer or amortize process startup away.
+- At fixed live state and delta sizes, cumulative logical writes, retained bytes,
+  and recovery work must have declared bounds. From 10,000 to 100,000 commits,
+  cumulative bytes written must grow <= 15x, not the roughly 100x quadratic
+  rewrite; instrument checkpoint, index, WAL and compaction work. Stable-state
+  RSS must not scale with the number of historical transactions. Report the
+  1 MiB axis and 300,000-commit headroom separately; failures narrow the supported
+  profile rather than disappearing into averaged results.
+
+These thresholds are proposed engineering budgets, not current measurements.
+Review them against the first matched baseline before activation; do not relax
+correctness, silently change the workload, or advertise an unqualified horizon.
+
+#### Retention, recovery and delivery gates
+
+Ten-day operation does not authorize day-11 deletion. Keep operation identity,
+digest and original receipts for the goal lifetime under the initial policy,
+including at least the day-1 retry after day 10 and day 30. Physical compaction
+may remove redundant encodings only when the retained checkpoint/log/index can
+reconstruct every promised historical record. Cold archive must remain
+addressable and verified; unavailable proof fails closed, never as a fresh
+operation. Any later expiry requires a versioned retention contract and explicit
+outside-window response; neither a TTL nor a tombstone permits duplicate effects.
+
+Checkpoint/segment publication must be crash-safe with a durable manifest/root
+switch. Reclaim old bytes only after durable replacement and every registered
+consumer's persisted cursor or explicit full-resync decision; protect lagging
+projection outboxes, exports, and backups. Set byte/lag admission budgets and
+surface maintenance/backpressure before disk exhaustion. Admission must reserve
+recovery space; ENOSPC or an interrupted commit cannot erase proof or count as a
+successful write. Total audit storage may grow linearly with useful history;
+only the hot path and maintenance batches are bounded.
+
+Sleeping or restarting a host does not preserve an expired lease: resume must
+re-read authority and reacquire through normal epoch fencing. Continuity means
+the same durable goal resumes safely, not that a process or lease stays alive.
+
+Qualification has two separate exits: accelerated 100,000/300,000-commit tests
+prove volume, while an actual >=10-day synthetic-goal soak proves elapsed-time
+continuity. Exercise day-1 historical retries, duplicate/different-digest writes,
+concurrent CAS, daily reopen, host sleep, lease expiry, 24 h consumer lag, crashes
+around append/checkpoint/index publication, disk-full, backup/restore lineage,
+and a supported upgrade/rollback. Compare final state, receipts and cursor scan
+to an independent reference; no lost acknowledged commit or repeated effect is
+acceptable. Use disposable goals, never active user state. Compressed clocks do
+not qualify wall-clock endurance; publishing this RFC starts no soak or monitor.
+
+A code PR can land while soak evidence remains pending, with promotion held.
+Promotion requires both exits, explicit import/fencing/export rehearsal and
+maintainer review. Publish compact reproducible evidence, not raw private logs.
 
 ## 8. Local Mode Stays the Default; Shared Mode Is an Explicit Migration
 
@@ -1874,9 +2015,11 @@ it does not promote any provider or complete the Stage 2C promotion.
     transaction's duplicated projection only when the complete canonical head
     and every field required by replay, audit, parity, and migration remain
     reconstructable and the conformance matrix proves equivalence. Physical
-    policy is provider-specific: sealed create-only segments for file, a
-    qualified document/segment strategy for NoKV, and append rows with reviewed
-    indexing/partitioning for PostgreSQL. Each profile declares measured limits
+    policy is provider-specific: Section 7.2 prefers an embedded transactional
+    local store with segmented files as a comparison candidate; NoKV needs a
+    qualified document/segment strategy, and PostgreSQL needs append rows with
+    reviewed indexing/partitioning. Section 7.2 also owns the minimum ten-day
+    qualification gate; the earlier file-v0 proof is insufficient. Each profile declares measured limits
     and fails closed with `store_capacity_exhausted`; one file-size constant is
     not a cross-provider contract. Host renewals remain authority transactions
     because their rate drives every profile's retention envelope.*
@@ -2179,14 +2322,13 @@ write that cannot preserve the contract.
 
 ### Growth is a promotion prerequisite
 
-`retain_all_v0` in one document is quadratic: a 600 s TTL renewed every
-300 s with three active todos produces 864 transitions a day and 25,920 in a
-30-day month. At a 15 KiB complete head, cumulative rewritten payload alone is
-about 380 MiB before receipt and envelope overhead; final document size depends
-on the retained record layout and must be measured rather than inferred from
-that rewrite total. This rate is already enough to require provider-specific
-capacity, latency, response-size, and recovery tests. Retaining everything in
-one document is acceptable only for promotion bootstrap and bounded test goals.
+The minimum supported horizon is ten elapsed days. The workload, corrected
+whole-history cost model, local storage direction and qualification budgets are
+owned by [Section 7.2](#72-ten-day-goals-local-storage-qualification-target-proposal).
+File-v0 remains a bounded conformance/bootstrap profile; neither successful
+bootstrap nor a short microbenchmark proves long-goal capacity. First local
+promotion requires a qualified bounded-history hot path and elapsed-time soak,
+without waiting for PostgreSQL service readiness.
 
 ### Todo domain / projection decision (2026-09-05)
 
@@ -2245,9 +2387,17 @@ export and cleanup. Each slice must prove an end-to-end transaction, not merely
 another schema identifier consolidation. Native contract acceptance alone is
 not permission to bypass any promotion hold.
 
-Choose the file profile for the first bounded local qualification. PostgreSQL
-service/deployment work remains parallel; it is not a dependency of file
-promotion. NoKV remains independently gated by its own lineage and recovery
+The first replacement-first `claim` slice routes both the default Markdown
+writer and the promoted provider transaction through one TypeScript decision.
+Python's default path retains only locked commit and existing projection-
+compatibility duties. This closes duplicate claim policy; it neither promotes
+Markdown to authority nor replaces the remaining unified
+create/update/complete/archive transactions and projection outbox.
+
+Use file-v0 for bounded conformance and import rehearsal only. Start the
+Section 7.2 embedded-store slice alongside the provider-first Todo caller; both
+converge before long-goal local qualification and promotion. PostgreSQL
+service/deployment work remains parallel; it is not a local-promotion dependency. NoKV remains independently gated by its own lineage and recovery
 qualification. The shared authority owns decisions and receipts; providers own
 durable CAS/transactions, never a second Todo state machine.
 
@@ -2255,7 +2405,8 @@ durable CAS/transactions, never a second Todo state machine.
 
 | Lane | May start | Scope and exit condition | Dependency |
 | --- | --- | --- | --- |
+| L. Long-goal local persistence | Now, alongside the Todo caller | Section 7.2: embedded-store candidate, bounded live head and receipt index, historical scan compatibility, crash-safe checkpoints, real CLI readback, accelerated capacity and >=10-day soak. | Reuses the TS authority owner; required for local long-goal promotion, independent of P. |
 | P. PostgreSQL provider plane | Now, from current `main` | Keep the existing `AuthorityStore` contract; finish schema migration/install ownership, authenticated service and tenant authorization, restore-incarnation rotation, pool/cancellation/failover behavior, and reviewed indexes, partitioning, retention, and measured capacity. Live PostgreSQL conformance remains mandatory. | Does not depend on #3870 and must not stack on its branch. This lane alone creates no runtime caller or promotion claim. |
 | C. Canonical transaction capture | In implementation, based on #3870 | Transaction-bound outbox capture now targets the one `coordination.runtime_shadow` lineage and retains complete versioned Todo/lease records. Finish sustained mixed-writer parity, explicit-clear/omission coverage, and event-only Todo recovery evidence. | Can run in parallel with P, but both C and the selected provider profile must finish before parity or promotion integration. |
-| I. Binding and qualification integration | After C and the selected profile's qualification | Bind one exact provider lineage, field manifest, source revision, digest, and cursor; qualify explicit v0 import, ordering/archival/consumer parity, and recovery/capacity without consulting legacy state for missing fields. | File does not wait for P. PostgreSQL joins only when its own P holds pass. |
-| F. Promotion and cleanup | After I and explicit maintainer approval | Complete provider-first CLI routing, the lock-owning promotion orchestrator, compatibility projection outbox, post-promotion fenced export/rollback, then delete duplicate reference aggregates and flip the reviewed stage/hold declarations. | Each profile must pass C, I, and its own provider qualification; PostgreSQL additionally requires P. |
+| I. Binding and qualification integration | After C and the selected profile's qualification | Bind one exact provider lineage, field manifest, source revision, digest, and cursor; qualify explicit v0 import, ordering/archival/consumer parity, and recovery/capacity without consulting legacy state for missing fields. | Long-goal local integration requires L and does not wait for P. PostgreSQL joins only when its own P holds pass. |
+| F. Promotion and cleanup | After I and explicit maintainer approval | Complete provider-first CLI routing, the lock-owning promotion orchestrator, compatibility projection outbox, post-promotion fenced export/rollback, then delete duplicate reference aggregates and flip the reviewed stage/hold declarations. | Each profile must pass C, I, and its own provider qualification; long-goal local promotion additionally requires L, and PostgreSQL requires P. |

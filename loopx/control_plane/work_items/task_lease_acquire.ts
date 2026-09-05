@@ -22,9 +22,10 @@ import {
   decodeLocalAuthorityShadowBinding,
   type LocalAuthorityShadowBinding,
 } from "../coordination/local_authority_shadow_outbox.ts";
+import { TASK_LEASE_ACQUIRE_REQUEST_SCHEMA } from "../coordination/coordination_state_contract.generated.ts";
 
 export const TASK_LEASE_ACQUIRE_REQUEST_SCHEMA_VERSION =
-  "loopx_task_lease_acquire_native_v0";
+  TASK_LEASE_ACQUIRE_REQUEST_SCHEMA;
 export const TASK_LEASE_SCHEMA_VERSION = "task_lease_v0";
 
 const DEFAULT_TTL_SECONDS = 45 * 60;

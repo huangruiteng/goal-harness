@@ -748,6 +748,113 @@ receipt-per-object 替代方案被全面支配：每笔迁移多付一次对象�
 在 owner 接受本修正案（§12 Q5）之前，`retain_all_v0` 继续生效，Stage 3 动词原样
 运行其上。
 
+### 7.2 十天 Goal：本地存储资格化目标（提案）
+
+受支持的 goal 必须能**至少持续十个自然日**，跨进程重启、主机休眠、迟到回执和
+二进制升级继续执行，不依赖人工截断历史或因存储问题重建 goal。十天是最低资格化
+周期，不是 receipt 过期时间或 goal 寿命上限。本修订设定产品目标，不宣称当前任何
+provider 已通过；经评审切换前，已交付规则仍是 `retain_all_v0`。
+
+#### 工作负载与成本模型
+
+只规定时长不足以定义容量。首轮本地资格化采用以下**提议负载**，不是实测用量或承诺：
+
+| Profile | 每个 goal 的负载 | 资格化周期 |
+| --- | --- | --- |
+| 最低连续性 | 三个持续持有 lease 的 Todo，TTL 600 s、每 300 s renew：其他写入之外每天 864 次 renew | 10 天；8,640 次 renew 加生命周期／回执写入 |
+| 本地设计目标 | 八个注册 agent；四个并发 writer 操作不同 Todo，另加同 Todo 竞争；最多 1,000 个活跃 Todo/lease/gate record；每天 10,000 次已提交 transaction，含 renew、receipt 和 capture | 10 天共 100,000 次 commit；另跑 30 天／300,000 次余量验证 |
+| Payload 与积压维度 | live projection 分别为 8 KiB、64 KiB、1 MiB；每次新增 event/receipt payload 至多 4 KiB；读写比 5:1；每秒 10 次 commit、持续 60 s 的突发；projection consumer 落后 24 h | 分别验证各维度及组合本地目标；retry/conflict 与 commit 分开计数 |
+
+每个 fixture 声明活跃／归档记录、序列化大小、命令比例、索引大小和 capture 放大倍数；
+一个模型 Turn 可能产生多次 commit。验证历史增长时固定 live state，之后单独增加
+live state。不能把所有已完成 Todo 或 receipt 的无界列表藏在所谓固定的 live projection。
+
+当前 `FileAuthorityStore` 每笔保留 P 字节 projection，N 笔约产生 P*N 最终历史字节，
+累计文档发布量约 P*N*(N+1)/2，尚未计 head、event、receipt 和 envelope。普通读取还会
+解码、验证完整链。P=15 KiB 时，仅 renew 的例子在第 10 天累计发布约 **534 GiB**，
+第 30 天约 **4.69 TiB**。旧文中的 380 MiB 只算了第 30 天的 N*P，并非保留历次
+projection 后的累计重写。这是 payload 解析估算，不是 SSD 物理写入或实测延迟；
+若每个 projection 自身还包含不断增长的 receipt index，成本可能更高。
+
+#### 本地优先方向与兼容边界
+
+在既有 TypeScript `AuthorityStore` owner 后资格化**嵌入式事务存储，首选候选为
+SQLite**。本地 goal 不应依赖 PostgreSQL 服务。file-v0 保留作 conformance/import
+基线，通用十天 goal 晋升不能依靠其全历史重写。SQLite 是待验证耐久性、依赖／打包、
+Windows/macOS/Linux 和受支持 Node 版本后的设计偏好，不是已交付 provider id 或默认
+切换。分段文件日志作为比较候选；PostgreSQL 继续走独立的共享服务路线。
+
+只替换数据库不够。完整切片必须：
+
+- 原子发布 current state、operation/digest 唯一性、原始 receipt、有序 cursor，以及
+  projection outbox entry。operation lookup 与 cursor 分页走索引；保留 ambiguous
+  commit、CAS、lineage、domain fencing 语义，存储层不决策 Todo policy。
+- live head 不随总历史增长。使用周期性校验 checkpoint 加 committed state delta 或
+  immutable state block；原始 receipt 移出 hot head。replay tail 与 index/root metadata
+  都要有界。head 保存全部封存段 pointer 仍然无界，扫描段链也不等于索引查询。
+- 保留 `scanCommitted` 逻辑合同：它目前每笔返回完整 projection。通过 checkpoint/delta
+  有界分页重建精确版本，或显式升版并迁移每个 consumer；不能静默删除历史 projection。
+  尚未证明现有 event 足以重建，因此 canonical state delta 需要独立等价验证。
+- authority 的 in-head receipt index 与 provider storage 一起显式升版迁移。checkpoint、
+  restart 和后续无关 commit 后，request-digest 冲突检测与原始 receipt 字段仍逐字节等价。
+  cache 不能成为正确性的唯一来源。
+
+这是包含真实 CLI caller 和 consumer readback 的一个本地持久化切片，不是零散 helper
+迁移或第二个语义 kernel。它覆盖 capture outbox、status/quota 所需归档 Todo/history 分页；
+其他存储和原始 artifact 单独计量，不宣称随本切片一起解决。
+
+#### 提议验收预算
+
+在声明配置的本地 SSD 主机上，报告 OS/filesystem、CPU/RAM、Node/database 版本、耐久
+配置、样本数、p50/p95/p99、lock wait、RSS、database/WAL/archive 大小与逻辑写入字节。
+冷 CLI 启动与 warm store service time 分开；不得关闭 fsync/checkpoint 安全性换成绩。
+
+64 KiB live state 下，对比 10,000 与 100,000 次历史 commit：
+
+- warm head load 和索引原始 receipt read 的 p95 <= 50 ms；durable commit p95 <= 100 ms。
+  固定 live state 与负载时，历史增长的 p95 比值 <= 2。
+- warm scan 100 笔 p95 <= 250 ms；cold open 加首次权威读取 <= 2 s；有界 crash recovery
+  <= 30 s。全量 archive integrity audit 可线性增长，但普通启动不能依赖它。
+- 相对匹配的 10,000 次基线，完整 CLI mutation 的存储成本增量 p95 <= 200 ms。
+  同时报告完整 status/quota 延迟；不得将历史扫描藏进 compatibility consumer，也不能
+  用进程启动摊销掩盖成本。
+- 固定 live state/delta 大小时，累计逻辑写入、保留字节、恢复工作须有明确上界。
+  从 10,000 到 100,000 笔累计写入增长 <= 15 倍，不能呈平方重写的约 100 倍；纳入
+  checkpoint、index、WAL、compaction 计量。稳定态 RSS 不得随历史交易数增长。
+  1 MiB 与 300,000 次余量维度单独报告；失败应缩小支持范围，不能藏在平均值里。
+
+以上是提议工程预算，不是当前实测。在启用前依据首轮匹配基线评审，不得放松正确性、
+静默改变负载或宣称未资格化的连续运行周期。
+
+#### 保留、恢复与交付门禁
+
+十天执行不授权第十一天删历史。初始策略在 goal 全生命周期保留 operation identity、
+digest 和原始 receipt，至少覆盖第 10／30 天重放第 1 天操作。只有保留的 checkpoint/log/
+index 能重建全部承诺历史时，物理 compaction 才能删除冗余编码。cold archive 必须可寻址
+且可验证；证明不可用时 fail closed，不能当作新操作。后续 expiry 必须有版本化 retention
+合同及窗口外响应；TTL 或 tombstone 都不能授权重复 effect。
+
+checkpoint/segment 发布需支持崩溃恢复并耐久切换 manifest/root。仅在替代数据耐久且每个
+注册 consumer 的持久 cursor 已推进或显式选择 full-resync 后回收旧字节；保护落后的
+projection outbox、export 和 backup。设置 byte/lag 准入预算，在磁盘耗尽前暴露 maintenance/
+backpressure，并为恢复预留空间；ENOSPC 或提交中断不能抹除证明或算作成功写入。
+总审计存储可以随有用历史线性增长；有界的是热路径和维护批次。
+
+主机休眠或重启不能保留已过期 lease；恢复时必须重读 authority，并经正常 epoch fence
+重新获取权限。连续性是同一个耐久 goal 安全恢复，不是进程或 lease 永远存活。
+
+资格化有两个独立出口：加速的 100,000/300,000 次测试证明容量，真实 **>=10 天**合成
+Goal soak 证明自然时间连续性。覆盖第 1 天历史 retry、同 id 同／异 digest、并发 CAS、
+每日 reopen、休眠、lease expiry、24 h consumer lag、append/checkpoint/index 发布前后
+crash、disk-full、backup/restore lineage，以及一次受支持 upgrade/rollback。与独立参考
+对比 final state、receipt、cursor scan；不接受丢失已确认 commit 或重复 effect。只用
+一次性 goal，不碰活跃用户状态。压缩时钟不证明自然时间耐久性；发布本 RFC 不启动 soak
+或 monitor。
+
+代码 PR 可在 soak 证据待补时合入，但 promotion 继续 hold。两个出口、显式 import/
+fencing/export 演练与 maintainer review 都通过才可晋升。发布紧凑可复现证据，不发布
+原始私有日志。
+
 ## 8. 默认本地模式不变，共享模式必须显式迁移
 
 ### 默认本地模式
@@ -1498,9 +1605,10 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
     receipt、segment 或 row-chain integrity、确定性 scan 与 recovery readback 始终可用。
     只有在完整 canonical head 仍可读取，且 replay、audit、parity、migration 所需字段
     全部可重建，并由 conformance matrix 证明等价时，旧 transaction 的重复 projection
-    才可替换为 digest。物理策略按 provider 实现：file 使用 create-only sealed segment；
-    NoKV 使用经过验证的 document/segment 策略；PostgreSQL 使用 append row 和经评审的
-    index/partition。每个 profile 都声明实测上限，并以 `store_capacity_exhausted` fail
+    才可替换为 digest。物理策略按 provider 实现：第 7.2 节优先嵌入式事务本地存储，
+    分段文件作为比较候选；NoKV 使用经过验证的 document/segment 策略；PostgreSQL
+    使用 append row 和经评审的 index/partition。最低十天资格门也由第 7.2 节维护，
+    先前 file-v0 证明不足以满足。每个 profile 都声明实测上限，并以 `store_capacity_exhausted` fail
     closed；单一 file size 常量不是跨 provider 合同。Host renewal 仍必须是 authority
     transaction，因为它的频率决定所有 profile 的 retention envelope。*
 13. Python 参考执行器（`executor.py`、`file_provider.py`、`head.py`、
@@ -1733,12 +1841,10 @@ integrity chain、确定性 scan 与 recovery readback。物理 profile 可以�
 
 ### 增长是晋升前置
 
-单文档 `retain_all_v0` 是二次方增长：TTL 600 秒、每 300 秒续约、三个活跃 todo 约
-产生每天 864 次、30 天 25,920 次 transition。按 15 KiB 完整 head 估算，仅累计重写
-payload 已约 380 MiB，尚未计 receipt 与 envelope overhead；最终文档大小取决于 retained
-record layout，不能由重写总量直接推断。这一频率已经要求逐 provider 验证 capacity、
-latency、response size 与 recovery。单文档全量保留只适用于 promotion bootstrap 与
-有界 test goal。
+最低支持周期是十个自然日。负载、修正后的全历史成本模型、本地存储方向和资格化预算
+统一由[第 7.2 节](#72-十天-goal本地存储资格化目标提案)维护。file-v0 仍是有界
+conformance/bootstrap profile；bootstrap 成功或短时微实验都不证明长程容量。本地首次
+晋升必须具备已资格化的历史有界热路径和自然时间 soak，不等待 PostgreSQL service 就绪。
 
 ### Todo domain / projection 决策（2026-09-05）
 
@@ -1787,8 +1893,14 @@ kernel 的近期顺序是：（1）真实 provider-first Todo lifecycle caller�
 transaction，不能只做另一轮 schema identifier 统一。接受 native contract 不等于
 可以绕过任何 promotion hold。
 
-第一轮有界本地资格化选择 file profile。PostgreSQL service/deployment 工作继续并行，
-不成为 file promotion 的依赖；NoKV 独立通过自己的 lineage/recovery 资格门禁。
+`claim` 的第一个 replacement-first 切片把默认 Markdown writer 与 promotion 后的
+provider transaction 接到同一个 TS decision；Python 默认路径只保留持锁提交和既有
+投影兼容职责。它关闭 claim policy 的双实现，但不把 Markdown 提升为 authority，
+也不替代剩余 create/update/complete/archive 的统一 transaction 与 projection outbox。
+
+file-v0 只用于有界 conformance 与 import 演练。第 7.2 节嵌入式存储切片与 provider-first
+Todo caller 同时推进，在长程本地资格化与晋升前汇合。PostgreSQL service/deployment
+继续并行，不成为本地晋升的依赖；NoKV 独立通过自己的 lineage/recovery 资格门禁。
 shared authority 持有 decision 与 receipt；provider 只持有 durable CAS/transaction，
 不再实现第二份 Todo 状态机。
 
@@ -1796,7 +1908,8 @@ shared authority 持有 decision 与 receipt；provider 只持有 durable CAS/tr
 
 | Lane | 何时开始 | 范围与退出条件 | 依赖 |
 | --- | --- | --- | --- |
+| L. 长程本地持久化 | 现在，与 Todo caller 同期 | 第 7.2 节：嵌入式候选、有界 live head/receipt index、历史 scan 兼容、crash-safe checkpoint、真实 CLI readback、加速容量与 >=10 天 soak。 | 复用 TS authority owner；本地长程晋升必需，不依赖 P。 |
 | P. PostgreSQL provider plane | 现在，从当前 `main` 开始 | 保持既有 `AuthorityStore` 合同；完成 schema migration/install ownership、authenticated service 与 tenant authorization、restore-incarnation rotation、pool/cancellation/failover 行为，以及经评审的 index、partition、retention 与实测 capacity。真实 PostgreSQL conformance 始终是强制门禁。 | 不依赖 #3870，也不得叠在其分支上。仅完成本 lane 不产生 runtime caller 或 promotion 声明。 |
 | C. Canonical transaction capture | 实现中，基于 #3870 | transaction-bound outbox 已指向唯一 `coordination.runtime_shadow` lineage，并保留完整带版本的 Todo/lease record；继续完成 sustained mixed-writer parity、explicit-clear/omission 与 event-only Todo recovery 证据。 | 可与 P 并行；但 C 与选定 provider profile 都完成后，才能进入 parity 或 promotion 集成。 |
-| I. Binding 与资格集成 | C 与选定 profile 的资格化完成后 | 绑定一个精确 provider lineage、field manifest、source revision、digest 与 cursor；资格化显式 v0 import、排序/归档/consumer parity 与 recovery/capacity；缺字段时不得查询 legacy state 补齐。 | file 不等待 P；PostgreSQL 仅在自己的 P hold 全通过后汇合。 |
-| F. Promotion 与清理 | I 完成且 maintainer 显式批准后 | 完成 provider-first CLI routing、持锁 promotion orchestrator、兼容投影 outbox、晋升后 fenced export/rollback；随后删除重复 reference aggregate，并翻转经评审的 stage/hold 声明。 | 每个 profile 必须通过 C、I 与自身 provider 资格化；PostgreSQL 还必须通过 P。 |
+| I. Binding 与资格集成 | C 与选定 profile 的资格化完成后 | 绑定一个精确 provider lineage、field manifest、source revision、digest 与 cursor；资格化显式 v0 import、排序/归档/consumer parity 与 recovery/capacity；缺字段时不得查询 legacy state 补齐。 | 长程本地集成需要 L，不等待 P；PostgreSQL 仅在自己的 P hold 全通过后汇合。 |
+| F. Promotion 与清理 | I 完成且 maintainer 显式批准后 | 完成 provider-first CLI routing、持锁 promotion orchestrator、兼容投影 outbox、晋升后 fenced export/rollback；随后删除重复 reference aggregate，并翻转经评审的 stage/hold 声明。 | 每个 profile 必须通过 C、I 与自身 provider 资格化；长程本地晋升还需 L，PostgreSQL 还需 P。 |

@@ -666,19 +666,21 @@ python3 -m pytest tests/test_smoke_suite.py \
   --junitxml smoke-suite.xml
 ```
 
-The required Python test workflow keeps `tests/**`, `canary/**`,
-`control_plane/**`, `domain_packs/**`, and `presentation/**` Ruff-clean. It also
-enforces an initial 19.6% package coverage floor.
-The floor is intentionally a regression guard, not a claim that 19.6% is
-sufficient; raise it as durable behavior moves from subprocess smokes into
-focused tests. An architecture test also prevents new control-plane dependencies
-on presentation, CLI, capability, or benchmark-adapter layers while preserving
-one explicit quota-Markdown migration debt edge. Existing source-wide lint debt
-is characterized separately. Strict mypy checking covers twelve characterized
-kernel and runtime contracts and should expand only as each next boundary
-becomes clean;
-expand the protected namespace list only after a bounded cleanup, rather than
-mass-fixing unrelated code merely to make a broad gate green.
+The required [Python test workflow](../../.github/workflows/python-tests.yml)
+owns the Ruff namespace selection and package coverage floor. The floor is a
+regression guard, not a claim of sufficient coverage; raise it as durable
+behavior moves from subprocess smokes into focused tests.
+
+[Architecture tests](../../tests/architecture/test_control_plane_import_boundaries.py)
+reject outward control-plane dependencies and forbidden status dependencies
+without migration exceptions, and protect presentation ownership of quota
+Markdown. See the [dependency policy](../architecture.md#current-dependency-budget)
+for the boundary rationale. Existing source-wide lint debt is characterized
+separately. Strict mypy scope is the `[tool.mypy].files` list in
+[`pyproject.toml`](../../pyproject.toml); use `python -m mypy` to check that exact
+scope. Expand each protected namespace only after a bounded cleanup rather
+than duplicating changing file counts or mass-fixing unrelated code to make a
+broad gate green.
 
 If the source checkout has optional frontend dependencies installed, dashboard
 readiness can be included in the same canary. If a release snapshot omits the

@@ -16,9 +16,10 @@ from typing import Any
 
 from ..todos.todo_summary import canonical_todo_read_record
 from .coordination_state_contract import TODO_CANONICAL_READ_RECORD_FIELDS
+from .coordination_state_contract_generated import LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA
 
 
-LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA_V0 = "loopx_local_authority_shadow_projection_v0"
+LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA_V0 = LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA
 TODO_PARTITION = "todos"
 LEASE_PARTITION = "leases"
 PARTITIONS: tuple[str, ...] = (TODO_PARTITION, LEASE_PARTITION)

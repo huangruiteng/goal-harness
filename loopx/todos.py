@@ -125,6 +125,7 @@ from .control_plane.coordination.local_authority import (
     local_authority_is_promoted,
     read_canonical_todos_if_promoted,
 )
+from .control_plane.todos.provider_compatibility_edit import edit_canonical_todo_if_promoted
 from .control_plane.todos.handoff_mode import (
     enter_added_todo_ownership_handoff_gate,
     enter_todo_ownership_handoff_gate,
@@ -1102,6 +1103,27 @@ def update_goal_todo(
         )
         if canonical_claim is not None:
             return canonical_claim
+    # A narrow compatibility editor is admitted through provider CAS. All
+    # other legacy writes still encounter the existing promotion fence.
+    if not claim_only and (text is not None or note is not None) and not any((
+        monitor_metadata,
+        goal_bound, clear_blocks_agent, clear_excluded_agents, global_gate,
+        clear_global_gate, clear_resume_when, clear_claim, authority_reason,
+    )) and all(value is None for value in (
+        status, evidence, reason, task_class, action_kind, task_domain,
+        task_repository, continuation_policy, required_write_scopes,
+        required_capabilities, target_capabilities, explore_result_node_refs,
+        decision_scope, required_decision_scopes, claimed_by, bound_agent,
+        blocks_agent, excluded_agents, unblocks_todo_id, successor_todo_ids,
+        resume_when, no_followup, authority_reason,
+    )):
+        canonical_edit = edit_canonical_todo_if_promoted(
+            registry_path=registry_path, runtime_root=shadow_runtime_root,
+            goal_id=goal_id, todo_id=normalize_todo_id(todo_id) or todo_id,
+            actor_agent_id=agent_id, role=role, text=text, note=note, dry_run=dry_run,
+        )
+        if canonical_edit is not None:
+            return canonical_edit
     resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,

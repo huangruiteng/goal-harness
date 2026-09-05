@@ -17,11 +17,11 @@ from ..effect_runtime import effect_runtime_result
 from ...file_lock import exclusive_file_lock
 from ...history import load_registry
 from ...paths import resolve_runtime_root
-
-
-LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA = (
-    "loopx_legacy_coordination_write_check_request_v0"
+from .coordination_state_contract_generated import (
+    LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
 )
+
+
 LEGACY_COORDINATION_WRITE_CHECK_METHOD = (
     "coordination.local_authority.legacy_write_check"
 )

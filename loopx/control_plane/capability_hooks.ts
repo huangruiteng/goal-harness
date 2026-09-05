@@ -1,5 +1,16 @@
 import type { JsonObject } from "./effect_program.ts";
 import {
+  CAPABILITY_HOOK_INTENT_SCHEMA,
+  CAPABILITY_HOOK_INTERACTION_RESULT_SCHEMA,
+  CAPABILITY_HOOK_POST_WRITEBACK_INPUT_SCHEMA,
+  CAPABILITY_HOOK_POST_WRITEBACK_RECEIPT_SCHEMA,
+  CAPABILITY_HOOK_POST_WRITEBACK_REGISTRATION_SCHEMA,
+  CAPABILITY_HOOK_POST_WRITEBACK_RESULT_SCHEMA,
+  CAPABILITY_HOOK_REGISTRATION_SCHEMA,
+  CAPABILITY_HOOK_TURN_START_REGISTRATION_SCHEMA,
+  CAPABILITY_HOOK_TURN_START_RESULT_SCHEMA,
+} from "./coordination/coordination_state_contract.generated.ts";
+import {
   requireBoolean,
   requireInteger,
   requireJsonObject as requiredObject,
@@ -10,22 +21,22 @@ import { projectRepositoryDeliveryGate } from "./work_items/repository_delivery.
 import { projectPendingCapabilityIntent } from "./work_items/pending_capability_intent.ts";
 
 export const CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION =
-  "loopx_capability_hook_registration_v0";
+  CAPABILITY_HOOK_REGISTRATION_SCHEMA;
 export const INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION =
-  "loopx_interaction_projection_hook_result_v0";
+  CAPABILITY_HOOK_INTERACTION_RESULT_SCHEMA;
 export const TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION =
-  "loopx_turn_start_capability_hook_registration_v1";
+  CAPABILITY_HOOK_TURN_START_REGISTRATION_SCHEMA;
 export const TURN_START_HOOK_RESULT_SCHEMA_VERSION =
-  "loopx_turn_start_capability_hook_result_v0";
+  CAPABILITY_HOOK_TURN_START_RESULT_SCHEMA;
 export const POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION =
-  "loopx_post_writeback_capability_hook_registration_v0";
+  CAPABILITY_HOOK_POST_WRITEBACK_REGISTRATION_SCHEMA;
 export const POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION =
-  "loopx_post_writeback_capability_hook_input_v0";
+  CAPABILITY_HOOK_POST_WRITEBACK_INPUT_SCHEMA;
 export const POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION =
-  "loopx_post_writeback_capability_hook_result_v0";
+  CAPABILITY_HOOK_POST_WRITEBACK_RESULT_SCHEMA;
 export const POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION =
-  "loopx_post_writeback_capability_hook_receipt_v0";
-export const CAPABILITY_INTENT_SCHEMA_VERSION = "loopx_capability_intent_v0";
+  CAPABILITY_HOOK_POST_WRITEBACK_RECEIPT_SCHEMA;
+export const CAPABILITY_INTENT_SCHEMA_VERSION = CAPABILITY_HOOK_INTENT_SCHEMA;
 
 const REGISTRATION_FIELDS = new Set([
   "schema_version",

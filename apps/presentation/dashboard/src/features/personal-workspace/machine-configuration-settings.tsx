@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Code2, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { Check, Code2, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import {
   applyMachineConfiguration,
@@ -18,15 +18,11 @@ import {
 import { projectEditableCapabilityConfiguration } from "../../data/capability-configuration";
 import { CapabilityConfigurationFields } from "./capability-configuration-fields";
 import { localizeCapability, localizedCapabilityFieldCopy } from "./capability-localization";
-import { CapabilityCatalogNavigation, CapabilityDetailHeader } from "./capability-workbench";
+import { canEditCapability, CapabilityCatalogNavigation, CapabilityConfigurationSummary, CapabilityDetailHeader, CapabilityEditorStatus, CapabilityEffectiveSource } from "./capability-workbench";
 import { useWorkspaceI18n } from "./i18n";
 
 type CapabilityDescriptor = CapabilityConfigurationCatalog["capabilities"][number];
 type EditorMode = "guided" | "json";
-
-function formattedValue(value: Record<string, unknown> | undefined) {
-  return value ? JSON.stringify(value, null, 2) : "—";
-}
 
 function configurationObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -99,19 +95,14 @@ export function MachineConfigurationSettings() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const capabilities = inspection?.capability_catalog.capabilities.filter(
-    (capability) => capability.available_scopes.includes("machine"),
-  ) ?? [];
+  const capabilities = inspection?.capability_catalog.capabilities ?? [];
   const selectedRaw = capabilities.find(
     (capability) => capability.capability_id === selectedCapabilityId,
   ) ?? capabilities[0];
   const selected = selectedRaw ? localizeCapability(selectedRaw, locale) : undefined;
   const selectedCurrent = currentConfiguration(inspection, selected);
   const configured = Boolean(selected?.machine_namespace && selectedCurrent);
-  const editorAvailable = Boolean(
-    selected?.configuration_editor.editable
-    && selected.configuration_editor.writable_scopes.includes("machine"),
-  );
+  const editorAvailable = Boolean(selected && canEditCapability(selected, "machine"));
   const parsedJsonDraft = useMemo(() => parseJsonObject(jsonDraft), [jsonDraft]);
   const desiredConfiguration = selected
     ? editorMode === "json"
@@ -197,7 +188,7 @@ export function MachineConfigurationSettings() {
   }
 
   async function createPreview() {
-    if (!selected?.machine_namespace || !desiredConfiguration || !editorValid || busy) return;
+    if (!editorAvailable || !selected?.machine_namespace || !desiredConfiguration || !editorValid || busy) return;
     setBusy("preview");
     setError(null);
     setNotice(null);
@@ -212,7 +203,7 @@ export function MachineConfigurationSettings() {
   }
 
   async function createRemovalPreview() {
-    if (!selected?.machine_namespace || !configured || busy) return;
+    if (!editorAvailable || !selected?.machine_namespace || !configured || busy) return;
     setBusy("preview");
     setError(null);
     setNotice(null);
@@ -227,7 +218,7 @@ export function MachineConfigurationSettings() {
   }
 
   async function applyPreview() {
-    if (!selected?.machine_namespace || !preview || busy || (previewOperation === "upsert" && !desiredConfiguration)) return;
+    if (!editorAvailable || !selected?.machine_namespace || !preview || busy || (previewOperation === "upsert" && !desiredConfiguration)) return;
     setBusy("apply");
     setError(null);
     const operation = previewOperation;
@@ -304,23 +295,11 @@ export function MachineConfigurationSettings() {
         <article className="personal-capability-detail">
           <CapabilityDetailHeader capability={selectedRaw} locale={locale} />
 
-          <div className="personal-capability-value-grid">
-            <section><strong>{t("machine.currentValue")}</strong><pre>{formattedValue(selectedCurrent)}</pre></section>
-            <section><strong>{t("capabilities.defaultValue")}</strong><pre>{formattedValue(selected.default)}</pre></section>
-          </div>
-
-          <p className="personal-capability-effective-source">
-            <ShieldCheck aria-hidden size={15} />
-            <span><strong>{t("capabilities.effectiveSource")}</strong>{configured ? t("capabilities.source.machine_default") : t("capabilities.source.capability_default")}</span>
-          </p>
-
-          <section className={`personal-capability-editor-status ${editorAvailable ? "is-preview" : "is-read-only"}`}>
-            {editorAvailable ? <ShieldCheck aria-hidden size={18} /> : <AlertTriangle aria-hidden size={18} />}
-            <div>
-              <strong>{editorAvailable ? t("capabilities.editorPrepared") : t("machine.editorUnavailable")}</strong>
-              <p>{editorAvailable ? t("machine.revisionLockedReady") : t("machine.editorUnavailableDescription")}</p>
-            </div>
-          </section>
+          {selected.available_scopes.includes("machine") ? <CapabilityEffectiveSource
+            source={configured ? "machine_default" : "capability_default"} t={t}
+          /> : null}
+          <CapabilityEditorStatus available={editorAvailable} t={t} description={!selected.available_scopes.includes("machine") ? t("machine.goalOnly")
+              : t("machine.editorUnavailableDescription")} />
 
           {selected.capability_id === "periodic_report" ? (
             <section className="personal-capability-behavior-note">
@@ -329,7 +308,7 @@ export function MachineConfigurationSettings() {
             </section>
           ) : null}
 
-          <div className="personal-capability-editor-mode">
+          {editorAvailable ? <><div className="personal-capability-editor-mode">
             <span>{t("machine.editorMode")}</span>
             <div role="group" aria-label={t("machine.editorMode")}>
               <button aria-pressed={editorMode === "guided"} disabled={!editorAvailable} onClick={() => changeMode("guided")} type="button">{t("machine.visualEditor")}</button>
@@ -350,7 +329,7 @@ export function MachineConfigurationSettings() {
               <small id="machine-configuration-json-help">{t("machine.jsonConfigurationHelp")}</small>
               {!parsedJsonDraft ? <span className="personal-machine-validation" role="alert">{t("machine.jsonInvalid")}</span> : null}
             </label>
-          )}
+          )}</> : null}
 
           {error ? <p className="personal-machine-error" role="alert">{error}</p> : null}
           {notice ? <p className="personal-machine-notice" role="status" aria-live="polite"><Check aria-hidden size={16} />{notice}</p> : null}
@@ -377,11 +356,15 @@ export function MachineConfigurationSettings() {
             </section>
           ) : null}
 
-          <footer className="personal-capability-actions">
+          {editorAvailable ? <footer className="personal-capability-actions">
             {configured ? <button className="is-danger" disabled={Boolean(busy)} onClick={() => void createRemovalPreview()} type="button"><Trash2 aria-hidden size={15} />{t("machine.previewRemoval")}</button> : null}
             <button disabled={Boolean(busy) || !editorValid} onClick={() => void createPreview()} type="button">{busy === "preview" ? t("common.loading") : t("machine.previewChanges")}</button>
             <button className="is-primary" disabled={Boolean(busy) || !preview} onClick={() => void applyPreview()} type="button">{busy === "apply" ? t("common.loading") : t("machine.applyPreview")}</button>
-          </footer>
+          </footer> : null}
+          {selected.available_scopes.includes("machine") ? <CapabilityConfigurationSummary key={selected.capability_id}
+            values={[{ label: t("machine.currentValue"), value: selectedCurrent }, { label: t("capabilities.defaultValue"), value: selected.default }]}
+            t={t}
+          /> : null}
         </article>
       </div>
     </section>

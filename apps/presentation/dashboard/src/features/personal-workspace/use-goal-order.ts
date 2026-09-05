@@ -1,0 +1,71 @@
+import { useRef, useState, type PointerEvent } from "react";
+import { decodeGoalOrder, goalOrderStorageKey, moveGoal, orderedGoals } from "./goal-order";
+import type { WorkspaceGoal } from "./personal-workspace-model";
+
+// The sidebar is keyed by source, so neither gestures nor preferences cross machines.
+export function useGoalOrder(goals: WorkspaceGoal[], source: string) {
+  const key = goalOrderStorageKey(source);
+  const [order, setOrder] = useState(() => {
+    try { return decodeGoalOrder(localStorage.getItem(key)); } catch { return []; }
+  });
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [lastMoved, setLastMoved] = useState<{ title: string; position: number } | null>(null);
+  const [target, setTarget] = useState<{ id: string; after: boolean } | null>(null);
+  const gesture = useRef<{ id: string; x: number; y: number; dragging: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  const sorted = orderedGoals(goals, order);
+  const visible = sorted.map((goal) => goal.goalId);
+  function move(from: string, to: string, after: boolean) {
+    const next = moveGoal(order, visible, from, to, after);
+    if (next === order) return;
+    setOrder(next);
+    const nextGoals = orderedGoals(goals, next);
+    const position = nextGoals.findIndex((goal) => goal.goalId === from);
+    const moved = nextGoals[position];
+    if (moved) setLastMoved({ title: moved.title, position: position + 1 });
+    try { localStorage.setItem(key, JSON.stringify(next)); setSaveFailed(false); }
+    catch { setSaveFailed(true); }
+  }
+  function cancel() { gesture.current = null; setTarget(null); }
+  return {
+    sorted, target, saveFailed, lastMoved, move,
+    moveBy(id: string, delta: -1 | 1) {
+      const neighbor = sorted[visible.indexOf(id) + delta];
+      if (neighbor) move(id, neighbor.goalId, delta === 1);
+    },
+    pointerProps: (id: string) => ({
+      onPointerDown(event: PointerEvent<HTMLButtonElement>) {
+        suppressClick.current = false;
+        // Touch retains vertical scrolling; the explicit move buttons work on touch.
+        if (event.pointerType !== "mouse" || event.button !== 0) return;
+        gesture.current = { id, x: event.clientX, y: event.clientY, dragging: false };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      },
+      onPointerMove(event: PointerEvent<HTMLButtonElement>) {
+        const current = gesture.current;
+        if (!current) return;
+        if (!current.dragging && Math.hypot(event.clientX - current.x, event.clientY - current.y) < 6) return;
+        current.dragging = true;
+        suppressClick.current = true;
+        const row = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-reorder-goal]");
+        const list = event.currentTarget.closest(".personal-goal-list");
+        const targetId = row?.dataset.reorderGoal;
+        if (!row || !targetId || !list?.contains(row) || targetId === current.id) { setTarget(null); return; }
+        const bounds = row.getBoundingClientRect();
+        setTarget({ id: targetId, after: event.clientY > bounds.top + bounds.height / 2 });
+      },
+      onPointerUp() {
+        if (gesture.current?.dragging && target) move(gesture.current.id, target.id, target.after);
+        cancel();
+      },
+      onPointerCancel: cancel,
+      onLostPointerCapture: cancel,
+      onKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+        if (event.key === "Escape") cancel();
+      },
+      onClickCapture(event: React.MouseEvent<HTMLButtonElement>) {
+        if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; }
+      },
+    }),
+  };
+}

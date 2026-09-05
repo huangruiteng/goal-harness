@@ -9,6 +9,7 @@ import type {
 } from "./personal-workspace-model";
 import { localizedAttentionAge, useWorkspaceI18n } from "./i18n";
 import { fetchCompletedTodos } from "../../data/chat";
+import { CompletedTaskLane } from "./completed-task-lane";
 
 function TaskLane({
   children,
@@ -106,6 +107,7 @@ function TaskLane({
  * Columns are states; cards open the same typed-preview drawer as the chat.
  */
 export function GoalTasksView({
+  historyEnabled = false,
   goal,
   items,
   onDraftTaskFromMessage,
@@ -117,6 +119,7 @@ export function GoalTasksView({
   userTodos,
   canLoadCompleted = false,
 }: {
+  historyEnabled?: boolean;
   goal: WorkspaceGoal;
   items: WorkspaceTimelineItem[];
   onDraftTaskFromMessage?: (message: string) => void;
@@ -316,6 +319,7 @@ export function GoalTasksView({
         ))}
         {!scheduleItems.length ? <p className="personal-task-empty">{t("tasks.emptySchedules")}</p> : null}
       </TaskLane>
+      {listView ? <>
       <TaskLane listView={listView} reveal={doneAgentTodos.some((todo) => todo.todoId === selectedTodoId)} count={currentPage?.total ?? (selectedLaneId === "all" ? Math.max(goal.doneTodoCount ?? 0, doneAgentTodos.length) : doneAgentTodos.length)} label={t("tasks.completed")} tone="done">
         <div className="personal-completed-query">
           <span>{currentPage ? t("tasks.loadedCompleted", { shown: doneAgentTodos.length, total: currentPage.total }) : t("tasks.recentCompleted", { count: doneAgentTodos.length })}</span>
@@ -331,6 +335,9 @@ export function GoalTasksView({
           ? t("tasks.completedSummary", { count: goal.doneTodoCount ?? 0 })
           : t("tasks.emptyCompleted")}</p> : null}
       </TaskLane>
+      </> : <>
+      <CompletedTaskLane key={`${goal.goalId}:${selectedLaneId}:${historyEnabled}`} goal={goal} agentId={selectedLaneId} seed={doneAgentTodos} enabled={historyEnabled} onSelect={onSelect} />
+      </>}
       </div>
       {isEmpty ? (
         <p className="personal-task-empty">

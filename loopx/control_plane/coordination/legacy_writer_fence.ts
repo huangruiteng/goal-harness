@@ -10,17 +10,21 @@ import {
   canonicalAuthorityObject,
   requireAuthorityStoreId,
 } from "./authority_store_codec.ts";
+import {
+  LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA,
+  LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
+  LEGACY_COORDINATION_WRITER_FENCE_SCHEMA,
+  LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+  LEGACY_COORDINATION_WRITE_CHECK_RESULT_SCHEMA,
+} from "./coordination_state_contract.generated.ts";
 
-export const LEGACY_COORDINATION_WRITER_FENCE_SCHEMA =
-  "loopx_legacy_coordination_writer_fence_v0";
-export const LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA =
-  "loopx_legacy_coordination_writer_fence_engage_request_v0";
-export const LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA =
-  "loopx_legacy_coordination_writer_fence_result_v0";
-export const LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA =
-  "loopx_legacy_coordination_write_check_request_v0";
-export const LEGACY_COORDINATION_WRITE_CHECK_RESULT_SCHEMA =
-  "loopx_legacy_coordination_write_check_result_v0";
+export {
+  LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA,
+  LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
+  LEGACY_COORDINATION_WRITER_FENCE_SCHEMA,
+  LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+  LEGACY_COORDINATION_WRITE_CHECK_RESULT_SCHEMA,
+};
 export const LEGACY_COORDINATION_TODO_LOCK_KEY = "legacy-todo-writer";
 export const LEGACY_COORDINATION_LEASE_LOCK_KEY = "legacy-task-lease-writer";
 

@@ -493,6 +493,10 @@ export const runGoalSchema = z.object({
   control_plane: controlPlaneSchema.optional().nullable(),
   spawn_policy: orchestrationPolicySchema.optional().nullable(),
   orchestration: orchestrationPolicySchema.optional().nullable(),
+  coordination: z.object({
+    agent_model: z.string().optional().nullable(),
+    registered_agents: z.array(z.string()).optional().default([]),
+  }).optional().nullable(),
   index_exists: z.boolean().optional().default(false),
   raw_index_records: z.number().optional().default(0),
   unique_runs: z.number().optional().default(0),
