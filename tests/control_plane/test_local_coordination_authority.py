@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -432,3 +434,28 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     )
     assert claimed_item["claimed_by"] == "agent-a"
     assert claimed_item["note"] == claimable["note"]
+
+    # Real CLI, no Markdown file: provider data feeds an in-memory editor and
+    # only requested fields return through TS CAS. Complex sibling fields do
+    # not round-trip through the lossy Markdown representation.
+    command = [sys.executable, "-m", "loopx.cli", "--format", "json",
+               "--registry", str(registry_path), "todo", "update", "--goal-id", "goal-a",
+               "--todo-id", "todo_claimable", "--agent-id", "agent-a",
+               "--text", "Edit provider-owned work", "--note", "compatibility edit"]
+    preview = subprocess.run([*command, "--dry-run"], capture_output=True, text=True, check=True)
+    assert json.loads(preview.stdout)["status"] == "planned"
+    assert list_goal_todos(registry_path=registry_path, goal_id="goal-a")["todos"] == after_claim["todos"]
+    edited = subprocess.run(command, capture_output=True, text=True, check=True)
+    edit_result = json.loads(edited.stdout)
+    assert edit_result["status"] == "applied"
+    assert edit_result["projection_delivery"] == "pending"
+    assert not state_file.exists()
+    after_edit = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
+    edited_by_id = {item["todo_id"]: item for item in after_edit["todos"]}
+    assert edited_by_id["todo_claimable"] == {
+        **claimed_item, "text": "Edit provider-owned work", "note": "compatibility edit",
+        "updated_at": edited_by_id["todo_claimable"]["updated_at"],
+    }
+    assert edited_by_id["todo_claimable"]["updated_at"] != claimed_item["updated_at"]
+    assert edited_by_id["todo_complex"] == by_id["todo_complex"]
+    assert edited_by_id["todo_successor"] == by_id["todo_successor"]
