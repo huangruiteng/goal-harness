@@ -459,7 +459,7 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert "loopx issue-fix workflow-plan " in rendered
     assert "loopx issue-fix feasibility " in rendered
     assert "proceed: `loopx issue-fix feasibility " in rendered
-    assert len(rendered.replace(str(project), "<project>")) <= 3_600
+    assert len(rendered.replace(str(project), "<project>")) <= 4_000
     todo_command = next(
         step["command_template"]
         for step in transaction["ordered_steps"]

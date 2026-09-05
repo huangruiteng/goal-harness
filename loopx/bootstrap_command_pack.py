@@ -18,6 +18,10 @@ from .control_plane.goals.start_contract import (
     build_goal_start_contract,
     build_goal_start_prompt,
 )
+from .control_plane.goals.terminal_contract import (
+    build_terminal_contract, render_terminal_contract_markdown,
+    validate_terminal_contract,
+)
 from .control_plane.goals.start_goal_todo_delta import (
     append_todo_delta_render_line,
     existing_runnable_agent_frontier,
@@ -1729,6 +1733,15 @@ def build_start_goal_guided_packet(
             "force_bootstrap_allowed": False,
         },
     }
+    hs, gid = command_pack.get("host_surface") or "", command_pack.get("goal_id") or ""
+    terminal_contract = build_terminal_contract(
+        host_surface=str(hs), goal_id=str(gid),
+        agent_id=command_pack.get("agent_id"),)
+    if errors := validate_terminal_contract(terminal_contract):
+        payload.update({"ok": False, "error": "terminal_contract validation failed",
+            "terminal_contract_errors": errors, "terminal_contract": terminal_contract})
+        return payload
+    payload["terminal_contract"] = terminal_contract
     if command_pack.get("thread_id"):
         payload["thread_id"] = command_pack["thread_id"]
         payload["thread_agent_binding"] = command_pack.get("thread_agent_binding")
@@ -1745,6 +1758,7 @@ def build_start_goal_guided_packet(
             "guided_transaction": "#/guided_transaction",
             "commands": "#/guided_transaction/ordered_steps",
             "safety_contract": "#/safety_contract",
+            "terminal_contract": "#/terminal_contract",
             "compatibility_message": "#/message",
         },
         legacy_fields_retained=include_command_pack_detail,
@@ -1899,6 +1913,10 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
             + "\n".join(choices)
             + "\n"
         )
+    terminal_contract = payload.get("terminal_contract")
+    terminal_contract_lines = render_terminal_contract_markdown(
+        terminal_contract
+    ) if isinstance(terminal_contract, dict) else ""
     return f"""# Guided Start Goal
 
 - project: `{payload.get("project")}`
@@ -1912,8 +1930,7 @@ Preview only; follow ordered commands to mutate.
 {chr(10).join(step_lines)}
 {host_gate_lines}
 {goal_gate_lines}
-{identity_gate_lines}
-
+{identity_gate_lines}{terminal_contract_lines}
 ## Todo Preservation
 
 - bootstrap: `{preserve.get("force_bootstrap_default")}`; reconnect: {preserve.get("before_destructive_reconnect")}; scope change: {preserve.get("preferred_scope_change")}
