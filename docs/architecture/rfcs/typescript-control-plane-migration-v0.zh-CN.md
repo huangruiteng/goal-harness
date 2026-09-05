@@ -87,6 +87,13 @@ lifecycle classification code 或其他 cadence policy，不能宣称全局已�
    complete-with-successor、archive 及相关 lease effect 经过现有 TS authority owner。
    每个内聚的纵向切片包含真实 CLI caller、replay/CAS/error 测试，并删除被替代的
    Python decision。仅统一 schema 或常量不满足退出条件。
+   单命令切片（例如通过同一兼容 editor 的 `todo update --text/--note`）只是
+   合成/资格化 goal 的验证里程碑，不是真实 goal 的 promote：一旦 promote，其余
+   legacy writer 仍被 fence 以 fail-closed 拦截。因此活跃 goal 的 promote 要等
+   到其 agent 实际使用的写命令族都经由同一个统一 TS 提交权威（同一入口的分命令
+   patch 类型，而不是平行 adapter），并且 capture/projection outbox 落盘接通之后。
+   删除的收益只在该入口背后的 in-place Markdown editor 被纯投影 renderer 替代时兑现。
+
 2. **先资格化，再启用。** 与 shared-authority RFC 的显式 v0 import、consumer
    parity、writer fencing、capture/projection outbox recovery、有界 retention、
    fenced export 汇合。file 资格化不等待 PostgreSQL service 就绪；不默认切换 authority。

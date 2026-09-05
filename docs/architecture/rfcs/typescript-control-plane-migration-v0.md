@@ -110,6 +110,17 @@ slice; they must not be reported as migrated or globally free of prose rules.
    the existing TS authority owner. Deliver coherent vertical slices with the
    real CLI caller, replay/CAS/error tests, and removal of the replaced Python
    decisions. A schema or constants-only PR does not satisfy this exit.
+   A single-command slice (for example `todo update --text/--note` through a
+   shared compatibility editor) is a validation milestone for synthetic or
+   qualification goals, never a real-goal promotion: once a goal is promoted,
+   every other legacy writer is still fenced fail-closed. Promoting a live goal
+   therefore waits until the write-command family its agents actually use routes
+   through the same unified TS commit authority (per-command patch types on one
+   entry point, not parallel adapters) and until capture/projection outbox
+   delivery is flushed. The deletion payoff lands only when the in-place
+   Markdown editor is replaced by a pure projection renderer behind that one
+   entry point.
+
 2. **Qualification before activation.** Join that path with the shared-authority
    RFC's explicit v0 import, consumer parity, writer fencing, capture/projection
    outbox recovery, bounded retention, and fenced export. File qualification
