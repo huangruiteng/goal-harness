@@ -129,7 +129,7 @@ export function GoalTasksView({
   canLoadCompleted?: boolean;
 }) {
   const { t } = useWorkspaceI18n();
-  const [listView, setListView] = useState(true);
+  const [listView, setListView] = useState(false);
   const [completedPage, setCompletedPage] = useState<{
     key: string; items: WorkspaceGoal["agentTodos"]; total: number; next: number | null;
   } | null>(null);
