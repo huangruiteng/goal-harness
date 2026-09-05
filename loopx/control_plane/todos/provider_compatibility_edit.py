@@ -53,14 +53,13 @@ def edit_canonical_todo_if_promoted(
         raise ValueError("compatibility editor lost Todo identity")
     patch = {field: edited[4].get(field) for field, requested in
              (("text", text), ("note", note)) if requested is not None}
-    result = effect_runtime_result("coordination.local_authority.todo_compatibility_edit", {
-        "schema_version": "loopx_todo_compatibility_edit_request_v0",
+    result = effect_runtime_result("coordination.local_authority.todo_update", {
+        "schema_version": "loopx_local_coordination_todo_update_request_v0",
         "runtime_root": str(runtime_root.resolve()), "goal_id": goal_id,
-        "todo_id": todo_id, "actor_agent_id": actor_agent_id,
+        "todo_id": todo_id, "role": role, "actor_agent_id": actor_agent_id,
         "registered_agents": registered_agent_ids_from_registry(registry_path, goal_id),
-        "operation_id": f"todo-edit:{uuid4().hex}",
-        "expected_provider_revision": canonical["provider_revision"],
-        "patch": patch, "dry_run": dry_run,
+        "operation_id": f"todo-update:{uuid4().hex}",
+        "patch": patch, "clear_fields": [], "dry_run": dry_run,
         "observed_at": now_local(),
     })
     if not isinstance(result, dict) or result.get("status") not in {
