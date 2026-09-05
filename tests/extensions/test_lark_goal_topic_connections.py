@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from loopx.control_plane.quota.goal_boundary import goal_boundary
 from loopx.extensions.lark.goal_channel_contracts import (
     binding_for_goal,
     bindings_for_goal,
@@ -29,6 +30,7 @@ from loopx.extensions.lark.goal_topic_connections import (
     reply_lark_goal_topic,
     route_lark_topic_event,
 )
+from loopx.registry import atomic_write_json
 
 APP_ID = "cli_public_fixture"
 CHAT_ID = "oc_public_fixture"
@@ -478,7 +480,8 @@ def test_two_goals_share_one_connection_with_distinct_topics(tmp_path: Path) -> 
     payload = read_goal_channel_binding(binding_path)
     alpha = binding_for_goal(payload, "goal-alpha")
     beta = binding_for_goal(payload, "goal-beta")
-    assert alpha is not None and beta is not None
+    assert alpha is not None
+    assert beta is not None
     assert alpha["target_ref"] == beta["target_ref"]
     assert alpha["topic"]["root_message_id"] == "om_topic_alpha"
     assert beta["topic"]["root_message_id"] == "om_topic_beta"
@@ -1343,3 +1346,124 @@ def test_disconnect_removes_only_the_selected_goal_topic(tmp_path: Path) -> None
     bindings = read_goal_channel_binding(binding_path)["bindings"]
     assert set(bindings) == {"goal-beta"}
     assert len(read_goal_channel_targets(target_path)["targets"]) == 1
+
+
+def test_disconnect_async_inbox_unregisters_only_selected_agent(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    registry = _registry(tmp_path)
+    registry["common_runtime_root"] = str(tmp_path / "runtime")
+    registry["goals"][0]["coordination"] = {
+        "registered_agents": ["agent-alpha", "agent-beta"]
+    }
+    atomic_write_json(registry_path, registry)
+    state: dict[str, Any] = {}
+    binding_path = tmp_path / "binding.json"
+    kwargs = dict(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id="goal-alpha",
+        target_path=tmp_path / "targets.json",
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        ingress_mode="async_inbox",
+        runner=_runner(state),
+        cli_bin="fake-lark",
+    )
+    assert connect_lark_goal_topic(**kwargs, agent_id="agent-alpha")["ok"]
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert connect_lark_goal_topic(
+        **{**kwargs, "registry": registry}, agent_id="agent-beta"
+    )["ok"]
+    payload = read_goal_channel_binding(binding_path)
+    alpha = next(
+        item
+        for item in bindings_for_goal(payload, "goal-alpha")
+        if item["agent_id"] == "agent-alpha"
+    )
+
+    result = disconnect_lark_goal_topic(
+        binding_path=binding_path,
+        registry_path=registry_path,
+        goal_id="goal-alpha",
+        connection_id=alpha["connection_id"],
+    )
+
+    assert result["ok"] is True
+    assert result["details"]["agent_inbox_unregistered"] is True
+    remaining = bindings_for_goal(
+        read_goal_channel_binding(binding_path), "goal-alpha"
+    )
+    assert [item["agent_id"] for item in remaining] == ["agent-beta"]
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    goal = registry["goals"][0]
+    assert set(goal["control_plane"]["lark_event_inboxes"]) == {"agent-beta"}
+    alpha_boundary = goal_boundary(
+        goal, agent_id="agent-alpha", registry_path=registry_path
+    )
+    assert alpha_boundary is None or "lark_event_inbox" not in alpha_boundary.get(
+        "capabilities", {}
+    )
+    assert goal_boundary(
+        goal, agent_id="agent-beta", registry_path=registry_path
+    )["capabilities"]["lark_event_inbox"]["enabled"] is True
+
+
+def test_disconnect_reports_agent_inbox_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    registry = _registry(tmp_path)
+    registry["common_runtime_root"] = str(tmp_path / "runtime")
+    registry["goals"][0]["coordination"] = {"registered_agents": ["agent-alpha"]}
+    atomic_write_json(registry_path, registry)
+    binding_path = tmp_path / "binding.json"
+    assert connect_lark_goal_topic(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id="goal-alpha",
+        target_path=tmp_path / "targets.json",
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        agent_id="agent-alpha",
+        ingress_mode="async_inbox",
+        runner=_runner({}),
+        cli_bin="fake-lark",
+    )["ok"]
+    connection = binding_for_goal(
+        read_goal_channel_binding(binding_path),
+        "goal-alpha",
+    )
+    assert connection is not None
+    monkeypatch.setattr(
+        "loopx.extensions.lark.goal_topic_connections.configure_goal_with_global_sync",
+        lambda **_kwargs: {"ok": False},
+    )
+
+    result = disconnect_lark_goal_topic(
+        binding_path=binding_path,
+        registry_path=registry_path,
+        goal_id="goal-alpha",
+        connection_id=str(connection["connection_id"]),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "disconnected_inbox_cleanup_failed"
+    assert result["blocker"] == "agent_inbox_unregistration_failed"
+    assert result["readback_verified"] is False
+    assert result["details"] == {
+        "connection_id": connection["connection_id"],
+        "agent_inbox_unregistered": False,
+        "agent_id": "agent-alpha",
+    }
+    assert binding_for_goal(
+        read_goal_channel_binding(binding_path),
+        "goal-alpha",
+        connection_id=str(connection["connection_id"]),
+    ) is None

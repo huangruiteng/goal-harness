@@ -2172,7 +2172,7 @@ async function main() {
     await connectDialog.getByLabel("目标 Agent").waitFor({ state: "visible" });
     await connectDialog.getByLabel("绑定到 Goal").selectOption("multi-agent-projection");
     const agentOptions = await connectDialog.getByLabel("目标 Agent").locator("option").evaluateAll((items) => items.map((item) => item.value));
-    if (JSON.stringify([...agentOptions].sort()) !== JSON.stringify(["codex-latest-lane", "codex-older-lane"])) throw new Error(`Lark omitted a peer Agent: ${JSON.stringify(agentOptions)}`);
+    if (JSON.stringify([...agentOptions].sort((left, right) => left.localeCompare(right))) !== JSON.stringify(["codex-latest-lane", "codex-older-lane"])) throw new Error(`Lark omitted a peer Agent: ${JSON.stringify(agentOptions)}`);
     await connectDialog.getByLabel("目标 Agent").selectOption("codex-older-lane");
     await connectDialog.getByLabel("回复方式").selectOption("topic_reply");
     await page.screenshot({ path: resolve(outputDir, "lark-routing-modes.png"), fullPage: false, animations: "disabled" });

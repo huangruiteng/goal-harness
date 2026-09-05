@@ -477,6 +477,7 @@ class LarkChatRequestMixin:
                 binding_path=binding_path,
                 goal_id=goal_id,
                 connection_id=connection_id,
+                registry_path=binding_path.parent / "registry.json",
             )
         except (OSError, ValueError) as exc:
             self._send_error(str(exc), status=400, error_code="invalid_lark_connection")

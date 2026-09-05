@@ -301,13 +301,19 @@ export function LarkSettingsPage({
   }, [setupOpen, setupSnapshot]);
 
   const selectedGoal = goals.find((goal) => goal.goalId === goalId);
+  const fallbackGoalAgents = selectedGoal?.agentId
+    ? [{ agentId: selectedGoal.agentId, label: selectedGoal.agentLabel ?? selectedGoal.agentId }]
+    : [];
   const goalAgents = selectedGoal?.agentLanes?.length
     ? selectedGoal.agentLanes
-    : selectedGoal?.agentId ? [{ agentId: selectedGoal.agentId, label: selectedGoal.agentLabel ?? selectedGoal.agentId }] : [];
+    : fallbackGoalAgents;
   const selectedAgentAvailable = goalAgents.some((agent) => agent.agentId === agentId);
-  const targetAgentIds = connectAllAgents
-    ? goalAgents.map((agent) => agent.agentId)
-    : selectedAgentAvailable ? [agentId] : [];
+  let targetAgentIds: string[] = [];
+  if (connectAllAgents) targetAgentIds = goalAgents.map((agent) => agent.agentId);
+  else if (selectedAgentAvailable) targetAgentIds = [agentId];
+  let connectActionLabel = t("lark.connect");
+  if (editingGoalId) connectActionLabel = t("lark.saveConnection");
+  else if (connectAllAgents) connectActionLabel = t("lark.connectAllAgentsAction", { count: targetAgentIds.length });
   const selectedApp = apps.find((app) => app.app_ref === appRef);
   const selectedChat = chats.find((chat) => chat.chat_id === chatId);
   const filteredConnections = useMemo(() => {
@@ -529,12 +535,12 @@ export function LarkSettingsPage({
               {!selectedAgentAvailable ? <option disabled value={agentId}>{agentId ? t("lark.agentUnavailable", { agent: agentId }) : t("lark.noAgentConfigured")}</option> : null}
               {goalAgents.map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.label === agent.agentId ? agent.agentId : `${agent.label} · ${agent.agentId}`}</option>)}
             </select><small>{t("lark.targetAgentDescription")}</small></label>
-            {!editingGoalId && goalAgents.length > 1 ? <label className="personal-lark-check"><input checked={connectAllAgents} onChange={(event) => setConnectAllAgents(event.target.checked)} type="checkbox" /><span><strong>{t("lark.connectAllAgents")}</strong><small>{t("lark.connectAllAgentsDescription", { count: goalAgents.length })}</small></span></label> : null}
+            {!editingGoalId && goalAgents.length > 1 ? <label aria-label={t("lark.connectAllAgents")} className="personal-lark-check"><input checked={connectAllAgents} onChange={(event) => setConnectAllAgents(event.target.checked)} type="checkbox" /><span><strong>{t("lark.connectAllAgents")}</strong><small>{t("lark.connectAllAgentsDescription", { count: goalAgents.length })}</small></span></label> : null}
             {targetAgentIds.length === 0 ? <p className="personal-notification-error" role="alert">{t("lark.selectRegisteredAgent")}</p> : null}
             <label><span>{t("lark.replyMode")}</span><select aria-label={t("lark.replyMode")} onChange={(event) => setReplyMode(event.target.value as LarkReplyMode)} value={replyMode}><option value="topic_reply">{t("lark.topicReply")}</option></select><small>{t("lark.replyModeDescription")}</small></label>
             <p className="personal-lark-cardinality"><Check size={15} />{t("lark.cardinality")}</p>
             {connectError ? <p className="personal-notification-error" role="alert">{connectError}</p> : null}
-            <footer><button className="personal-secondary-action" onClick={() => setModalOpen(false)} type="button">{t("lark.cancel")}</button><button className="personal-primary-action" disabled={loading || !appRef || !selectedApp?.reply_ready || !goalId || !chatId || targetAgentIds.length === 0 || connecting} onClick={() => void connect()} type="button">{connecting ? <Loader2 className="is-spinning" size={15} /> : null}{editingGoalId ? t("lark.saveConnection") : connectAllAgents ? t("lark.connectAllAgentsAction", { count: targetAgentIds.length }) : t("lark.connect")}</button></footer>
+            <footer><button className="personal-secondary-action" onClick={() => setModalOpen(false)} type="button">{t("lark.cancel")}</button><button className="personal-primary-action" disabled={loading || !appRef || !selectedApp?.reply_ready || !goalId || !chatId || targetAgentIds.length === 0 || connecting} onClick={() => void connect()} type="button">{connecting ? <Loader2 className="is-spinning" size={15} /> : null}{connectActionLabel}</button></footer>
           </section>
         </div>
       ) : null}

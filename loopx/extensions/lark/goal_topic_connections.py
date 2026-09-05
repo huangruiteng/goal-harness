@@ -1358,26 +1358,25 @@ def reply_lark_goal_topic(
     )
 
 
-@serialize_goal_binding_mutation
-def disconnect_lark_goal_topic(
-    *, binding_path: Path, goal_id: str, connection_id: str
-) -> dict[str, Any]:
-    payload = read_goal_channel_binding(binding_path)
+def _without_goal_topic_connection(
+    payload: Mapping[str, Any], *, goal_id: str, connection_id: str
+) -> tuple[dict[str, Any], Mapping[str, Any] | None]:
     bindings = payload.get("bindings")
     mutable = dict(bindings) if isinstance(bindings, Mapping) else {}
     stored = mutable.get(goal_id)
-    existed = False
+    removed: Mapping[str, Any] | None = None
     if (
         isinstance(stored, Mapping)
         and stored.get("schema_version") == GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION
         and isinstance(stored.get("connections"), Mapping)
     ):
         connections = dict(stored["connections"])
-        existed = connections.pop(connection_id, None) is not None
+        removed_value = connections.pop(connection_id, None)
+        removed = removed_value if isinstance(removed_value, Mapping) else None
         if connections:
             default_id = str(stored.get("default_connection_id") or "")
             if default_id not in connections:
-                default_id = sorted(connections)[0]
+                default_id = min(connections)
             mutable[goal_id] = {
                 "schema_version": GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION,
                 "default_connection_id": default_id,
@@ -1390,28 +1389,101 @@ def disconnect_lark_goal_topic(
             goal_id, str(stored.get("agent_id") or "") or None
         )
         if connection_id == legacy_id:
-            existed = mutable.pop(goal_id, None) is not None
+            removed = stored
+            mutable.pop(goal_id, None)
+    return mutable, removed
+
+
+def _unregister_async_inbox(
+    *,
+    removed: Mapping[str, Any] | None,
+    registry_path: Path | None,
+    goal_id: str,
+) -> tuple[dict[str, Any] | None, str]:
+    routing = removed.get("routing") if isinstance(removed, Mapping) else None
+    routing = routing if isinstance(routing, Mapping) else {}
+    agent_id = str(removed.get("agent_id") or "").strip() if removed else ""
+    if routing.get("ingress_mode") != IngressMode.ASYNC_INBOX.value or not agent_id:
+        return None, agent_id
+    if registry_path is None:
+        return {
+            "ok": False,
+            "error": "source registry path is required to unregister the Agent inbox",
+        }, agent_id
+    return configure_goal_with_global_sync(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        runtime_root_override=None,
+        execute=True,
+        lark_event_inbox_agent_id=agent_id,
+        clear_lark_event_inbox_config=True,
+    ), agent_id
+
+
+@serialize_goal_binding_mutation
+def disconnect_lark_goal_topic(
+    *,
+    binding_path: Path,
+    goal_id: str,
+    connection_id: str,
+    registry_path: Path | None = None,
+) -> dict[str, Any]:
+    payload = read_goal_channel_binding(binding_path)
+    mutable, removed = _without_goal_topic_connection(
+        payload,
+        goal_id=goal_id,
+        connection_id=connection_id,
+    )
+    existed = removed is not None
     if existed:
         write_goal_channel_binding(
             binding_path,
             {"schema_version": payload["schema_version"], "bindings": mutable},
         )
-    return operation_packet(
-        ok=True,
+    cleanup, removed_agent_id = _unregister_async_inbox(
+        removed=removed,
+        registry_path=registry_path,
         goal_id=goal_id,
-        operation="disconnect_topic",
-        execute=True,
-        status="disconnected" if existed else "already_disconnected",
-        public_summary=(
-            "disconnected the selected Goal topic"
-            if existed
-            else "the selected Goal has no Lark topic connection"
-        ),
-        readback_verified=binding_for_goal(
+    )
+    cleanup_ok = cleanup is None or cleanup.get("ok") is True
+    readback_verified = (
+        binding_for_goal(
             read_goal_channel_binding(binding_path),
             goal_id,
             connection_id=connection_id,
         )
-        is None,
-        details={"connection_id": connection_id},
+        is None
+    )
+    return operation_packet(
+        ok=cleanup_ok,
+        goal_id=goal_id,
+        operation="disconnect_topic",
+        execute=True,
+        status=(
+            "disconnected"
+            if existed and cleanup_ok
+            else "disconnected_inbox_cleanup_failed"
+            if existed
+            else "already_disconnected"
+        ),
+        blocker=None if cleanup_ok else "agent_inbox_unregistration_failed",
+        public_summary=(
+            "disconnected the selected Goal topic"
+            if existed and cleanup_ok
+            else "the Goal topic was disconnected but its Agent inbox registration could not be cleared"
+            if existed
+            else "the selected Goal has no Lark topic connection"
+        ),
+        readback_verified=readback_verified and cleanup_ok,
+        details={
+            "connection_id": connection_id,
+            **(
+                {
+                    "agent_inbox_unregistered": cleanup_ok,
+                    "agent_id": removed_agent_id,
+                }
+                if cleanup is not None
+                else {}
+            ),
+        },
     )

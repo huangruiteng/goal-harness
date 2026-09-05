@@ -146,27 +146,29 @@ def _topic_roots_for_target(
     for goal_id, payload in binding_payloads.items():
         if not isinstance(payload, Mapping):
             continue
-        for binding in bindings_for_goal(payload, str(goal_id)):
-            if (
-                binding.get("enabled") is not True
-                or str(binding.get("target_ref") or "") != target_ref
-            ):
-                continue
-            topic = (
-                binding.get("topic")
-                if isinstance(binding.get("topic"), Mapping)
-                else {}
-            )
-            channel = (
-                binding.get("channel")
-                if isinstance(binding.get("channel"), Mapping)
-                else {}
-            )
-            root_id = str(
-                topic.get("root_message_id") or channel.get("pinned_message_id") or ""
-            )
-            if MESSAGE_ID_PATTERN.fullmatch(root_id):
-                roots.append(root_id)
+        bindings = bindings_for_goal(payload, str(goal_id))
+        roots.extend(_topic_roots_for_bindings(bindings, target_ref=target_ref))
+    return roots
+
+
+def _topic_roots_for_bindings(
+    bindings: list[Mapping[str, Any]], *, target_ref: str
+) -> list[str]:
+    roots: list[str] = []
+    for binding in bindings:
+        if binding.get("enabled") is not True:
+            continue
+        if str(binding.get("target_ref") or "") != target_ref:
+            continue
+        topic = binding.get("topic")
+        topic = topic if isinstance(topic, Mapping) else {}
+        channel = binding.get("channel")
+        channel = channel if isinstance(channel, Mapping) else {}
+        root_id = str(
+            topic.get("root_message_id") or channel.get("pinned_message_id") or ""
+        )
+        if MESSAGE_ID_PATTERN.fullmatch(root_id):
+            roots.append(root_id)
     return roots
 
 
