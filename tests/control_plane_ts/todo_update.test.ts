@@ -58,8 +58,18 @@ test("provider-first update rejects authority and lifecycle escalation", async (
     actor_agent_id: "agent-b"})).reason_code, "update_owner_mismatch");
   assert.equal((await executeCoordinationTodoUpdate(store, {...request,
     actor_agent_id: "unknown"})).reason_code, "actor_not_registered");
-  for (const patch of [{status: "done"}, {claimed_by: "agent-b"}, {archive_state: "archive"}]) {
+  for (const patch of [{status: "done"}, {claimed_by: "agent-b"}, {archive_state: "archive"},
+    {excluded_agents: ["agent-a"]}, {required_capabilities: ["network"]},
+    {required_decision_scopes: ["release"]}, {continuation_policy: "no_followup"},
+    {task_repository: "git:example.invalid/repo"}, {successor_todo_ids: ["todo_b"]}]) {
     const result = await executeCoordinationTodoUpdate(store, {...request, patch});
+    assert.equal(result.reason_code, "invalid_coordination_todo_update");
+  }
+  for (const clear_fields of [["excluded_agents"], ["required_capabilities"],
+    ["required_decision_scopes"], ["continuation_policy"], ["task_repository"],
+    ["successor_todo_ids"]]) {
+    const result = await executeCoordinationTodoUpdate(store, {...request,
+      patch: {}, clear_fields});
     assert.equal(result.reason_code, "invalid_coordination_todo_update");
   }
 });

@@ -26,11 +26,7 @@ export const COORDINATION_TODO_UPDATE_RESULT_SCHEMA =
 export const COORDINATION_TODO_UPDATE_RECEIPT_SCHEMA =
   "loopx_coordination_todo_update_receipt_v0";
 
-const IMMUTABLE_FIELDS = new Set([
-  "schema_version", "todo_id", "role", "status", "done", "archive_state",
-  "created_by", "claimed_by", "last_actor_agent_id", "updated_at",
-]);
-const PROJECTION_FIELDS = new Set(["index", "source_section"]);
+const UPDATE_FIELDS = new Set(["text", "note"]);
 
 export interface CoordinationTodoUpdateInput {
   readonly goal_id: string;
@@ -69,10 +65,10 @@ function normalizeInput(raw: CoordinationTodoUpdateInput): CoordinationTodoUpdat
   if (new Set(clearFields).size !== clearFields.length) {
     throw new AuthorityStoreProtocolError("clear_fields must be unique");
   }
-  const fields = [...Object.keys(patch), ...clearFields];
-  const forbidden = fields.find((field) => IMMUTABLE_FIELDS.has(field) || PROJECTION_FIELDS.has(field));
-  if (forbidden !== undefined) {
-    throw new AuthorityStoreProtocolError(`Todo update cannot mutate ${forbidden}`);
+  const unsupported = [...Object.keys(patch), ...clearFields]
+    .find((field) => !UPDATE_FIELDS.has(field));
+  if (unsupported !== undefined) {
+    throw new AuthorityStoreProtocolError(`Todo update does not own field ${unsupported}`);
   }
   if (Object.keys(patch).some((field) => clearFields.includes(field))) {
     throw new AuthorityStoreProtocolError("Todo update cannot patch and clear the same field");

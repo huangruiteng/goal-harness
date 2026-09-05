@@ -472,6 +472,17 @@ export function registerAuthorityStoreConformance(
       assert.equal(updated.claimed_by, "agent-a");
       assert.equal(updated.last_actor_agent_id, "agent-a");
       assert.equal((loaded.head.todo_read_model as Record<string, unknown>).todo_count, 1);
+      for (const patch of [{excluded_agents: ["agent-b"]},
+        {required_capabilities: ["network"]}, {continuation_policy: "no_followup"}]) {
+        assert.equal((await executeCoordinationTodoUpdate(store, {...request,
+          operation_id: `reject-patch-${Object.keys(patch)[0]}`, patch,
+          clear_fields: []})).reason_code, "invalid_coordination_todo_update");
+      }
+      for (const field of ["excluded_agents", "required_capabilities", "continuation_policy"]) {
+        assert.equal((await executeCoordinationTodoUpdate(store, {...request,
+          operation_id: `reject-clear-${field}`, patch: {}, clear_fields: [field]})).reason_code,
+        "invalid_coordination_todo_update");
+      }
     });
     test(`${providerName} conformance: provider-neutral Todo claim transaction (${native ? "native" : "v0"})`, async (t) => {
       const { store } = await factory(t);
