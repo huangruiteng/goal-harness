@@ -240,7 +240,8 @@ export async function executeCoordinationTodoCreate(
   }
   const todoId = requireAuthorityStoreId(input.todo.todo_id, "todo id");
   const duplicate = [...projection.todos.values()].find((todo) =>
-    todo.role === input.todo.role && todo.archive_state === "active" && todo.text === input.todo.text
+    todo.role === input.todo.role && todo.archive_state === "active" &&
+    todo.done === false && todo.text === input.todo.text
   );
   if (duplicate !== undefined) {
     return semanticDuplicateResult(input.todo, duplicate, head.provider_revision, head.cursor);

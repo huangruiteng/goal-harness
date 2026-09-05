@@ -279,6 +279,32 @@ export function registerAuthorityStoreConformance(
           todo_id: "todo-other", task_class: "continuous_monitor"}});
       assert.equal(conflictingDuplicate.status, "failed");
       assert.equal(conflictingDuplicate.reason_code, "todo_semantic_duplicate_conflict");
+      const deferredSameText = {
+        ...replayRequest.todo,
+        todo_id: "todo-deferred-terminal",
+        status: "deferred",
+        done: true,
+        text: "Repeat terminal work",
+        ...(native ? {} : {schema_version: "todo_item_v0", source_section: "Agent Todo"}),
+      };
+      const loadedBeforeDeferred = await store.loadAuthority();
+      assert.equal(loadedBeforeDeferred.status, "loaded");
+      if (loadedBeforeDeferred.status !== "loaded") return;
+      const deferredCommit = prepareCoordinationProjectionCommit({
+        goal_id: goalId,
+        operation_id: "seed-deferred-terminal",
+        expected_provider_revision: loadedBeforeDeferred.provider_revision,
+        projection: loadedBeforeDeferred.head,
+        mutations: [{kind: "todo_upsert", todo: deferredSameText}],
+      });
+      assert.equal((await store.commitAuthority(deferredCommit)).status, "applied");
+      const recreatedAfterDeferred = await executeCoordinationTodoCreate(store, {
+        ...replayRequest,
+        operation_id: "create-after-deferred-terminal",
+        todo: {...replayRequest.todo, todo_id: "todo-after-deferred-terminal",
+          text: "Repeat terminal work"},
+      });
+      assert.equal(recreatedAfterDeferred.status, "applied");
       const loaded = await store.loadAuthority();
       assert.equal(loaded.status, "loaded");
       if (loaded.status !== "loaded") return;
@@ -287,7 +313,7 @@ export function registerAuthorityStoreConformance(
       assert.equal(created.created_by, "agent-a");
       assert.equal(created.last_actor_agent_id, "agent-a");
       assert.equal(created.updated_at, "2026-09-05T06:00:00Z");
-      assert.equal((loaded.head.todo_read_model as Record<string, unknown>).todo_count, 2);
+      assert.equal((loaded.head.todo_read_model as Record<string, unknown>).todo_count, 4);
       for (const invalid of [
         {...request, operation_id: "bad-actor", actor_agent_id: "agent-b"},
         {...request, operation_id: "bad-status", todo: {...todo, todo_id: "todo-done", status: "done", done: true}},
