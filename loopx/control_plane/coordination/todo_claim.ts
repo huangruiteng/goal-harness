@@ -6,6 +6,7 @@ import {
   canonicalAuthoritySha256,
   requireAuthorityStoreId,
 } from "./authority_store_codec.ts";
+import {normalizeRegisteredTodoAgents, normalizeTodoAgent} from "./todo_agents.ts";
 import {
   prepareCoordinationProjectionCommit,
   indexCoordinationProjection,
@@ -57,39 +58,13 @@ export type CoordinationTodoClaimDecision =
 
 type ClaimRejection = CoordinationTodoClaimRejectedDecision | null;
 
-function normalizeAgent(value: unknown, label: string): string {
-  if (typeof value !== "string") {
-    throw new AuthorityStoreProtocolError(`${label} must be a public-safe agent id`);
-  }
-  const candidate = value.trim().toLowerCase().replaceAll(" ", "-");
-  if (!/^[a-z][a-z0-9_.:@-]{0,79}$/u.test(candidate)) {
-    throw new AuthorityStoreProtocolError(`${label} must be a public-safe agent id`);
-  }
-  return candidate;
-}
-
-function normalizeRegisteredAgents(value: readonly string[]): string[] {
-  if (!Array.isArray(value)) {
-    throw new AuthorityStoreProtocolError("registered_agents must be an array");
-  }
-  const normalized = value.map((agent, index) =>
-    normalizeAgent(agent, `registered_agents[${index}]`)
-  );
-  if (new Set(normalized).size !== normalized.length) {
-    throw new AuthorityStoreProtocolError(
-      "registered_agents must contain unique public-safe agent ids",
-    );
-  }
-  return normalized;
-}
-
 function normalizeExcludedAgents(value: unknown): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     throw new AuthorityStoreProtocolError("todo.excluded_agents must be an array");
   }
   const normalized = value.map((agent, index) =>
-    normalizeAgent(agent, `todo.excluded_agents[${index}]`)
+    normalizeTodoAgent(agent, `todo.excluded_agents[${index}]`)
   );
   if (new Set(normalized).size !== normalized.length) {
     throw new AuthorityStoreProtocolError(
@@ -207,7 +182,7 @@ export function evaluateCoordinationTodoClaimDecision(
     );
   }
   const existing = typeof todo.claimed_by === "string" && todo.claimed_by.length > 0
-    ? normalizeAgent(todo.claimed_by, "todo.claimed_by")
+    ? normalizeTodoAgent(todo.claimed_by, "todo.claimed_by")
     : null;
   if (existing !== null && existing !== owner) {
     return decisionFailure(
@@ -240,7 +215,7 @@ function leaseIsActiveForOwner(lease: JsonObject | undefined, owner: string, now
       typeof lease.owner !== "string" || typeof lease.expires_at !== "string") return false;
   let leaseOwner: string;
   try {
-    leaseOwner = normalizeAgent(lease.owner, "lease.owner");
+    leaseOwner = normalizeTodoAgent(lease.owner, "lease.owner");
   } catch {
     return false;
   }
@@ -267,10 +242,10 @@ export async function executeCoordinationTodoClaim(
       goal_id: requireAuthorityStoreId(rawInput.goal_id, "goal id"),
       todo_id: requireAuthorityStoreId(rawInput.todo_id, "todo id"),
       operation_id: requireAuthorityStoreId(rawInput.operation_id, "operation id"),
-      claimed_by: normalizeAgent(rawInput.claimed_by, "claimed_by"),
+      claimed_by: normalizeTodoAgent(rawInput.claimed_by, "claimed_by"),
       actor_agent_id: rawInput.actor_agent_id === null
-        ? null : normalizeAgent(rawInput.actor_agent_id, "actor_agent_id"),
-      registered_agents: normalizeRegisteredAgents(rawInput.registered_agents),
+        ? null : normalizeTodoAgent(rawInput.actor_agent_id, "actor_agent_id"),
+      registered_agents: normalizeRegisteredTodoAgents(rawInput.registered_agents),
     };
     if (typeof input.dry_run !== "boolean") {
       throw new AuthorityStoreProtocolError("dry_run must be a boolean");

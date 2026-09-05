@@ -6,6 +6,7 @@ import {
   canonicalAuthoritySha256,
   requireAuthorityStoreId,
 } from "./authority_store_codec.ts";
+import {normalizeRegisteredTodoAgents, normalizeTodoAgent} from "./todo_agents.ts";
 import {
   TODO_DOMAIN_READ_RECORD_SCHEMA,
   TODO_DOMAIN_ITEM_SCHEMA,
@@ -36,32 +37,6 @@ export interface CoordinationTodoCreateInput {
 export type CoordinationTodoCreateResult = JsonObject & {
   readonly schema_version: typeof COORDINATION_TODO_CREATE_RESULT_SCHEMA;
 };
-
-function normalizeAgent(value: unknown, label: string): string {
-  if (typeof value !== "string") {
-    throw new AuthorityStoreProtocolError(`${label} must be a public-safe agent id`);
-  }
-  const candidate = value.trim().toLowerCase().replaceAll(" ", "-");
-  if (!/^[a-z][a-z0-9_.:@-]{0,79}$/u.test(candidate)) {
-    throw new AuthorityStoreProtocolError(`${label} must be a public-safe agent id`);
-  }
-  return candidate;
-}
-
-function normalizeRegisteredAgents(value: readonly string[]): string[] {
-  if (!Array.isArray(value)) {
-    throw new AuthorityStoreProtocolError("registered_agents must be an array");
-  }
-  const normalized = value.map((agent, index) =>
-    normalizeAgent(agent, `registered_agents[${index}]`)
-  );
-  if (new Set(normalized).size !== normalized.length) {
-    throw new AuthorityStoreProtocolError(
-      "registered_agents must contain unique public-safe agent ids",
-    );
-  }
-  return normalized;
-}
 
 function failure(code: string, reason: string, detail: JsonObject = {}): CoordinationTodoCreateResult {
   return {
@@ -113,8 +88,8 @@ function normalizeCreateInput(rawInput: CoordinationTodoCreateInput): Coordinati
     operation_id: requireAuthorityStoreId(rawInput.operation_id, "operation id"),
     todo,
     actor_agent_id: rawInput.actor_agent_id === null
-      ? null : normalizeAgent(rawInput.actor_agent_id, "actor_agent_id"),
-    registered_agents: normalizeRegisteredAgents(rawInput.registered_agents),
+      ? null : normalizeTodoAgent(rawInput.actor_agent_id, "actor_agent_id"),
+    registered_agents: normalizeRegisteredTodoAgents(rawInput.registered_agents),
   };
   if (typeof input.dry_run !== "boolean") {
     throw new AuthorityStoreProtocolError("dry_run must be a boolean");
@@ -128,7 +103,7 @@ function normalizeCreateInput(rawInput: CoordinationTodoCreateInput): Coordinati
     );
   }
   if (todo.claimed_by !== undefined) {
-    const owner = normalizeAgent(todo.claimed_by, "todo.claimed_by");
+    const owner = normalizeTodoAgent(todo.claimed_by, "todo.claimed_by");
     if (!input.registered_agents.includes(owner)) {
       throw new AuthorityStoreProtocolError("Todo claim owner is not registered");
     }
