@@ -66,6 +66,10 @@ from .capabilities.connector_registry.cli import (
     handle_connector_command,
     register_connector_commands,
 )
+from .capabilities.local_synthetic_overlay.cli import (
+    handle_local_synthetic_overlay_command,
+    register_local_synthetic_overlay_commands,
+)
 from .cli_commands import (
     handle_turn_command,
     handle_benchmark_command,
@@ -292,6 +296,8 @@ def build_parser() -> LoopXArgumentParser:
 
     register_connector_commands(sub, add_subcommand_format)
 
+    register_local_synthetic_overlay_commands(sub, add_subcommand_format)
+
     register_ml_experiment_commands(sub, add_subcommand_format)
 
     _register_demo_commands(sub, add_subcommand_format)
@@ -441,6 +447,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if capability_result is not None:
         return capability_result
+
+    local_synthetic_overlay_result = handle_local_synthetic_overlay_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if local_synthetic_overlay_result is not None:
+        return local_synthetic_overlay_result
 
     extension_result = handle_extension_command(
         args,
