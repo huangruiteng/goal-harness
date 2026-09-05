@@ -1175,14 +1175,29 @@ function buildPersonalHomeModel(
     const needsYouTodo = allUserTodos.find((todo) => todo.goalId === goal.id);
     const needsYou = needsYouTodo?.text ?? null;
     const agentTodoFacts = personalAgentTodoFacts(row);
+    const registeredAgentIds = goal.coordination?.registered_agents ?? [];
+    const registeredAgentSet = new Set(registeredAgentIds);
     const goalAgentRows = agentRows.filter(
       (agent) => agent.goalIds.includes(goal.id)
         && !/unassigned|unknown/i.test(agent.agentId)
+        && (registeredAgentSet.size === 0 || registeredAgentSet.has(agent.agentId))
         && (agent.currentTodo?.goal_id === goal.id || agent.claimedTodos.some((todo) => todo.goalId === goal.id)),
     );
     const sortedGoalAgentRows = [...goalAgentRows].sort((left, right) =>
       (right.lastActivity ?? "").localeCompare(left.lastActivity ?? ""),
     );
+    const knownAgentIds = new Set(sortedGoalAgentRows.map((agent) => agent.agentId));
+    const goalAgentLanes = [
+      ...sortedGoalAgentRows.map((agent) => ({
+        agentId: agent.agentId,
+        label: agent.agentId,
+        lastActivityAt: agent.lastActivity,
+        state: agent.status.label,
+      })),
+      ...registeredAgentIds
+        .filter((agentId) => !knownAgentIds.has(agentId))
+        .map((agentId) => ({ agentId, label: agentId, lastActivityAt: null, state: "registered" })),
+    ];
     const agentRow = sortedGoalAgentRows[0];
     const goalAgentTodos = mergePersonalAgentTodos(personalAgentTodos(row), sortedGoalAgentRows, row);
     const nextSentence = [
@@ -1194,14 +1209,9 @@ function buildPersonalHomeModel(
       .find((value) => value !== "" && value !== "暂无") ?? "等待 LoopX 更新下一步";
     return [{
       activationState: goal.activation_state,
-      agentId: agentRow?.agentId ?? "codex",
-      agentLaneCount: sortedGoalAgentRows.length,
-      agentLanes: sortedGoalAgentRows.map((agent) => ({
-        agentId: agent.agentId,
-        label: agent.agentId,
-        lastActivityAt: agent.lastActivity,
-        state: agent.status.label,
-      })),
+      agentId: agentRow?.agentId ?? registeredAgentIds[0] ?? "codex",
+      agentLaneCount: goalAgentLanes.length,
+      agentLanes: goalAgentLanes,
       agentLabel: agentRow?.agentId,
       agentSentence: personalAgentSentence(payload, row, state),
       agentTodos: [...goalAgentTodos, ...agentTodoFacts.recentCompleted],

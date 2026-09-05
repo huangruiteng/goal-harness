@@ -435,7 +435,7 @@ assert.match(larkSettings, /t\("lark\.connections"\)/, "Lark management exposes 
 for (const label of ["Connect Lark App", "Group chat", "Bind to Goal", "Create Goal topic automatically", "Topic reply"]) {
   assert.match(i18n, new RegExp(label), `English locale contains ${label}`);
 }
-assert.match(i18n, /One Lark App · many Goals · one topic per Goal/, "Connection cardinality is explicit");
+assert.match(i18n, /One Lark App · many Goals · one isolated route per Agent/, "Connection cardinality is explicit");
 assert.match(larkSettings, /lark_message_permissions_required/, "Missing message permissions receive an actionable error");
 assert.match(larkSettings, /selectedApp\?\.reply_ready/, "Connect stays disabled until automatic replies are healthy");
 assert.match(larkSettings, /lark\.health\.unavailable/, "Existing unhealthy connections expose localized reply health");
