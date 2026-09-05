@@ -305,6 +305,14 @@ export function registerAuthorityStoreConformance(
           text: "Repeat terminal work"},
       });
       assert.equal(recreatedAfterDeferred.status, "applied");
+      const inconsistentTerminal = await executeCoordinationTodoCreate(store, {
+        ...replayRequest,
+        operation_id: "reject-inconsistent-terminal",
+        todo: {...replayRequest.todo, todo_id: "todo-inconsistent-terminal",
+          status: "done", done: false},
+      });
+      assert.equal(inconsistentTerminal.status, "failed");
+      assert.equal(inconsistentTerminal.reason_code, "invalid_coordination_todo_create");
       const loaded = await store.loadAuthority();
       assert.equal(loaded.status, "loaded");
       if (loaded.status !== "loaded") return;
