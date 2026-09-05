@@ -28,7 +28,10 @@ coordination 路径使用同一份语言中立的 `coordination_state_contract_v
 仅将 typed read result 适配为兼容 summary。这是 contract 检查点，不是已经完成的
 CLI lifecycle cutover。
 
-显式 promotion 后，`todo claim` 现在只跨一次 runtime 边界，由 TS 事务同时处理原生
+默认 Markdown 与显式 promotion 两条 `todo claim` 路径现在都由同一个 TS claim
+decision 处理 actor、registration、role、status、archive、exclusion 与现有 owner
+检查；Python legacy writer 只在持锁后提交该 decision。显式 promotion 后，claim
+只跨一次 runtime 边界，由同一 TS 事务同时处理原生
 和 v0 记录。新 claim 要求 active、open Todo，并检查当前 actor/lease；同一 operation
 的重试先恢复原 claim receipt，再考虑当前资格。观测时间和当前注册信息不属于请求
 身份。回放 receipt 不续租，也不表示当前仍持有任务。非 preview 的成功 `no_change`

@@ -31,7 +31,11 @@ native creation, archival, receipt replay, and store reopen are tested without
 Markdown metadata. Python only adapts the typed read result to the compatibility
 summary. This is a contract checkpoint, not a completed CLI lifecycle cutover.
 
-After explicit promotion, `todo claim` now crosses once into a TS-owned
+The default Markdown and explicitly promoted `todo claim` paths now share one
+TypeScript claim decision for actor, registration, role, status, archive,
+exclusion, and existing-owner checks; the Python legacy writer only commits
+that decision while holding its lock. After explicit promotion, claim crosses
+once into the same TS-owned
 transaction for both native and v0 records. New claims require active, open
 Todos and the current actor/lease checks. Exact operation retries recover the
 original claim receipt before current-state eligibility; observation time and

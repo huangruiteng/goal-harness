@@ -1893,6 +1893,11 @@ kernel 的近期顺序是：（1）真实 provider-first Todo lifecycle caller�
 transaction，不能只做另一轮 schema identifier 统一。接受 native contract 不等于
 可以绕过任何 promotion hold。
 
+`claim` 的第一个 replacement-first 切片把默认 Markdown writer 与 promotion 后的
+provider transaction 接到同一个 TS decision；Python 默认路径只保留持锁提交和既有
+投影兼容职责。它关闭 claim policy 的双实现，但不把 Markdown 提升为 authority，
+也不替代剩余 create/update/complete/archive 的统一 transaction 与 projection outbox。
+
 file-v0 只用于有界 conformance 与 import 演练。第 7.2 节嵌入式存储切片与 provider-first
 Todo caller 同时推进，在长程本地资格化与晋升前汇合。PostgreSQL service/deployment
 继续并行，不成为本地晋升的依赖；NoKV 独立通过自己的 lineage/recovery 资格门禁。

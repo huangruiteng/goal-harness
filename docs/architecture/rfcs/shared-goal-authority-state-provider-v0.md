@@ -2387,6 +2387,13 @@ export and cleanup. Each slice must prove an end-to-end transaction, not merely
 another schema identifier consolidation. Native contract acceptance alone is
 not permission to bypass any promotion hold.
 
+The first replacement-first `claim` slice routes both the default Markdown
+writer and the promoted provider transaction through one TypeScript decision.
+Python's default path retains only locked commit and existing projection-
+compatibility duties. This closes duplicate claim policy; it neither promotes
+Markdown to authority nor replaces the remaining unified
+create/update/complete/archive transactions and projection outbox.
+
 Use file-v0 for bounded conformance and import rehearsal only. Start the
 Section 7.2 embedded-store slice alongside the provider-first Todo caller; both
 converge before long-goal local qualification and promotion. PostgreSQL

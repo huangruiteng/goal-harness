@@ -30,6 +30,10 @@ import {
   readLocalCoordinationTodo,
 } from "../../loopx/control_plane/coordination/local_authority_runtime.ts";
 import {
+  COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
+  evaluateCoordinationTodoClaimDecision,
+} from "../../loopx/control_plane/coordination/todo_claim.ts";
+import {
   checkLegacyCoordinationWriteAllowed,
   engageLegacyCoordinationWriterFence,
   LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA,
@@ -77,6 +81,40 @@ function todoRecord(overrides: Record<string, unknown> = {}): Record<string, unk
     source_section: "Agent Todo",
     ...overrides,
   };
+}
+
+async function claimSeededTodo(
+  root: string,
+  todo: Record<string, unknown>,
+  operationId: string,
+) {
+  const store = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
+  await store.commitAuthority({
+    expected_provider_revision: null,
+    operation_id: "seed",
+    events: [],
+    next_projection: withTodoReadModel({
+      goal_id: "goal-a",
+      handoff_mode: "soft_claim",
+      todos: [todo],
+      leases: [],
+    }),
+    receipts: [],
+  });
+  const result = await claimLocalCoordinationTodo({
+    schema_version: LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    todo_id: "todo_a",
+    role: "agent",
+    claimed_by: "agent-a",
+    actor_agent_id: "agent-a",
+    registered_agents: ["agent-a", "agent-b"],
+    operation_id: operationId,
+    observed_at: "2026-09-05T04:30:00Z",
+    dry_run: false,
+  });
+  return { result, receipt: await store.readReceipt(operationId) };
 }
 
 async function qualifiedShadow(root: string) {
@@ -472,6 +510,105 @@ test("provider-first Todo claim preserves the complete record and is replay-safe
   });
   assert.equal(repeated.status, "no_change");
   assert.equal(repeated.changed, false);
+});
+
+test("one TypeScript decision owns promoted and legacy Todo claims", () => {
+  const input = {
+    goal_id: "goal-a",
+    todo_id: "todo_a",
+    claimed_by: "agent-a",
+    actor_agent_id: "agent-a",
+    expected_role: "agent",
+    registered_agents: ["agent-a", "agent-b"],
+    operation_id: "decision-only",
+    dry_run: true,
+    now: new Date(0),
+  };
+  const accepted = evaluateCoordinationTodoClaimDecision(todoRecord(), input);
+  assert.equal(accepted.status, "accepted");
+  assert.equal(
+    (accepted.mutation_authority as Record<string, unknown>).mode,
+    "registered_peer_actor",
+  );
+
+  const rejected = evaluateCoordinationTodoClaimDecision(
+    todoRecord({ excluded_agents: [" Agent-A "] }),
+    input,
+  );
+  assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.reason_code, "actor_excluded");
+
+  assert.throws(
+    () => evaluateCoordinationTodoClaimDecision(
+      todoRecord({ excluded_agents: ["agent-a", " Agent-A "] }),
+      input,
+    ),
+    /unique public-safe agent ids/,
+  );
+});
+
+test("the shared claim decision rejects every pre-commit lifecycle boundary", () => {
+  const base: Parameters<typeof evaluateCoordinationTodoClaimDecision>[1] = {
+    goal_id: "goal-a",
+    todo_id: "todo_a",
+    claimed_by: "agent-a",
+    actor_agent_id: "agent-a",
+    expected_role: "agent",
+    registered_agents: ["agent-a", "agent-b"],
+    operation_id: "decision-only",
+    dry_run: true,
+    now: new Date(0),
+  };
+  const cases: Array<[Record<string, unknown>, Partial<typeof base>, string]> = [
+    [{ status: "done" }, {}, "todo_not_open"],
+    [{ archive_state: "archive" }, {}, "todo_archived"],
+    [{ role: "user" }, { expected_role: "user" }, "todo_not_agent"],
+    [{ removed_continuation_policy: "author_reviewer_handoff" }, {},
+      "removed_continuation_policy"],
+    [{ claimed_by: "agent-b" }, {}, "claim_owner_mismatch"],
+    [{}, { actor_agent_id: "agent-b" }, "claim_actor_mismatch"],
+    [{}, { actor_agent_id: null }, "actor_required"],
+  ];
+  for (const [todoOverrides, inputOverrides, code] of cases) {
+    const result = evaluateCoordinationTodoClaimDecision(
+      todoRecord(todoOverrides),
+      { ...base, ...inputOverrides },
+    );
+    assert.equal(result.status, "rejected", code);
+    assert.equal(result.reason_code, code);
+  }
+});
+
+test("promoted claim rejection preserves the public result envelope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-claim-rejection-envelope-"));
+  const { result: rejected, receipt } = await claimSeededTodo(
+    root,
+    todoRecord({ status: "done", done: true }),
+    "claim-rejected",
+  );
+
+  assert.equal(
+    rejected.schema_version,
+    COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
+    JSON.stringify(rejected),
+  );
+  assert.equal(rejected.status, "failed");
+  assert.equal(rejected.reason_code, "todo_not_open", JSON.stringify(rejected));
+  assert.deepEqual(receipt, { status: "missing" });
+});
+
+test("promoted claim normalizes persisted excluded-agent identities", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-claim-excluded-normalize-"));
+  const { result: rejected, receipt } = await claimSeededTodo(
+    root,
+    todoRecord({ excluded_agents: [" Agent-A "] }),
+    "claim-excluded",
+  );
+
+  assert.equal(rejected.schema_version, COORDINATION_TODO_CLAIM_RESULT_SCHEMA);
+  assert.equal(rejected.status, "failed");
+  assert.equal(rejected.reason_code, "actor_excluded");
+  assert.deepEqual(receipt, { status: "missing" });
 });
 
 for (const native of [false, true]) {

@@ -120,6 +120,7 @@ import {
   promoteLocalCoordinationAuthority,
   readLocalCoordinationTodo,
 } from "./coordination/local_authority_runtime.ts";
+import { evaluateCoordinationTodoClaimDecision } from "./coordination/todo_claim.ts";
 import {
   checkLegacyCoordinationWriteAllowed,
   engageLegacyCoordinationWriterFence,
@@ -350,6 +351,25 @@ export function createEffectRuntimeHandlers(
     ["todo.completion_state.require_metadata", requireTodoCompletionMetadataValue],
     ["todo.completion_state.continuation_for_write", selectTodoCompletionContinuation],
     ["todo.completion_state.metadata_updates", buildTodoCompletionMetadataUpdates],
+    [
+      "todo.claim.decide",
+      (params) => evaluateCoordinationTodoClaimDecision(
+        requiredObject(params.todo, "todo"),
+        {
+          goal_id: requiredString(params.goal_id, "goal_id"),
+          todo_id: requiredString(params.todo_id, "todo_id"),
+          claimed_by: requiredString(params.claimed_by, "claimed_by"),
+          actor_agent_id: params.actor_agent_id === null
+            ? null : requiredString(params.actor_agent_id, "actor_agent_id"),
+          expected_role: params.expected_role === null
+            ? null : requiredString(params.expected_role, "expected_role"),
+          registered_agents: stringArray(params.registered_agents, "registered_agents"),
+          operation_id: "decision-only",
+          dry_run: true,
+          now: new Date(0),
+        },
+      ),
+    ],
     ["todo.completion.reduce", reduceTodoCompletionTransaction],
     ["todo.next_action.transition", transitionTodoNextAction],
     ["todo.resume_condition.normalize", normalizeTodoResumeWhen],
