@@ -114,6 +114,7 @@ import {
 } from "./coordination/runtime_shadow.ts";
 import {
   claimLocalCoordinationTodo,
+  createLocalCoordinationTodo,
   editLocalCoordinationTodo,
   mutateLocalCoordinationAuthority,
   listLocalCoordinationTodos,
@@ -412,6 +413,7 @@ export function createEffectRuntimeHandlers(
     ["coordination.runtime_shadow.rollback", rollbackCoordinationRuntimeShadow],
     ["coordination.local_authority.promote", promoteLocalCoordinationAuthority],
     ["coordination.local_authority.todo_claim", claimLocalCoordinationTodo],
+    ["coordination.local_authority.todo_create", createLocalCoordinationTodo],
     ["coordination.local_authority.todo_compatibility_edit", editLocalCoordinationTodo],
     ["coordination.local_authority.mutate", mutateLocalCoordinationAuthority],
     ["coordination.local_authority.todo_read", readLocalCoordinationTodo],

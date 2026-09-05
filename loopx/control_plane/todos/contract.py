@@ -1207,6 +1207,12 @@ def _normalize_todo_metadata_for_write(values: dict[str, Any]) -> dict[str, Any]
     return normalized
 
 
+def normalize_todo_metadata_for_write(values: dict[str, Any]) -> dict[str, Any]:
+    """Return canonical typed Todo metadata without Markdown encoding."""
+
+    return _normalize_todo_metadata_for_write(values)
+
+
 def _format_todo_metadata_values(values: dict[str, Any]) -> str | None:
     normalized = _normalize_todo_metadata_for_write(values)
     fields = [

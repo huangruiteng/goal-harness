@@ -21,7 +21,7 @@ from loopx.control_plane.todos.active_state_editing import TODO_SECTION_HEADINGS
 from loopx.control_plane.coordination.legacy_writer_fence import (
     legacy_coordination_writer_fence_path,
 )
-from loopx.todos import list_goal_todos, update_goal_todo
+from loopx.todos import add_goal_todo, list_goal_todos, update_goal_todo
 
 
 def _engage_fence(runtime_root: Path, goal_id: str = "goal-a") -> None:
@@ -138,6 +138,96 @@ def test_promoted_claim_adapter_invokes_typescript_without_markdown_fallback(
         "todo-claim:goal-a:todo_a:"
     )
     assert isinstance(calls[0][1]["observed_at"], str)
+
+
+def test_promoted_add_invokes_native_create_without_markdown_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": 1,
+        "common_runtime_root": str(tmp_path / "runtime"),
+        "goals": [{
+            "id": "goal-a",
+            "coordination": {"registered_agents": ["agent-a", "agent-b"]},
+        }],
+    }), encoding="utf-8")
+    calls: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        "loopx.control_plane.todos.provider_create.read_canonical_todos_if_promoted",
+        lambda **_kwargs: {"todos": []},
+    )
+
+    def _create(method: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((method, params))
+        return {
+            "status": "applied", "changed": True,
+            "source_authority": "file_v0",
+            "decision_read_from_provider": True,
+            "legacy_fallback_used": False,
+        }
+
+    monkeypatch.setattr(
+        "loopx.control_plane.todos.provider_create.effect_runtime_result", _create
+    )
+    result = add_goal_todo(
+        registry_path=registry, goal_id="goal-a", role="agent",
+        text="Create natively", claimed_by="agent-a", agent_id="agent-a",
+        task_class="advancement_task", action_kind="implement",
+        validation_command_json='["python", "-c", "pass"]',
+    )
+
+    assert result["added"] is True
+    assert calls[0][0] == "coordination.local_authority.todo_create"
+    assert calls[0][1]["todo"]["schema_version"] == "todo_domain_record_v0"
+    assert calls[0][1]["todo"]["claimed_by"] == "agent-a"
+    assert calls[0][1]["todo"]["validation_command_argv"] == [
+        "python", "-c", "pass"
+    ]
+    assert calls[0][1]["registered_agents"] == ["agent-a", "agent-b"]
+
+
+def test_promoted_add_delegates_semantic_duplicate_to_typescript(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "loopx.control_plane.todos.provider_create.read_canonical_todos_if_promoted",
+        lambda **_kwargs: {"todos": [{
+            "todo_id": "todo_existing", "role": "agent", "status": "open",
+            "archive_state": "active", "text": "Already native",
+        }]},
+    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def _create(method: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((method, params))
+        return {
+            "status": "no_change", "changed": False,
+            "todo_id": "todo_existing", "source_authority": "file_v0",
+            "decision_read_from_provider": True, "legacy_fallback_used": False,
+        }
+
+    monkeypatch.setattr(
+        "loopx.control_plane.todos.provider_create.effect_runtime_result", _create,
+    )
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": 1,
+        "goals": [{"id": "goal-a", "coordination": {
+            "registered_agents": ["agent-a"]
+        }}],
+    }), encoding="utf-8")
+
+    result = add_goal_todo(
+        registry_path=registry, goal_id="goal-a", role="agent",
+        text="Already native", claimed_by="agent-a", agent_id="agent-a",
+    )
+
+    assert result["already_exists"] is True
+    assert result["todo_id"] == "todo_existing"
+    assert calls[0][0] == "coordination.local_authority.todo_create"
 
 
 def test_engaged_fence_never_falls_back_when_provider_is_missing(
@@ -433,6 +523,34 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
         item for item in after_claim["todos"] if item["todo_id"] == "todo_claimable"
     )
     assert claimed_item["claimed_by"] == "agent-a"
+
+    create_command = [
+        sys.executable, "-m", "loopx.cli", "--format", "json",
+        "--registry", str(registry_path), "todo", "add", "--goal-id", "goal-a",
+        "--role", "agent", "--text", "Create directly against promoted provider",
+        "--claimed-by", "agent-a",
+        "--task-class", "advancement_task", "--action-kind", "implement",
+    ]
+    create_preview = subprocess.run(
+        [*create_command, "--dry-run"], capture_output=True, text=True, check=True,
+    )
+    assert json.loads(create_preview.stdout)["status"] == "planned"
+    assert not state_file.exists()
+    created = json.loads(subprocess.run(
+        create_command, capture_output=True, text=True, check=True,
+    ).stdout)
+    assert created["ok"] is True
+    assert created["source_authority"] == "file_v0"
+    assert created["legacy_fallback_used"] is False
+    assert not state_file.exists()
+
+    after_create = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
+    created_item = next(
+        item for item in after_create["todos"] if item["todo_id"] == created["todo_id"]
+    )
+    assert created_item["text"] == "Create directly against promoted provider"
+    assert created_item["claimed_by"] == "agent-a"
+    assert after_create["authority_read"]["todo_read_model"]["todo_count"] == 4
     assert claimed_item["note"] == claimable["note"]
 
     # Real CLI, no Markdown file: provider data feeds an in-memory editor and
@@ -444,7 +562,7 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
                "--text", "Edit provider-owned work", "--note", "compatibility edit"]
     preview = subprocess.run([*command, "--dry-run"], capture_output=True, text=True, check=True)
     assert json.loads(preview.stdout)["status"] == "planned"
-    assert list_goal_todos(registry_path=registry_path, goal_id="goal-a")["todos"] == after_claim["todos"]
+    assert list_goal_todos(registry_path=registry_path, goal_id="goal-a")["todos"] == after_create["todos"]
     edited = subprocess.run(command, capture_output=True, text=True, check=True)
     edit_result = json.loads(edited.stdout)
     assert edit_result["status"] == "applied"

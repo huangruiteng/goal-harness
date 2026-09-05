@@ -41,10 +41,16 @@ import {
   COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
   executeCoordinationTodoClaim,
 } from "./todo_claim.ts";
+import {
+  COORDINATION_TODO_CREATE_RESULT_SCHEMA,
+  executeCoordinationTodoCreate,
+} from "./todo_create.ts";
 import { editCoordinationTodo, TODO_COMPATIBILITY_EDIT_RESULT_SCHEMA } from "./todo_compatibility_edit.ts";
 
 export const LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA =
   "loopx_local_coordination_todo_claim_request_v0";
+export const LOCAL_COORDINATION_TODO_CREATE_REQUEST_SCHEMA =
+  "loopx_local_coordination_todo_create_request_v0";
 export {
   LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA,
   LOCAL_COORDINATION_MUTATION_RESULT_SCHEMA,
@@ -571,6 +577,58 @@ export async function claimLocalCoordinationTodo(
       status: "failed",
       reason_code: "invalid_local_coordination_todo_claim_request",
       reason: error instanceof Error ? error.message : "invalid Todo claim request",
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  }
+}
+
+/** Local file-provider adapter for the provider-neutral Todo create transaction. */
+export async function createLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local coordination Todo create request");
+    if (input.schema_version !== LOCAL_COORDINATION_TODO_CREATE_REQUEST_SCHEMA) {
+      throw new Error("local coordination Todo create request schema mismatch");
+    }
+    if (typeof input.dry_run !== "boolean") {
+      throw new Error("dry_run must be a JSON boolean");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    if (!Array.isArray(input.registered_agents)) {
+      throw new Error("registered_agents must be a JSON array");
+    }
+    const result = await executeCoordinationTodoCreate(store, {
+      goal_id: goalId,
+      todo: requireJsonObject(input.todo, "todo"),
+      actor_agent_id: input.actor_agent_id === null || input.actor_agent_id === undefined
+        ? null
+        : claimAgentValue(input.actor_agent_id, "actor_agent_id"),
+      registered_agents: input.registered_agents.map(
+        (agent) => claimAgentValue(agent, "registered agent"),
+      ),
+      operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+      dry_run: input.dry_run,
+      now: claimObservedAt(input.observed_at),
+    });
+    return {
+      ...result,
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_TODO_CREATE_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_todo_create_request",
+      reason: error instanceof Error ? error.message : "invalid Todo create request",
       source_authority: "file_v0",
       decision_read_from_provider: true,
       legacy_fallback_used: false,
