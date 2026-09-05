@@ -584,7 +584,7 @@ export async function claimLocalCoordinationTodo(
   }
 }
 
-/** Local file-provider adapter for the provider-neutral Todo create transaction. */
+/** Local file-provider adapter for the provider-neutral work-item create transaction. */
 export async function createLocalCoordinationTodo(
   value: unknown,
   dependencies: LocalAuthorityRuntimeDependencies = {},
@@ -592,17 +592,17 @@ export async function createLocalCoordinationTodo(
   try {
     const input = requireJsonObject(value, "local coordination Todo create request");
     if (input.schema_version !== LOCAL_COORDINATION_TODO_CREATE_REQUEST_SCHEMA) {
-      throw new Error("local coordination Todo create request schema mismatch");
+      throw new TypeError("local coordination Todo create request schema mismatch");
     }
     if (typeof input.dry_run !== "boolean") {
-      throw new Error("dry_run must be a JSON boolean");
+      throw new TypeError("dry_run must be a JSON boolean");
     }
     const root = runtimeRoot(input.runtime_root);
     const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
     const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
       new FileAuthorityStore(authorityDirectory(root), goalId);
     if (!Array.isArray(input.registered_agents)) {
-      throw new Error("registered_agents must be a JSON array");
+      throw new TypeError("registered_agents must be a JSON array");
     }
     const result = await executeCoordinationTodoCreate(store, {
       goal_id: goalId,

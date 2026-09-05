@@ -258,7 +258,12 @@ export function registerAuthorityStoreConformance(
         executeCoordinationTodoCreate(contender, {...request,
           operation_id: "create-todo-contender", todo: {...todo, text: "Competing create"}}),
       ]);
-      assert.deepEqual([first.status, second.status].sort(), ["applied", "conflict"]);
+      assert.deepEqual(
+        [first.status, second.status].sort((left, right) =>
+          String(left).localeCompare(String(right))
+        ),
+        ["applied", "conflict"],
+      );
       const applied = first.status === "applied" ? first : second;
       const replayRequest = first.status === "applied" ? request : {...request,
         operation_id: "create-todo-contender", todo: {...todo, text: "Competing create"}};

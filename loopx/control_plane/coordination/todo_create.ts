@@ -105,46 +105,79 @@ function replayCreate(
   };
 }
 
-/** Create one canonical Todo through the provider transaction and outbox. */
+function normalizeCreateInput(rawInput: CoordinationTodoCreateInput): CoordinationTodoCreateInput {
+  const todo = canonicalTodoDomainRecord(rawInput.todo, "Todo create record");
+  const input = {
+    ...rawInput,
+    goal_id: requireAuthorityStoreId(rawInput.goal_id, "goal id"),
+    operation_id: requireAuthorityStoreId(rawInput.operation_id, "operation id"),
+    todo,
+    actor_agent_id: rawInput.actor_agent_id === null
+      ? null : normalizeAgent(rawInput.actor_agent_id, "actor_agent_id"),
+    registered_agents: normalizeRegisteredAgents(rawInput.registered_agents),
+  };
+  if (typeof input.dry_run !== "boolean") {
+    throw new AuthorityStoreProtocolError("dry_run must be a boolean");
+  }
+  if (!(input.now instanceof Date) || Number.isNaN(input.now.valueOf())) {
+    throw new AuthorityStoreProtocolError("now must be a valid Date");
+  }
+  if (todo.status === "done" || todo.done || todo.archive_state !== "active") {
+    throw new AuthorityStoreProtocolError(
+      "Todo create requires a non-completed active record with coherent status",
+    );
+  }
+  if (todo.claimed_by !== undefined) {
+    const owner = normalizeAgent(todo.claimed_by, "todo.claimed_by");
+    if (!input.registered_agents.includes(owner)) {
+      throw new AuthorityStoreProtocolError("Todo claim owner is not registered");
+    }
+    if (input.actor_agent_id !== null && input.actor_agent_id !== owner) {
+      throw new AuthorityStoreProtocolError("claimed Todo create requires actor to match owner");
+    }
+  }
+  if (input.actor_agent_id !== null && !input.registered_agents.includes(input.actor_agent_id)) {
+    throw new AuthorityStoreProtocolError("actor_agent_id is not registered for this goal");
+  }
+  return input;
+}
+
+function semanticDuplicateResult(
+  todo: JsonObject,
+  duplicate: JsonObject,
+  providerRevision: unknown,
+  cursor: unknown,
+): CoordinationTodoCreateResult {
+  const ignored = new Set(["schema_version", "todo_id", "created_by", "last_actor_agent_id", "updated_at"]);
+  const mismatch = Object.entries(todo).find(([field, value]) =>
+    !ignored.has(field) && canonicalAuthoritySha256(value) !== canonicalAuthoritySha256(duplicate[field])
+  );
+  if (mismatch !== undefined) {
+    return failure(
+      "todo_semantic_duplicate_conflict",
+      `an active Todo with the same role/text has different ${mismatch[0]}; use Todo update`,
+      {todo_id: duplicate.todo_id},
+    );
+  }
+  return {
+    schema_version: COORDINATION_TODO_CREATE_RESULT_SCHEMA,
+    status: "no_change",
+    changed: false,
+    todo_id: duplicate.todo_id,
+    todo: duplicate,
+    provider_revision: providerRevision,
+    cursor,
+  };
+}
+
+/** Create one canonical work item through the provider transaction and outbox. */
 export async function executeCoordinationTodoCreate(
   store: AuthorityStore,
   rawInput: CoordinationTodoCreateInput,
 ): Promise<CoordinationTodoCreateResult> {
   let input: CoordinationTodoCreateInput;
   try {
-    const todo = canonicalTodoDomainRecord(rawInput.todo, "Todo create record");
-    input = {
-      ...rawInput,
-      goal_id: requireAuthorityStoreId(rawInput.goal_id, "goal id"),
-      operation_id: requireAuthorityStoreId(rawInput.operation_id, "operation id"),
-      todo,
-      actor_agent_id: rawInput.actor_agent_id === null
-        ? null : normalizeAgent(rawInput.actor_agent_id, "actor_agent_id"),
-      registered_agents: normalizeRegisteredAgents(rawInput.registered_agents),
-    };
-    if (typeof input.dry_run !== "boolean") {
-      throw new AuthorityStoreProtocolError("dry_run must be a boolean");
-    }
-    if (!(input.now instanceof Date) || Number.isNaN(input.now.valueOf())) {
-      throw new AuthorityStoreProtocolError("now must be a valid Date");
-    }
-    if (todo.status === "done" || todo.done || todo.archive_state !== "active") {
-      throw new AuthorityStoreProtocolError(
-        "Todo create requires a non-completed active record with coherent status",
-      );
-    }
-    if (todo.claimed_by !== undefined) {
-      const owner = normalizeAgent(todo.claimed_by, "todo.claimed_by");
-      if (!input.registered_agents.includes(owner)) {
-        throw new AuthorityStoreProtocolError("Todo claim owner is not registered");
-      }
-      if (input.actor_agent_id !== null && input.actor_agent_id !== owner) {
-        throw new AuthorityStoreProtocolError("claimed Todo create requires actor to match owner");
-      }
-    }
-    if (input.actor_agent_id !== null && !input.registered_agents.includes(input.actor_agent_id)) {
-      throw new AuthorityStoreProtocolError("actor_agent_id is not registered for this goal");
-    }
+    input = normalizeCreateInput(rawInput);
   } catch (error) {
     return failure(
       "invalid_coordination_todo_create",
@@ -182,26 +215,7 @@ export async function executeCoordinationTodoCreate(
     todo.role === input.todo.role && todo.archive_state === "active" && todo.text === input.todo.text
   );
   if (duplicate !== undefined) {
-    const ignored = new Set(["schema_version", "todo_id", "created_by", "last_actor_agent_id", "updated_at"]);
-    const mismatch = Object.entries(input.todo).find(([field, value]) =>
-      !ignored.has(field) && canonicalAuthoritySha256(value) !== canonicalAuthoritySha256(duplicate[field])
-    );
-    if (mismatch !== undefined) {
-      return failure(
-        "todo_semantic_duplicate_conflict",
-        `an active Todo with the same role/text has different ${mismatch[0]}; use Todo update`,
-        {todo_id: duplicate.todo_id},
-      );
-    }
-    return {
-      schema_version: COORDINATION_TODO_CREATE_RESULT_SCHEMA,
-      status: "no_change",
-      changed: false,
-      todo_id: duplicate.todo_id,
-      todo: duplicate,
-      provider_revision: head.provider_revision,
-      cursor: head.cursor,
-    };
+    return semanticDuplicateResult(input.todo, duplicate, head.provider_revision, head.cursor);
   }
   if (projection.todos.has(todoId)) {
     return failure("todo_already_exists", "Todo id already exists in canonical authority", {todo_id: todoId});
