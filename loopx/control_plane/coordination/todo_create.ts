@@ -170,6 +170,59 @@ function semanticDuplicateResult(
   };
 }
 
+function createCandidate(
+  input: CoordinationTodoCreateInput,
+  readModelSchema: unknown,
+): JsonObject {
+  const domainCreated = canonicalTodoDomainRecord({
+    ...input.todo,
+    schema_version: TODO_DOMAIN_ITEM_SCHEMA,
+    created_by: input.actor_agent_id,
+    last_actor_agent_id: input.actor_agent_id,
+    updated_at: input.now.toISOString().replace(/\.\d{3}Z$/u, "Z"),
+  }, "created Todo");
+  if (readModelSchema === TODO_DOMAIN_READ_RECORD_SCHEMA) return domainCreated;
+  return {
+    ...domainCreated,
+    schema_version: TODO_ITEM_SCHEMA,
+    source_section: domainCreated.role === "agent" ? "Agent Todo" : "User Todo",
+  };
+}
+
+async function commitCreate(
+  store: AuthorityStore,
+  input: CoordinationTodoCreateInput,
+  requestSha: string,
+  head: Extract<Awaited<ReturnType<AuthorityStore["loadAuthority"]>>, {status: "loaded"}>,
+  created: JsonObject,
+  todoId: string,
+): Promise<CoordinationTodoCreateResult> {
+  const commit = prepareCoordinationProjectionCommit({
+    goal_id: input.goal_id,
+    operation_id: input.operation_id,
+    expected_provider_revision: head.provider_revision,
+    projection: head.head,
+    mutations: [{kind: "todo_upsert", todo: created}],
+  });
+  commit.receipts = [{
+    schema_version: COORDINATION_TODO_CREATE_RECEIPT_SCHEMA,
+    operation_id: input.operation_id,
+    goal_id: input.goal_id,
+    request_sha256: requestSha,
+    todo_id: todoId,
+    todo: created,
+  }];
+  const committed = await store.commitAuthority(commit);
+  const readback = replayCreate(
+    await store.readReceipt(input.operation_id), input, requestSha,
+    committed.status === "applied" ? "applied" : "recovered",
+  );
+  if (readback !== null) return readback;
+  return committed.status === "applied"
+    ? failure("coordination_commit_readback_mismatch", "applied create lacks its durable receipt")
+    : {schema_version: COORDINATION_TODO_CREATE_RESULT_SCHEMA, ...committed, changed: false};
+}
+
 /** Create one canonical work item through the provider transaction and outbox. */
 export async function executeCoordinationTodoCreate(
   store: AuthorityStore,
@@ -220,22 +273,8 @@ export async function executeCoordinationTodoCreate(
   if (projection.todos.has(todoId)) {
     return failure("todo_already_exists", "Todo id already exists in canonical authority", {todo_id: todoId});
   }
-  const createdAt = input.now.toISOString().replace(/\.\d{3}Z$/u, "Z");
-  const domainCreated = canonicalTodoDomainRecord({
-    ...input.todo,
-    schema_version: TODO_DOMAIN_ITEM_SCHEMA,
-    created_by: input.actor_agent_id,
-    last_actor_agent_id: input.actor_agent_id,
-    updated_at: createdAt,
-  }, "created Todo");
   const readModel = canonicalAuthorityObject(head.head.todo_read_model, "Todo read model");
-  const created: JsonObject = readModel.schema_version === TODO_DOMAIN_READ_RECORD_SCHEMA
-    ? domainCreated
-    : {
-      ...domainCreated,
-      schema_version: TODO_ITEM_SCHEMA,
-      source_section: domainCreated.role === "agent" ? "Agent Todo" : "User Todo",
-    };
+  const created = createCandidate(input, readModel.schema_version);
   if (input.dry_run) {
     return {
       schema_version: COORDINATION_TODO_CREATE_RESULT_SCHEMA,
@@ -248,28 +287,5 @@ export async function executeCoordinationTodoCreate(
       cursor: head.cursor,
     };
   }
-  const commit = prepareCoordinationProjectionCommit({
-    goal_id: input.goal_id,
-    operation_id: input.operation_id,
-    expected_provider_revision: head.provider_revision,
-    projection: head.head,
-    mutations: [{kind: "todo_upsert", todo: created}],
-  });
-  commit.receipts = [{
-    schema_version: COORDINATION_TODO_CREATE_RECEIPT_SCHEMA,
-    operation_id: input.operation_id,
-    goal_id: input.goal_id,
-    request_sha256: requestSha,
-    todo_id: todoId,
-    todo: created,
-  }];
-  const committed = await store.commitAuthority(commit);
-  const readback = replayCreate(
-    await store.readReceipt(input.operation_id), input, requestSha,
-    committed.status === "applied" ? "applied" : "recovered",
-  );
-  if (readback !== null) return readback;
-  return committed.status === "applied"
-    ? failure("coordination_commit_readback_mismatch", "applied create lacks its durable receipt")
-    : {schema_version: COORDINATION_TODO_CREATE_RESULT_SCHEMA, ...committed, changed: false};
+  return commitCreate(store, input, requestSha, head, created, todoId);
 }
