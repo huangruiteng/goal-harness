@@ -316,13 +316,11 @@ def _guided_todo_delta_schema_migration(
 def _terminal_contract_schema_migration(
     base: dict[str, Any], candidate: dict[str, Any]
 ) -> str | None:
-    base_versions = tuple(base.get("terminal_contract_schema_versions") or [])
-    candidate_versions = tuple(
+    base_versions = set(base.get("terminal_contract_schema_versions") or [])
+    candidate_versions = set(
         candidate.get("terminal_contract_schema_versions") or []
     )
-    if base_versions == () and candidate_versions == (
-        TERMINAL_CONTRACT_SCHEMA_VERSION_V0,
-    ):
+    if base_versions == set() and TERMINAL_CONTRACT_SCHEMA_VERSION_V0 in candidate_versions:
         return f"none -> {TERMINAL_CONTRACT_SCHEMA_VERSION_V0}"
     return None
 
@@ -467,7 +465,7 @@ def _schema_migration_state(
             output_format == "json" and guided_todo_delta_schema_migration
         ),
         terminal_contract_growth_migration=bool(
-            output_format == "json" and terminal_contract_schema_migration
+            terminal_contract_schema_migration
         ),
     )
 
