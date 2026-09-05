@@ -20,7 +20,6 @@ ACTION_PORTFOLIO_SCHEMA_VERSION_V1 = "quota_action_portfolio_v1"
 ACTION_PORTFOLIO_SCHEMA_VERSION_V2 = "quota_action_portfolio_v2"
 PLANNING_HORIZON_SCHEMA_VERSION_V0 = "quota_planning_horizon_v0"
 GUIDED_TODO_DELTA_SCHEMA_VERSION_V0 = "loopx_guided_todo_delta_v0"
-TERMINAL_CONTRACT_SCHEMA_VERSION_V0 = "loopx_goal_terminal_contract_v0"
 PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION_V0 = (
     "todo_planning_inventory_detail_v0"
 )
@@ -166,17 +165,6 @@ _GUIDED_TODO_DELTA_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
     "compact_payload_chars": 448,
 }
 
-# loopx_goal_terminal_contract_v0 adds the typed terminal contract to the
-# guided start-goal packet. The allowance is bound to the declared
-# none-to-v0 schema migration; after merge the ordinary start_goal_guided
-# growth budgets apply again.
-_TERMINAL_CONTRACT_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
-    "chars": 1024,
-    "utf8_bytes": 1024,
-    "lines": 24,
-    "compact_payload_chars": 896,
-}
-
 
 def _runtime_root_route_growth_allowances(
     base: dict[str, Any], candidate: dict[str, Any]
@@ -313,20 +301,6 @@ def _guided_todo_delta_schema_migration(
     return None
 
 
-def _terminal_contract_schema_migration(
-    base: dict[str, Any], candidate: dict[str, Any]
-) -> str | None:
-    base_versions = tuple(base.get("terminal_contract_schema_versions") or [])
-    candidate_versions = tuple(
-        candidate.get("terminal_contract_schema_versions") or []
-    )
-    if base_versions == () and candidate_versions == (
-        TERMINAL_CONTRACT_SCHEMA_VERSION_V0,
-    ):
-        return f"none -> {TERMINAL_CONTRACT_SCHEMA_VERSION_V0}"
-    return None
-
-
 def _planning_inventory_detail_schema_migration(
     base: dict[str, Any], candidate: dict[str, Any]
 ) -> str | None:
@@ -355,13 +329,10 @@ class _SchemaMigrationState:
     inventory_detail_schema_migration: str | None
     guided_todo_delta_schema_changed: bool
     guided_todo_delta_schema_migration: str | None
-    terminal_contract_schema_changed: bool
-    terminal_contract_schema_migration: str | None
     portfolio_growth_migration: bool
     horizon_growth_migration: bool
     inventory_detail_growth_migration: bool
     guided_todo_delta_growth_migration: bool
-    terminal_contract_growth_migration: bool
 
 
 def _schema_migration_state(
@@ -414,15 +385,6 @@ def _schema_migration_state(
         if guided_todo_delta_schema_changed
         else None
     )
-    terminal_contract_schema_changed = (
-        tuple(base.get("terminal_contract_schema_versions") or [])
-        != tuple(candidate.get("terminal_contract_schema_versions") or [])
-    )
-    terminal_contract_schema_migration = (
-        _terminal_contract_schema_migration(base, candidate)
-        if terminal_contract_schema_changed
-        else None
-    )
     return _SchemaMigrationState(
         signature_changed=signature_changed,
         signature_migration=signature_migration,
@@ -434,8 +396,6 @@ def _schema_migration_state(
         inventory_detail_schema_migration=inventory_detail_schema_migration,
         guided_todo_delta_schema_changed=guided_todo_delta_schema_changed,
         guided_todo_delta_schema_migration=guided_todo_delta_schema_migration,
-        terminal_contract_schema_changed=terminal_contract_schema_changed,
-        terminal_contract_schema_migration=terminal_contract_schema_migration,
         portfolio_growth_migration=bool(
             output_format == "json"
             and (
@@ -465,9 +425,6 @@ def _schema_migration_state(
         ),
         guided_todo_delta_growth_migration=bool(
             output_format == "json" and guided_todo_delta_schema_migration
-        ),
-        terminal_contract_growth_migration=bool(
-            output_format == "json" and terminal_contract_schema_migration
         ),
     )
 
@@ -529,11 +486,6 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
             allowance = max(
                 allowance,
                 _GUIDED_TODO_DELTA_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
-            )
-        if migration.terminal_contract_growth_migration:
-            allowance = max(
-                allowance,
-                _TERMINAL_CONTRACT_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
             )
         if runtime_root_route_allowances:
             allowance = max(
@@ -605,14 +557,6 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
             review_signals.append(
                 "guided todo delta schema migrated: "
                 f"{migration.guided_todo_delta_schema_migration}"
-            )
-    if migration.terminal_contract_schema_changed:
-        if migration.terminal_contract_schema_migration is None:
-            failures.append("terminal contract schema coverage changed")
-        else:
-            review_signals.append(
-                "terminal contract schema migrated: "
-                f"{migration.terminal_contract_schema_migration}"
             )
 
     return {
