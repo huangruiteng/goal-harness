@@ -66,6 +66,7 @@ from .extensions.runtime import (
     resolve_extension_activation,
 )
 from .history import load_registry
+from .todos import list_goal_todos
 from .paths import resolve_runtime_root
 from .release_manifest import release_runtime_identity
 from .registry import registry_goals, resolve_state_file
@@ -761,6 +762,61 @@ class ChatRequestHandler(
         except KeyError:
             self._send_error("chat session was not found", status=404)
 
+    def _completed_todos(self) -> None:
+        query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+        allowed = {"goal_id", "agent_id", "offset", "limit"}
+        if set(query) - allowed or any(len(values) != 1 for values in query.values()):
+            self._send_error("invalid completed task query")
+            return
+        goal_id = query.get("goal_id", [""])[0].strip()
+        agent_id = query.get("agent_id", [""])[0].strip() or None
+        try:
+            offset = int(query.get("offset", ["0"])[0])
+            limit = int(query.get("limit", ["50"])[0])
+            if not goal_id or offset < 0 or not 1 <= limit <= 100:
+                raise ValueError
+        except ValueError:
+            self._send_error("goal_id, offset >= 0 and limit between 1 and 100 are required")
+            return
+        if self.server.selected_goal_id and goal_id != self.server.selected_goal_id:
+            self._send_error("Goal is outside this server scope", status=403)
+            return
+        try:
+            result = list_goal_todos(
+                registry_path=self.server.registry_path,
+                goal_id=goal_id,
+                role="agent",
+                status="done",
+                agent_id=agent_id,
+                runtime_root_arg=self.server.runtime_root_override,
+            )
+        except ValueError:
+            self._send_error("Goal or task source is unavailable", status=400)
+            return
+        except OSError:
+            self._send_error("Task source could not be read", status=503)
+            return
+        items = sorted(
+            [item for item in result.get("todos", [])
+             if item.get("task_class") == "advancement_task"
+             and item.get("archive_state", "active") == "active"
+             and item.get("done") is True],
+            key=lambda item: (str(item.get("completed_at") or ""), str(item.get("todo_id") or "")),
+            reverse=True,
+        )
+        protected_paths = [Path(result[key]) for key in ("state_file", "project") if result.get(key)]
+        page = [_compact_todo(item, protected_paths=protected_paths) for item in items[offset:offset + limit]]
+        for item in page:
+            item.pop("evidence", None)
+        self._send_json({
+            "ok": True,
+            "goal_id": goal_id,
+            "scope": "active_completed_advancement",
+            "total": len(items),
+            "items": page,
+            "next_offset": offset + len(page) if offset + len(page) < len(items) else None,
+        })
+
     def _list_sessions(self) -> None:
         query = parse_qs(urlparse(self.path).query)
         goal_id = _compact_text((query.get("goal_id") or [""])[0], limit=160) or None
@@ -1299,6 +1355,7 @@ class ChatRequestHandler(
                 }
             )
         get_dispatch = {
+            "/api/chat/todos/completed": self._completed_todos,
             CHAT_SESSIONS_PATH: self._list_sessions,
             CHAT_ACTIONS_PATH: self._action_list,
             CHAT_GOAL_CONTEXTS_PATH: self._goal_contexts,
