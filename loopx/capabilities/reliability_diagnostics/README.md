@@ -55,6 +55,18 @@ hook isolation, not an OS-process-isolation claim.
   and the `SOURCE_ID_KEYS` identity tuple; the session-runtime substring
   classifier is deliberately not reused.
 
+## Relationship To The RFCs
+
+- [Long-Running Agent Reliability Diagnostics](../../../docs/architecture/rfcs/long-running-agent-reliability-diagnostics-governed-delivery-v0.md)
+  owns this capability. This slice is the P0 contract checkpoint recorded in
+  its roadmap; the `dsh` event source is the recorded answer to owner
+  decision 2, and the C1 run, overhead report, and retention profile remain
+  open before P0 exit.
+- [Desktop Execution Frontends](../../../docs/architecture/rfcs/desktop-execution-frontends-v0.md)
+  Mode B is the managed runtime this observer is built for: the Desktop-owned
+  runtime supervisor may consume the receipt and projection as diagnostic
+  inputs, while the observer keeps no supervisor authority.
+
 ## Contract
 
 ### Observer envelope (`reliability_observer_envelope_v0`)
