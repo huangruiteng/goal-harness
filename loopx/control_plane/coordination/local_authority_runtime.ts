@@ -647,7 +647,7 @@ export async function createLocalCoordinationTodo(
   }
 }
 
-/** Local file-provider adapter for the provider-neutral Todo metadata update. */
+/** Local file-provider adapter for one provider-neutral metadata mutation. */
 export async function updateLocalCoordinationTodo(
   value: unknown,
   dependencies: LocalAuthorityRuntimeDependencies = {},
@@ -657,10 +657,10 @@ export async function updateLocalCoordinationTodo(
   try {
     const input = requireJsonObject(value, "local coordination Todo update request");
     if (input.schema_version !== COORDINATION_TODO_UPDATE_REQUEST_SCHEMA) {
-      throw new Error("local coordination Todo update request schema mismatch");
+      throw new TypeError("local coordination Todo update request schema mismatch");
     }
     if (!Array.isArray(input.registered_agents) || !Array.isArray(input.clear_fields)) {
-      throw new Error("registered_agents and clear_fields must be JSON arrays");
+      throw new TypeError("registered_agents and clear_fields must be JSON arrays");
     }
     const root = runtimeRoot(input.runtime_root);
     const goalId = requireAuthorityStoreId(input.goal_id, "goal id");

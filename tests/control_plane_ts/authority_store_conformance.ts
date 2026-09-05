@@ -454,7 +454,9 @@ export function registerAuthorityStoreConformance(
         executeCoordinationTodoUpdate(contender, {...request, operation_id: "update-contender",
           patch: {text: "Concurrent update"}}),
       ]);
-      assert.deepEqual([first.status, second.status].sort(), ["applied", "conflict"]);
+      assert.deepEqual([String(first.status), String(second.status)].sort(
+        (left, right) => left.localeCompare(right)),
+        ["applied", "conflict"]);
       const appliedRequest = first.status === "applied" ? request : {...request,
         operation_id: "update-contender", patch: {text: "Concurrent update"}};
       assert.equal((await executeCoordinationTodoUpdate(store, appliedRequest)).status, "replayed");

@@ -54,6 +54,11 @@ function failure(code: string, reason: string): CoordinationTodoUpdateResult {
     changed: false, reason_code: code, reason};
 }
 
+function isFailure(value: JsonObject): value is CoordinationTodoUpdateResult {
+  return value.schema_version === COORDINATION_TODO_UPDATE_RESULT_SCHEMA &&
+    value.status === "failed";
+}
+
 function normalizeInput(raw: CoordinationTodoUpdateInput): CoordinationTodoUpdateInput {
   const patch = canonicalAuthorityObject(raw.patch, "Todo update patch");
   const clearFields = raw.clear_fields.map((field, index) =>
@@ -117,40 +122,33 @@ function replayUpdate(
     projection_source: "committed_authority_journal"};
 }
 
-/** Update mutable Todo metadata from the canonical provider head. */
-export async function executeCoordinationTodoUpdate(
-  store: AuthorityStore, rawInput: CoordinationTodoUpdateInput,
-): Promise<CoordinationTodoUpdateResult> {
-  let input: CoordinationTodoUpdateInput;
-  try { input = normalizeInput(rawInput); } catch (error) {
-    return failure("invalid_coordination_todo_update",
-      error instanceof Error ? error.message : "invalid Todo update");
-  }
-  const requestSha = canonicalAuthoritySha256({goal_id: input.goal_id,
+function updateRequestSha(input: CoordinationTodoUpdateInput): string {
+  return canonicalAuthoritySha256({goal_id: input.goal_id,
     todo_id: input.todo_id, expected_role: input.expected_role,
     actor_agent_id: input.actor_agent_id, patch: input.patch,
     clear_fields: input.clear_fields, dry_run: input.dry_run});
-  const replay = replayUpdate(await store.readReceipt(input.operation_id), input, requestSha, "replayed");
-  if (replay !== null) return replay;
-  if (input.actor_agent_id === null || !input.registered_agents.includes(input.actor_agent_id)) {
-    return failure("actor_not_registered", "Todo update requires a registered actor");
-  }
-  const head = await store.loadAuthority();
-  if (head.status !== "loaded") {
-    return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA, ...head, changed: false};
-  }
-  let todo: JsonObject;
-  let projection: ReturnType<typeof indexCoordinationProjection>;
+}
+
+function loadUpdateTarget(
+  head: JsonObject, input: CoordinationTodoUpdateInput,
+): {todo: JsonObject; leases: ReadonlyMap<string, JsonObject>} | CoordinationTodoUpdateResult {
   try {
-    validateCoordinationTodoReadModel(head.head, input.goal_id);
-    projection = indexCoordinationProjection(head.head, input.goal_id);
+    validateCoordinationTodoReadModel(head, input.goal_id);
+    const projection = indexCoordinationProjection(head, input.goal_id);
     const found = projection.todos.get(input.todo_id);
-    if (found === undefined) return failure("todo_not_found", "canonical Todo is missing");
-    todo = found;
+    return found === undefined
+      ? failure("todo_not_found", "canonical Todo is missing")
+      : {todo: found, leases: projection.leases};
   } catch (error) {
     return failure("invalid_coordination_projection",
       error instanceof Error ? error.message : "invalid coordination projection");
   }
+}
+
+function targetRejection(
+  head: JsonObject, todo: JsonObject, leases: ReadonlyMap<string, JsonObject>,
+  input: CoordinationTodoUpdateInput,
+): CoordinationTodoUpdateResult | null {
   if (input.expected_role !== null && todo.role !== input.expected_role) {
     return failure("todo_role_mismatch", "Todo does not have the requested role");
   }
@@ -166,10 +164,16 @@ export async function executeCoordinationTodoUpdate(
   }
   // Lease-bearing updates need an execution-instance fence in addition to the
   // actor identity. Until the native request carries that proof, fail closed.
-  if (![undefined, "legacy", "soft_claim"].includes(head.head.handoff_mode as string | undefined) ||
-      projection.leases.has(input.todo_id)) {
+  if (![undefined, "legacy", "soft_claim"].includes(head.handoff_mode as string | undefined) ||
+      leases.has(input.todo_id)) {
     return failure("update_lease_unsupported", "lease-bearing Todo updates are not yet supported");
   }
+  return null;
+}
+
+function prepareUpdatedTodo(
+  todo: JsonObject, input: CoordinationTodoUpdateInput,
+): {next: JsonObject; changed: boolean} | CoordinationTodoUpdateResult {
   const next: JsonObject = {...todo, ...input.patch};
   for (const field of input.clear_fields) delete next[field];
   next.last_actor_agent_id = input.actor_agent_id;
@@ -196,6 +200,35 @@ export async function executeCoordinationTodoUpdate(
     next.last_actor_agent_id = todo.last_actor_agent_id;
     next.updated_at = todo.updated_at;
   }
+  return {next, changed};
+}
+
+/** Update mutable Todo metadata from the canonical provider head. */
+export async function executeCoordinationTodoUpdate(
+  store: AuthorityStore, rawInput: CoordinationTodoUpdateInput,
+): Promise<CoordinationTodoUpdateResult> {
+  let input: CoordinationTodoUpdateInput;
+  try { input = normalizeInput(rawInput); } catch (error) {
+    return failure("invalid_coordination_todo_update",
+      error instanceof Error ? error.message : "invalid Todo update");
+  }
+  const requestSha = updateRequestSha(input);
+  const replay = replayUpdate(await store.readReceipt(input.operation_id), input, requestSha, "replayed");
+  if (replay !== null) return replay;
+  if (input.actor_agent_id === null || !input.registered_agents.includes(input.actor_agent_id)) {
+    return failure("actor_not_registered", "Todo update requires a registered actor");
+  }
+  const head = await store.loadAuthority();
+  if (head.status !== "loaded") {
+    return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA, ...head, changed: false};
+  }
+  const target = loadUpdateTarget(head.head, input);
+  if (isFailure(target)) return target;
+  const rejected = targetRejection(head.head, target.todo, target.leases, input);
+  if (rejected !== null) return rejected;
+  const prepared = prepareUpdatedTodo(target.todo, input);
+  if (isFailure(prepared)) return prepared;
+  const {next, changed} = prepared;
   if (input.dry_run) return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA,
     status: changed ? "planned" : "no_change", changed, todo_id: input.todo_id,
     provider_revision: head.provider_revision, cursor: head.cursor, dry_run: true};
