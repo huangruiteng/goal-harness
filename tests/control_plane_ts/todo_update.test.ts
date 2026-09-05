@@ -64,6 +64,22 @@ test("provider-first update rejects authority and lifecycle escalation", async (
   }
 });
 
+test("provider-first update fails closed without a hard-lease execution proof", async () => {
+  const {store, request} = await seeded();
+  const head = await store.loadAuthority();
+  assert.equal(head.status, "loaded");
+  if (head.status !== "loaded") return;
+  await store.commitAuthority({operation_id: "seed-lease",
+    expected_provider_revision: head.provider_revision, events: [], receipts: [],
+    next_projection: {...head.head, handoff_mode: "hard_lease", leases: [{
+      todo_id: "todo_a", owner: "agent-a", status: "active",
+      expires_at: "2026-09-06T00:00:00Z",
+    }]}});
+  const result = await executeCoordinationTodoUpdate(store, request);
+  assert.equal(result.reason_code, "update_lease_unsupported");
+  assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+});
+
 test("provider-first update records no-change identity without state mutation", async () => {
   const {store, request} = await seeded();
   const before = await store.loadAuthority();

@@ -572,6 +572,7 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     edited_by_id = {item["todo_id"]: item for item in after_edit["todos"]}
     assert edited_by_id["todo_claimable"] == {
         **claimed_item, "text": "Edit provider-owned work", "note": "compatibility edit",
+        "last_actor_agent_id": "agent-a",
         "updated_at": edited_by_id["todo_claimable"]["updated_at"],
     }
     assert edited_by_id["todo_claimable"]["updated_at"] != claimed_item["updated_at"]

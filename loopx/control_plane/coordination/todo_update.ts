@@ -112,7 +112,9 @@ function replayUpdate(
     status: status === "applied" && !original.changed ? "no_change" : status,
     changed: status !== "replayed" && original.changed,
     todo_id: input.todo_id, provider_revision: receipt.provider_revision,
-    cursor: receipt.cursor, original_receipt: original};
+    cursor: receipt.cursor, original_receipt: original,
+    projection_delivery: original.changed ? "pending" : "not_required",
+    projection_source: "committed_authority_journal"};
 }
 
 /** Update mutable Todo metadata from the canonical provider head. */
@@ -138,9 +140,11 @@ export async function executeCoordinationTodoUpdate(
     return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA, ...head, changed: false};
   }
   let todo: JsonObject;
+  let projection: ReturnType<typeof indexCoordinationProjection>;
   try {
     validateCoordinationTodoReadModel(head.head, input.goal_id);
-    const found = indexCoordinationProjection(head.head, input.goal_id).todos.get(input.todo_id);
+    projection = indexCoordinationProjection(head.head, input.goal_id);
+    const found = projection.todos.get(input.todo_id);
     if (found === undefined) return failure("todo_not_found", "canonical Todo is missing");
     todo = found;
   } catch (error) {
@@ -159,6 +163,12 @@ export async function executeCoordinationTodoUpdate(
   }
   if (todo.claimed_by !== input.actor_agent_id) {
     return failure("update_owner_mismatch", "Todo update requires the current claim owner");
+  }
+  // Lease-bearing updates need an execution-instance fence in addition to the
+  // actor identity. Until the native request carries that proof, fail closed.
+  if (![undefined, "legacy", "soft_claim"].includes(head.head.handoff_mode as string | undefined) ||
+      projection.leases.has(input.todo_id)) {
+    return failure("update_lease_unsupported", "lease-bearing Todo updates are not yet supported");
   }
   const next: JsonObject = {...todo, ...input.patch};
   for (const field of input.clear_fields) delete next[field];
