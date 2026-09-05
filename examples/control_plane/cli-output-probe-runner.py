@@ -107,6 +107,11 @@ def _receipt_row(
             if isinstance(payload, dict)
             else []
         ),
+        "terminal_contract_schema_versions": (
+            semantics.terminal_contract_schema_versions(payload)
+            if isinstance(payload, dict)
+            else []
+        ),
     }
 
 
