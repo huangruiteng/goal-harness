@@ -24,6 +24,8 @@ from loopx.session_runtime import (
         # pointers and counts that merely contain a raw-looking word
         "trace_id", "message_id", "catalog_id", "dialog_id", "login_at", "log_count",
         "conversation_id",
+        # `message` is an exact raw key, not a raw word: its pointer/count neighbours stay compact
+        "message_count", "message_ref",
         # usage metrics
         "token_count", "tokens_used", "max_tokens", "input_tokens", "output_tokens",
         "prompt_tokens", "prompt_token_count", "completion_tokens",
@@ -33,7 +35,9 @@ def test_compact_keys(key: str) -> None:
     assert classify_session_runtime_key(key).state is KeyState.COMPACT
 
 
-@pytest.mark.parametrize("key", ["logical_clock", "backlog", "changelog", "drawer", "content_type", ""])
+@pytest.mark.parametrize(
+    "key", ["logical_clock", "backlog", "changelog", "drawer", "content_type", "message_text", ""]
+)
 def test_unclassified_keys_are_neither_compact_nor_raw(key: str) -> None:
     assert classify_session_runtime_key(key) == (KeyState.UNCLASSIFIED, None)
 

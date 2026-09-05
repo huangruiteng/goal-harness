@@ -176,7 +176,11 @@ the same key takes precedence over both metric and pointer shortcuts
 `trace_id` is an explicitly safe pointer; `trace`, `stack_trace`, and
 `trace_path` are logs. `log_count`, `prompt_tokens`, and `prompt_token_count`
 are explicitly safe aggregates and `conversation_id` is an explicitly safe
-pointer; every other `prompt*`, `message*`, or `conversation*` key stays raw. `log`
+pointer. Transcript evidence otherwise matches the exact key `message` and the
+whole words `messages`, `prompt`, `prompts`, and `conversation`: `prompt_id`,
+`prompt_text`, and `conversation_ref` stay raw, `message_count` and
+`message_ref` are compact pointers, and `message_text` is reported as
+unclassified rather than guessed either way. `log`
 matches only as a whole word, so `catalog_id`, `login_at`, and `changelog` are
 not flagged.
 
