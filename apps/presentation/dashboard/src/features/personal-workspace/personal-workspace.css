@@ -734,7 +734,7 @@
 .personal-task-group { min-width: 0; border: 1px solid var(--pw-line); border-radius: 12px; background: var(--pw-card); }
 .personal-task-group > summary { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 10px 16px; list-style: none; cursor: pointer; }
 .personal-task-group > summary::-webkit-details-marker { display: none; }
-.personal-task-group > summary strong { font-size: 13px; font-weight: 600; }
+.personal-task-group > summary strong { font-size: 12px; font-weight: 600; line-height: 18px; }
 .personal-task-group > summary span { padding: 2px 7px; border-radius: 6px; background: var(--pw-line); color: var(--pw-muted); font-size: 12px; }
 .personal-task-group > summary svg { transform: rotate(-90deg); color: var(--pw-muted); }
 .personal-task-group[open] > summary svg { transform: none; }
@@ -742,8 +742,8 @@
 .personal-task-list-rows { padding: 0 16px 8px; }
 .personal-task-list-rows > button, .personal-task-list-rows > .personal-task-card > button { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px 12px; width: 100%; padding: 16px 4px; border: 0; border-top: 1px solid var(--pw-line); border-radius: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .personal-task-list-rows > button:hover, .personal-task-list-rows > .personal-task-card > button:hover { background: var(--pw-line); }
-.personal-task-list-rows > button > strong, .personal-task-list-rows > .personal-task-card > button > strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 1.65; }
-.personal-task-list-rows > button > small, .personal-task-list-rows > .personal-task-card > button > small { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--pw-muted); font-size: 12px; overflow-wrap: anywhere; }
+.personal-task-list-rows > button > strong, .personal-task-list-rows > .personal-task-card > button > strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 20px; }
+.personal-task-list-rows > button > small, .personal-task-list-rows > .personal-task-card > button > small { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--pw-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
 .personal-task-list-rows .personal-task-card-actions { top: auto; bottom: 12px; background: var(--pw-card); }
 @media (min-width: 721px) {
   .personal-channel-header:has(~ .personal-channel-scroll .is-list-view) { flex-wrap: wrap; }
@@ -787,7 +787,8 @@
 .personal-task-kanban .personal-task-lane-scroll > button:last-child { border-bottom: 1px solid var(--pw-line); }
 .personal-task-kanban .personal-task-lane-scroll > button:last-child:hover { border-color: var(--pw-line-strong); }
 .personal-task-lane-scroll > button, .personal-task-card { flex: 0 0 auto; min-width: 0; }
-.personal-task-lane-scroll > button > strong, .personal-task-card > button > strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 1.6; }
+.personal-task-lane-scroll > button > small, .personal-task-card > button > small { font-size: 12px; line-height: 16px; }
+.personal-task-lane-scroll > button > strong, .personal-task-card > button > strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 20px; }
 .personal-task-card { position: relative; }
 .personal-task-card > button { width: 100%; display: grid; align-items: start; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .personal-task-card-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s ease; }
@@ -1308,9 +1309,9 @@
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-object-list > button,
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-task-card > button { border-radius: 12px; box-shadow: none; }
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-task-lane-scroll > button > strong,
-.personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-task-card > button > strong { font-size: 14px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-task-card > button > strong { font-size: 14px; font-weight: 500; line-height: 20px; overflow-wrap: anywhere; }
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-object-list > button > small,
-.personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-task-card > button > small { color: #6b6b6b; font-size: 11px; line-height: 16px; }
+.personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-task-card > button > small { color: #6b6b6b; font-size: 12px; line-height: 16px; }
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-object-list > button:hover,
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-task-kanban .personal-task-card > button:hover { border-color: #a1a1a1; box-shadow: none; }
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-task-card.is-selected > button,
