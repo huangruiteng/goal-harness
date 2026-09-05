@@ -9,6 +9,8 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -1746,8 +1748,11 @@ def test_post_writeback_legacy_lock_timeout_isolates_other_hooks(
     assert len(receipts) == 1
 
 
+@pytest.mark.parametrize("controlled_clock", [False, True], ids=["real-clock", "budget"])
 def test_post_writeback_legacy_locks_share_one_batch_deadline(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    controlled_clock: bool,
 ) -> None:
     calls = {"free": 0}
     locked_hooks = [
@@ -1794,6 +1799,16 @@ def test_post_writeback_legacy_locks_share_one_batch_deadline(
     ]
     assert len(locked_receipts) == 3
 
+    if controlled_clock:
+        # A 50ms budget loses 20ms before the first guard, then overruns.
+        # Patch only this adapter's clock, not the real file-lock/runtime clock.
+        ticks = iter([100.0, 100.02, 100.075, 100.075, 100.075])
+        monkeypatch.setattr(
+            capability_hooks, "time", SimpleNamespace(monotonic=lambda: next(ticks))
+        )
+        lock_spy = Mock(wraps=exclusive_file_lock)
+        monkeypatch.setattr(capability_hooks, "exclusive_file_lock", lock_spy)
+
     with ExitStack() as held_locks:
         for receipt in locked_receipts:
             held_locks.enter_context(
@@ -1808,7 +1823,16 @@ def test_post_writeback_legacy_locks_share_one_batch_deadline(
         )
         elapsed = time.monotonic() - started
 
-    assert elapsed < 0.13
+    if controlled_clock:
+        # Neither restart a full timeout per lock nor pass a negative timeout;
+        # the free sibling must still get a nonblocking acquisition attempt.
+        assert [
+            call.kwargs["timeout_seconds"] for call in lock_spy.call_args_list
+        ] == pytest.approx([0.03, 0.0, 0.0, 0.0])
+    else:
+        # Coarse integration guard only: dispatch also includes runtime and I/O
+        # overhead. The controlled-clock case enforces the precise budget rule.
+        assert elapsed < 2.0
     assert calls == {"free": 1}
     assert dispatch["invoked_count"] == 1
     assert dispatch["intent_count"] == 1
