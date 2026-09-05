@@ -27,7 +27,7 @@ assert.match(
 );
 assert.match(
   tasks,
-  /resizeObserverRef\.current = observer[\s\S]*\}, \[syncOverflow\]\);/,
+  /resizeObserverRef\.current = observer[\s\S]*\}, \[listView, syncOverflow\]\);/,
   "The lane ResizeObserver lifecycle stays stable across card renders",
 );
 assert.match(
@@ -143,6 +143,8 @@ async function main() {
     await page.route("**/api/**", (route) => route.fulfill({ contentType: "application/json", json: { ok: true }, status: 200 }));
     await page.goto(url, { waitUntil: "networkidle" });
     await page.locator(".personal-goal-link").filter({ hasText: "Task board scroll fixture" }).click();
+    await page.getByRole("button", { name: "Tasks", exact: true }).click();
+    await page.getByRole("button", { name: "看板", exact: true }).click();
 
     const lane = page.getByRole("region", { name: "待执行 / 进行中" });
     await lane.waitFor({ state: "visible" });

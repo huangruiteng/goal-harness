@@ -1759,6 +1759,7 @@ export function PersonalWorkspacePage({
             ) : null}
             {selectedGoal && selectedGoalTab === "tasks" ? (
               <GoalTasksView
+                canLoadCompleted={!readOnly}
                 goal={selectedGoal}
                 items={items}
                 onDraftTaskFromMessage={readOnly ? undefined : (reply) => {
