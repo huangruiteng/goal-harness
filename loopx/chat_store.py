@@ -86,6 +86,13 @@ def _session_channel(payload: dict[str, Any]) -> str:
     return f"goal.{payload.get('goal_id')}"
 
 
+def _require_matching_replay(
+    existing: dict[str, Any], *, identity: str, request: dict[str, Any]
+) -> None:
+    if any(existing.get(field) != value for field, value in request.items()):
+        raise ValueError(f"{identity} already belongs to a different request")
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any], *, preserve_mode: bool = False) -> None:
     previous_mode = path.stat().st_mode & 0o777 if preserve_mode and path.exists() else 0o600
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -511,6 +518,11 @@ class ChatSessionStore:
         ):
             existing = _read_json(path)
             if existing.get("schema_version") == CHAT_INGRESS_SCHEMA_VERSION:
+                _require_matching_replay(
+                    existing,
+                    identity="client_ingress_id",
+                    request={"mode": _opaque_id(mode, field="mode"), "message": str(message)},
+                )
                 return existing, False
             now = utc_now()
             payload = {
@@ -575,6 +587,15 @@ class ChatSessionStore:
             ):
                 existing = self.turn_for_client(session_id, client_id)
                 if existing is not None:
+                    _require_matching_replay(
+                        existing,
+                        identity="client_turn_id",
+                        request={
+                            "message": str(message),
+                            "origin": _opaque_id(origin, field="origin"),
+                            "attachments": attachments or None,
+                        },
+                    )
                     return existing, False
                 session = self.load_session(session_id)
                 if session is None or session.get("status") == "closed":
@@ -652,6 +673,14 @@ class ChatSessionStore:
             ):
                 existing = self.turn_for_client(session_id, client_id)
                 if existing is not None:
+                    _require_matching_replay(
+                        existing,
+                        identity="client_turn_id",
+                        request={
+                            "message": str(message),
+                            "origin": _opaque_id(origin, field="origin"),
+                        },
+                    )
                     return existing, False
                 session = self.load_session(session_id)
                 if session is None or session.get("status") == "closed":
