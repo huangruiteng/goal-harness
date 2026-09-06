@@ -47,6 +47,7 @@ from .ack_policy import (
     autonomous_replan_ack_satisfies_obligation,
     replan_successor_transition_ack,
 )
+from .fallback_disposition import declared_fallback_gap_from_agent_vision
 from .long_todo_chain import (
     LONG_TODO_CHAIN_TRIGGER,
     classify_long_todo_chain_ack,
@@ -1416,6 +1417,7 @@ def build_goal_frontier_projection_from_summaries(
     replan_obligation: dict[str, Any] | None,
     acceptance_gaps: list[dict[str, Any]] | None = None,
     vision_wait_state: dict[str, Any] | None = None,
+    fallback_gaps: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     user_counts = _summary_task_counts(user_todo_summary)
     agent_counts = _summary_task_counts(agent_todo_summary)
@@ -1453,6 +1455,7 @@ def build_goal_frontier_projection_from_summaries(
         replan_obligation=replan_obligation,
         acceptance_gaps=acceptance_gaps,
         vision_wait_state=vision_wait_state,
+        fallback_gaps=fallback_gaps,
         deferred_successors=_deferred_successors(
             agent_todo_summary,
             agent_id=agent_id,
@@ -1602,6 +1605,17 @@ def build_goal_frontier_projection_context_from_status(
         ),
     )
     acceptance_gaps = [] if vision_wait_state else source_acceptance_gaps
+    declared_fallback_gaps = [
+        gap
+        for gap in (
+            declared_fallback_gap_from_agent_vision(
+                latest_agent_vision,
+                agent_todo_summary=agent_todo_summary,
+                agent_id=agent_id,
+            ),
+        )
+        if isinstance(gap, dict)
+    ]
     projected_replan_ack = projected_autonomous_replan_ack_for_agent(
         item,
         project_asset,
@@ -1716,6 +1730,7 @@ def build_goal_frontier_projection_context_from_status(
         replan_obligation=replan_obligation,
         acceptance_gaps=acceptance_gaps,
         vision_wait_state=vision_wait_state,
+        fallback_gaps=declared_fallback_gaps,
     )
     if latest_replan_ack_feedback:
         goal_frontier_projection["replan_ack_feedback"] = (
@@ -1821,6 +1836,7 @@ def build_goal_frontier_projection(
     acceptance_gaps: list[dict[str, Any]] | None = None,
     deferred_successors: dict[str, Any] | None = None,
     vision_wait_state: dict[str, Any] | None = None,
+    fallback_gaps: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     replan_required = autonomous_replan_is_required(replan_obligation)
     blockers: list[str] = []
@@ -1883,6 +1899,11 @@ def build_goal_frontier_projection(
     }
     if vision_continuation_audit:
         projection["vision_continuation_audit"] = vision_continuation_audit
+    # Advisory-only field: unlike acceptance_gaps it is never cleared by the
+    # blocked-successor wait state, which is exactly when a declared fallback
+    # would otherwise disappear silently.
+    if fallback_gaps:
+        projection["fallback_gaps"] = fallback_gaps[:1]
     if isinstance(vision_wait_state, dict):
         projection["vision_wait_state"] = vision_wait_state
     if replan_required and isinstance(replan_obligation, dict):
