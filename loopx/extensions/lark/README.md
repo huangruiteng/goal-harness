@@ -247,6 +247,14 @@ permission or silently enables an external write.
   `im:message.p2p_msg:readonly`
 - 交互/文档 sink：`cardkit:card:read/write`、`docs:document.comment:read/create/delete`
 
+`im:chat.members:read` 是原生 @ 身份校验的核心权限，也适用于 @ 机器人。
+发送前使用 `im +chat-members-list --member-types user,bot --page-all` 查询
+精确成员身份；旧的 `chat.members get` 不能作为机器人不在群内的证据。
+默认权限清单不代表已有应用已获授权：旧应用仍需在开发者后台申请并完成审核，
+LoopX 不会自动授予权限，也不会在成员读取失败时绕过 @ 校验。
+若消息回读将机器人标为 `app_id`，仅接受当前群机器人列表中已验证且无歧义的
+`member_id` ↔ `app_id` 映射；名称相同不构成身份验证。
+
 拿到 App ID（`cli_xxx`）后，可在开发者后台一键批量申请：
 
 ```text
