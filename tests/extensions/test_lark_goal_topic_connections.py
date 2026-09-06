@@ -1555,6 +1555,49 @@ def test_disconnect_reports_agent_inbox_cleanup_raise_as_packet(
     )
 
 
+def test_invalid_default_fallback_selects_same_connection_as_disconnect(
+    tmp_path: Path,
+) -> None:
+    beta_id = goal_channel_connection_id("goal-alpha", "agent-beta")
+    zeta_id = goal_channel_connection_id("goal-alpha", "agent-zeta")
+    omega_id = goal_channel_connection_id("goal-alpha", "agent-omega")
+    assert min(beta_id, zeta_id, omega_id) == omega_id
+    binding_path = tmp_path / "binding.json"
+    write_goal_channel_binding(
+        binding_path,
+        {
+            "schema_version": GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+            "bindings": {
+                "goal-alpha": {
+                    "schema_version": GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION,
+                    "default_connection_id": "lark_missing0000000000000000",
+                    "connections": {
+                        beta_id: {"agent_id": "agent-beta", "enabled": True},
+                        zeta_id: {"agent_id": "agent-zeta", "enabled": True},
+                        omega_id: {"agent_id": "agent-omega", "enabled": True},
+                    },
+                }
+            },
+        },
+    )
+    payload = read_goal_channel_binding(binding_path)
+
+    selected = binding_for_goal(payload, "goal-alpha")
+
+    assert selected is not None
+    assert str(selected["connection_id"]) == omega_id
+
+    result = disconnect_lark_goal_topic(
+        binding_path=binding_path,
+        goal_id="goal-alpha",
+        connection_id=beta_id,
+    )
+
+    assert result["ok"] is True
+    stored = read_goal_channel_binding(binding_path)["bindings"]["goal-alpha"]
+    assert stored["default_connection_id"] == omega_id
+
+
 def _legacy_v0_binding_payload(
     root_message_id: str, agent_id: str, target_ref: str = "mew-product"
 ) -> dict[str, Any]:
