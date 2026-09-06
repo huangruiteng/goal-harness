@@ -2436,6 +2436,9 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
         build_turn_envelope as real_build_turn_envelope,
         refresh_state_run as real_refresh_state_run,
         spend_quota_slot as real_spend_quota_slot,
+    )
+
+    from loopx.cli_commands.turn_todo_writeback import (
         update_goal_todo as real_update_goal_todo,
     )
 
@@ -2533,7 +2536,7 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
         recording_spend_quota_slot,
     )
     monkeypatch.setattr(
-        "loopx.cli_commands.turn.update_goal_todo",
+        "loopx.cli_commands.turn_todo_writeback.update_goal_todo",
         recording_update_goal_todo,
     )
     output = io.StringIO()

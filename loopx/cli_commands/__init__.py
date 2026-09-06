@@ -147,7 +147,8 @@ def _load_exports() -> None:
         register_authority_shadow_command,
     )
     from .task_lease import handle_task_lease_command, register_task_lease_command
-    from .todo import handle_todo_command, register_todo_command
+    from .todo import handle_todo_command
+    from .todo_registration import register_todo_command
     from .version import handle_version_command, register_version_command
     from .worker_bridge import handle_worker_bridge_command, register_worker_bridge_commands
     from .workflow_skills import (

@@ -91,6 +91,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin",
                 "purpose": "Read the current agent's thin public-safe ledger before replan or handoff.",
             },
+            {
+                "command": "loopx machine-config --help",
+                "purpose": "Inspect typed machine policy, preview changes, and apply an exact plan revision.",
+            },
             {"command": "loopx todo --help", "purpose": "Show todo lifecycle commands."},
             {
                 "command": "loopx task-lease --help",
@@ -397,12 +401,10 @@ def render_concise_help(program: str = "loopx") -> str:
     program = _program_name(program)
     return "\n".join(
         [
-            "LoopX keeps long-running agent work moving by preserving goals, todos, gates, quota,",
-            "and evidence between agent turns.",
+            "LoopX keeps long-running agent work moving with durable state and evidence.",
             "",
             "Usage:",
             f"  {program} [global options] <command> [command options]",
-            f"  {program} <command> --help",
             "",
             "Start here:",
             "  /loopx                         Ask the agent to inspect LoopX state.",
@@ -438,7 +440,6 @@ def render_concise_help(program: str = "loopx") -> str:
             "  loopx commands                 Show grouped command reference.",
             "  loopx <command> --help         Show flags for one command.",
             "  man loopx                      Open the installed manual page.",
-            "",
         ]
     )
 

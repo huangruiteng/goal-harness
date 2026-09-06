@@ -1,0 +1,67 @@
+"""Todo writeback adapters that preserve the Turn's effective runtime root."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from ..todos import complete_goal_todo, update_goal_todo
+
+
+def write_turn_repair_update(
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    goal_id: str,
+    todo_id: str,
+    note: str,
+    evidence: str,
+    agent_id: str | None,
+) -> None:
+    """Record one repair-required Todo note under the effective runtime root.
+
+    ``runtime_root_arg`` is required on purpose: the Turn settlement must
+    hand down the same ``--runtime-root`` override the dispatch resolved, so
+    the legacy writer fence and the todo mutex of a promotion cannot split
+    from the Turn writeback path.
+    """
+
+    update_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        role="agent",
+        note=note,
+        evidence=evidence,
+        agent_id=agent_id,
+        project=None,
+        dry_run=False,
+        runtime_root_arg=runtime_root_arg,
+    )
+
+
+def write_turn_validated_completion(
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    goal_id: str,
+    todo_id: str,
+    completion_turn_key: str,
+    evidence: str,
+    note: str,
+    agent_id: str | None,
+) -> dict[str, Any]:
+    """Complete one validated Todo under the effective runtime root."""
+
+    return complete_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        role="agent",
+        completion_turn_key=completion_turn_key,
+        evidence=evidence,
+        note=note,
+        agent_id=agent_id,
+        project=None,
+        dry_run=False,
+        runtime_root_arg=runtime_root_arg,
+    )
