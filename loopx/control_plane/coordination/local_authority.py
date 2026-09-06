@@ -71,6 +71,7 @@ def claim_canonical_todo_if_promoted(
     claimed_by: str,
     actor_agent_id: str | None,
     dry_run: bool,
+    operation_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Route a post-cutover claim to the TypeScript transaction owner."""
 
@@ -89,7 +90,7 @@ def claim_canonical_todo_if_promoted(
             "registered_agents": registered_agent_ids_from_registry(
                 registry_path, goal_id
             ),
-            "operation_id": f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}",
+            "operation_id": operation_id if operation_id is not None else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}",
             "observed_at": now_local(),
             "dry_run": dry_run,
         },
