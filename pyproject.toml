@@ -117,6 +117,7 @@ include = ["loopx*"]
 ]
 
 [tool.pytest.ini_options]
+markers = ["stage2c_e2e: real process Stage 2C correctness and recovery acceptance"]
 norecursedirs = ["deprecate"]
 
 [tool.coverage.run]

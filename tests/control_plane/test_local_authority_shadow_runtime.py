@@ -5,10 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from loopx.control_plane.coordination.local_authority_shadow_adapter import (
-    LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA,
-    observe_local_authority_commit,
-)
+from loopx.control_plane.coordination.local_authority_shadow_observation import LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA, observe_local_authority_commit
 from loopx.control_plane.todos.handoff_mode import set_goal_handoff_mode
 from loopx.control_plane.work_items.task_lease import (
     acquire_task_lease,
@@ -117,7 +114,7 @@ def test_default_off_public_writers_never_call_shadow_runtime(
         raise AssertionError("default-off path constructed the shadow runtime")
 
     monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority_shadow_adapter.effect_runtime_result",
+        "loopx.control_plane.coordination.local_authority_shadow_observation.effect_runtime_result",
         forbidden,
     )
 
@@ -396,7 +393,7 @@ def test_candidate_failure_never_changes_committed_todo_result(
         }
 
     monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority_shadow_adapter.effect_runtime_result",
+        "loopx.control_plane.coordination.local_authority_shadow_observation.effect_runtime_result",
         unavailable,
     )
 
@@ -467,7 +464,7 @@ def test_provider_revision_conflict_resamples_source_under_same_observation_lock
     requests: list[dict[str, object]] = []
 
     monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority_shadow_adapter._stable_projection",
+        "loopx.control_plane.coordination.local_authority_shadow_observation._stable_projection",
         lambda **_kwargs: next(projections),
     )
 
@@ -503,7 +500,7 @@ def test_provider_revision_conflict_resamples_source_under_same_observation_lock
         }
 
     monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority_shadow_adapter.effect_runtime_result",
+        "loopx.control_plane.coordination.local_authority_shadow_observation.effect_runtime_result",
         conflict_then_advance,
     )
 

@@ -1,548 +1,169 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { mkdtemp, readdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile, unlink, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { canonicalAuthorityBytes } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
-import {
-  TODO_CANONICAL_READ_RECORD_FIELDS,
-  TODO_CANONICAL_READ_RECORD_SCHEMA,
-} from "../../loopx/control_plane/coordination/coordination_projection.ts";
+import type { JsonObject } from "../../loopx/control_plane/effect_program.ts";
+import { canonicalAuthoritySha256 } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import * as schemas from "../../loopx/control_plane/coordination/coordination_state_contract.generated.ts";
+import { commitLocalAuthorityShadowEntry, readLocalAuthorityShadow } from "../../loopx/control_plane/coordination/local_authority_shadow.ts";
+import { bootstrapCoordinationRuntimeShadow, commitCoordinationRuntimeShadow, inspectCoordinationRuntimeShadow,
+  qualifyCoordinationRuntimeShadow, readCoordinationRuntimeShadowTodoCandidate, rollbackCoordinationRuntimeShadow } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
+import { fixture, pendingEntry, projection, settleFiles, sourceRequest, todo, type ShadowFixture } from "./shadow_file_fixture.ts";
 
-import type {
-  AuthorityStoreCommit,
-  AuthorityStoreCommitResult,
-} from "../../loopx/control_plane/coordination/authority_store.ts";
-import {
-  FileAuthorityStore,
-  type FileAuthorityArchiveResult,
-} from "../../loopx/control_plane/coordination/file_authority_store.ts";
-import {
-  bootstrapCoordinationRuntimeShadow,
-  commitCoordinationRuntimeShadow,
-  inspectCoordinationRuntimeShadow,
-  qualifyCoordinationRuntimeShadow,
-  readCoordinationRuntimeShadowTodoCandidate,
-  rollbackCoordinationRuntimeShadow,
-  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
-} from "../../loopx/control_plane/coordination/runtime_shadow.ts";
-
-function withTodoReadModel<T extends Record<string, unknown>>(projection: T): T {
-  const todos = projection.todos as Record<string, unknown>[];
-  return {
-    ...projection,
-    todo_read_model: {
-      schema_version: TODO_CANONICAL_READ_RECORD_SCHEMA,
-      todo_count: todos.length,
-      records_sha256: createHash("sha256").update(canonicalAuthorityBytes(todos)).digest("hex"),
-      contract_fields: [...TODO_CANONICAL_READ_RECORD_FIELDS],
-    },
-  };
+async function qualifiedFixture(t: test.TestContext): Promise<{ f: ShadowFixture; head: JsonObject }> {
+  const f = await fixture(t); let head = projection();
+  for (let seq = 1; seq <= 3; seq++) {
+    const records = Array.from({ length: seq }, (_, index) => todo(`todo_${index + 1}`));
+    head = projection(records);
+    const entry = await pendingEntry(f, seq, { handoff_mode: "hard_lease", todos: records });
+    const result = await commitLocalAuthorityShadowEntry(entry);
+    assert.equal(result.outcome, "delivered"); await settleFiles(f, entry, result);
+  }
+  return { f, head };
+}
+async function qualify(f: ShadowFixture, head: JsonObject, extra: JsonObject = {}): Promise<JsonObject> {
+  return await qualifyCoordinationRuntimeShadow({ ...await sourceRequest(f, head),
+    schema_version: schemas.COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
+    minimum_operations: 3, required_event_kinds: ["todo_add"], ...extra });
 }
 
-async function request(root: string, operationId = "todo:goal-a:todo_one:v1") {
-  return {
-    schema_version: COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: operationId,
-    event_kind: "todo_claim",
-    source_version: "state:1",
-    projection: withTodoReadModel({
-      schema_version: "loopx_coordination_shadow_projection_v0",
-      goal_id: "goal-a",
-      todos: [{
-        schema_version: "todo_item_v0",
-        todo_id: "todo_one",
-        role: "agent",
-        status: "open",
-        done: false,
-        text: "Qualify shadow semantics",
-        archive_state: "active",
-        source_section: "Agent Todo",
-        claimed_by: "agent-a",
-      }],
-      leases: [],
-    }),
-  };
-}
-
-async function bootstrapRequest(root: string) {
-  const commit = await request(root);
-  return {
-    schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: commit.goal_id,
-    operation_id: "bootstrap:goal-a:state-1",
-    source_version: "state:1",
-    projection: commit.projection,
-  };
-}
-
-test("runtime shadow bootstrap records a replayable baseline with no receipt", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-bootstrap-"));
-  const input = await bootstrapRequest(root);
-
-  const applied = await bootstrapCoordinationRuntimeShadow(input);
-  assert.equal(applied.status, "applied");
-  assert.equal(applied.cursor, "1");
-  assert.equal(applied.mode_declaration, "legacy_canonical_shadow");
-  assert.equal(applied.bootstrap_receipts_empty, true);
-  assert.equal(applied.decision_read_from_shadow, false);
-
-  const replayed = await bootstrapCoordinationRuntimeShadow(input);
-  assert.equal(replayed.status, "replayed");
-  assert.equal(replayed.provider_revision, applied.provider_revision);
-
-  const store = new FileAuthorityStore(
-    join(root, "authority-shadow", "file-v0"),
-    "goal-a",
-  );
-  const receipt = await store.readReceipt(input.operation_id);
-  assert.equal(receipt.status, "found");
-  if (receipt.status === "found") assert.deepEqual(receipt.receipts, []);
-  const scan = await store.scanCommitted(null, 1);
-  assert.equal(scan.status, "page");
-  if (scan.status === "page") {
-    assert.equal(scan.transactions[0]?.receipts.length, 0);
-    assert.equal(
-      (scan.transactions[0]?.events[0] as Record<string, unknown>).source_version,
-      "state:1",
-    );
-  }
-
-  const next = await request(root, "todo:goal-a:todo_one:v2");
-  const committed = await commitCoordinationRuntimeShadow(next);
-  assert.equal(committed.status, "applied");
-  assert.equal(committed.cursor, "2");
+test("bootstrap is exactly replayable, has no mutation receipt and cannot overwrite a different baseline", async (t) => {
+  const f = await fixture(t);
+  const request = { ...await sourceRequest(f, f.baseline), schema_version: schemas.COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
+    operation_id: "bootstrap:test:first", source_version: "source:initial" };
+  const replay = await bootstrapCoordinationRuntimeShadow(request);
+  assert.equal(replay.status, "replayed"); assert.equal(replay.bootstrap_receipts_empty, true);
+  const changed = await sourceRequest(f, projection([todo()]));
+  const rejected = await bootstrapCoordinationRuntimeShadow({ ...request, ...changed });
+  assert.equal(rejected.status, "failed");
+  const history = await f.store.scanCommitted(null, 10); assert.equal(history.status, "page");
+  if (history.status === "page") { assert.equal(history.transactions.length, 1); assert.deepEqual(history.transactions[0]?.receipts, []); }
 });
 
-test("runtime shadow bootstrap fails closed against different initialized content", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-bootstrap-conflict-"));
-  assert.equal((await commitCoordinationRuntimeShadow(await request(root))).status, "applied");
-
-  const result = await bootstrapCoordinationRuntimeShadow(await bootstrapRequest(root));
-  assert.equal(result.status, "failed");
-  assert.equal(result.reason_code, "shadow_bootstrap_identity_mismatch");
-  assert.equal(result.primary_writeback_preserved, true);
-});
-
-test("runtime shadow bootstrap reconciles an applied commit whose response was lost", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-bootstrap-ambiguous-"));
-  class LostBootstrapResponseStore extends FileAuthorityStore {
-    override async commitAuthority(
-      commit: AuthorityStoreCommit,
-    ): Promise<AuthorityStoreCommitResult> {
-      const result = await super.commitAuthority(commit);
-      return result.status === "applied"
-        ? {
-          status: "ambiguous",
-          reason_code: "simulated_response_loss",
-          reason: "commit response was lost",
-        }
-        : result;
-    }
-  }
-
-  const result = await bootstrapCoordinationRuntimeShadow(
-    await bootstrapRequest(root),
-    {
-      createStore: (directory, goalId) =>
-        new LostBootstrapResponseStore(directory, goalId),
-    },
-  );
-  assert.equal(result.status, "recovered");
-  assert.equal(result.cursor, "1");
-  assert.equal(result.bootstrap_receipts_empty, true);
-});
-
-test("runtime shadow rollback quarantines and exactly replays one fenced lineage", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-rollback-"));
-  const bootstrap = await bootstrapCoordinationRuntimeShadow(await bootstrapRequest(root));
-  assert.equal(bootstrap.status, "applied");
-  const rollbackRequest = {
-    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: `rollback:goal-a:${String(bootstrap.provider_revision)}`,
-    expected_provider_revision: bootstrap.provider_revision,
-  };
-
-  const applied = await rollbackCoordinationRuntimeShadow(rollbackRequest);
-  assert.equal(applied.status, "applied");
-  assert.equal(applied.active_shadow_removed, true);
-  assert.equal(applied.archive_retained, true);
-  assert.equal(applied.decision_read_from_shadow, false);
-
-  const store = new FileAuthorityStore(
-    join(root, "authority-shadow", "file-v0"),
-    "goal-a",
-  );
-  assert.equal((await store.loadAuthority()).status, "missing");
-  assert.equal(
-    (await readdir(join(root, "authority-shadow", "file-v0", "rollback"))).length,
-    1,
-  );
-
-  const replayed = await rollbackCoordinationRuntimeShadow(rollbackRequest);
-  assert.equal(replayed.status, "replayed");
-  assert.equal(replayed.archive_id, applied.archive_id);
-});
-
-test("runtime shadow rollback fences revision drift and operation reuse", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-rollback-fence-"));
-  const bootstrapInput = await bootstrapRequest(root);
-  const first = await bootstrapCoordinationRuntimeShadow(bootstrapInput);
-  assert.equal(first.status, "applied");
-  const rollbackRequest = {
-    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: `rollback:goal-a:${String(first.provider_revision)}`,
-    expected_provider_revision: first.provider_revision,
-  };
-  const stale = await rollbackCoordinationRuntimeShadow({
-    ...rollbackRequest,
-    expected_provider_revision: "file:stale-revision",
-  });
-  assert.equal(stale.status, "failed");
-  assert.equal(stale.reason_code, "provider_revision_mismatch");
-
-  assert.equal((await rollbackCoordinationRuntimeShadow(rollbackRequest)).status, "applied");
-  const second = await bootstrapCoordinationRuntimeShadow({
-    ...bootstrapInput,
-    operation_id: "bootstrap:goal-a:state-2",
-    source_version: "state:2",
-  });
-  assert.equal(second.status, "applied");
-
-  const reused = await rollbackCoordinationRuntimeShadow(rollbackRequest);
-  assert.equal(reused.status, "failed");
-  assert.equal(reused.reason_code, "archive_operation_reused_after_rebootstrap");
-  assert.equal(reused.primary_writeback_preserved, true);
-});
-
-test("runtime shadow rollback reconciles a quarantined lineage after response loss", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-rollback-ambiguous-"));
-  const bootstrap = await bootstrapCoordinationRuntimeShadow(await bootstrapRequest(root));
-  assert.equal(bootstrap.status, "applied");
-  const rollbackRequest = {
-    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: `rollback:goal-a:${String(bootstrap.provider_revision)}`,
-    expected_provider_revision: bootstrap.provider_revision,
-  };
-  class LostRollbackResponseStore extends FileAuthorityStore {
-    override async archiveAuthorityDocument(
-      expectedProviderRevision: string,
-      operationId: string,
-    ): Promise<FileAuthorityArchiveResult> {
-      const result = await super.archiveAuthorityDocument(
-        expectedProviderRevision,
-        operationId,
-      );
-      return result.status === "applied"
-        ? {
-          status: "ambiguous",
-          reason_code: "simulated_response_loss",
-          reason: "rollback response was lost",
-        }
-        : result;
-    }
-  }
-
-  const ambiguous = await rollbackCoordinationRuntimeShadow(
-    rollbackRequest,
-    {
-      createFileStore: (directory, goalId) =>
-        new LostRollbackResponseStore(directory, goalId),
-    },
-  );
-  assert.equal(ambiguous.status, "ambiguous");
-  assert.equal(ambiguous.reconciliation_required, true);
-
-  const recovered = await rollbackCoordinationRuntimeShadow(rollbackRequest);
-  assert.equal(recovered.status, "replayed");
-  assert.equal(recovered.archive_retained, true);
-});
-
-test("runtime shadow commits and exactly replays one legacy mutation", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-"));
-  const input = await request(root);
-
-  const applied = await commitCoordinationRuntimeShadow(input);
-  assert.equal(applied.status, "applied");
-  assert.equal(applied.cursor, "1");
-  assert.equal(applied.primary_writeback_preserved, true);
-  assert.equal(applied.decision_read_from_shadow, false);
-  assert.equal((applied.parity as Record<string, unknown>).receipt_matches, true);
-  assert.deepEqual(
-    (applied.parity as Record<string, unknown>).projection_readback,
-    {
-      verified: true,
-      status: "matched_current_head",
-      projection_matches: true,
-      provider_revision: applied.provider_revision,
-    },
-  );
-
-  const replayed = await commitCoordinationRuntimeShadow(input);
-  assert.equal(replayed.status, "replayed");
-  assert.equal(replayed.cursor, "1");
-
-  const store = new FileAuthorityStore(
-    join(root, "authority-shadow", "file-v0"),
-    "goal-a",
-  );
-  const scan = await store.scanCommitted(null, 10);
-  assert.equal(scan.status, "page");
-  if (scan.status === "page") assert.equal(scan.transactions.length, 1);
-});
-
-test("runtime shadow rejects operation-id content drift without changing history", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-drift-"));
-  const input = await request(root);
-  assert.equal((await commitCoordinationRuntimeShadow(input)).status, "applied");
-
-  const drifted = structuredClone(input);
-  (drifted.projection.todos[0] as Record<string, unknown>).claimed_by = "agent-b";
-  const result = await commitCoordinationRuntimeShadow(drifted);
-  assert.equal(result.status, "failed");
-  assert.equal(result.reason_code, "shadow_operation_identity_mismatch");
-  assert.equal(result.primary_writeback_preserved, true);
-
-  const store = new FileAuthorityStore(
-    join(root, "authority-shadow", "file-v0"),
-    "goal-a",
-  );
-  const scan = await store.scanCommitted(null, 10);
-  assert.equal(scan.status, "page");
-  if (scan.status === "page") assert.equal(scan.transactions.length, 1);
-});
-
-test("runtime shadow reconciles an applied commit whose response was lost", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-ambiguous-"));
-  class LostResponseStore extends FileAuthorityStore {
-    override async commitAuthority(
-      commit: AuthorityStoreCommit,
-    ): Promise<AuthorityStoreCommitResult> {
-      const result = await super.commitAuthority(commit);
-      return result.status === "applied"
-        ? {
-          status: "ambiguous",
-          reason_code: "simulated_response_loss",
-          reason: "commit response was lost",
-        }
-        : result;
-    }
-  }
-  const result = await commitCoordinationRuntimeShadow(
-    await request(root),
-    {
-      createStore: (directory, goalId) =>
-        new LostResponseStore(directory, goalId),
-    },
-  );
-  assert.equal(result.status, "recovered");
-  assert.equal(result.cursor, "1");
-  assert.equal(result.primary_writeback_preserved, true);
-});
-
-test("runtime shadow isolates provider failure from primary truth", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-failure-"));
-  class FailedStore extends FileAuthorityStore {
-    override async commitAuthority(): Promise<AuthorityStoreCommitResult> {
-      return {
-        status: "failed",
-        reason_code: "simulated_unavailable",
-        reason: "shadow is offline",
-      };
-    }
-  }
-  const result = await commitCoordinationRuntimeShadow(
-    await request(root),
-    {
-      createStore: (directory, goalId) => new FailedStore(directory, goalId),
-    },
-  );
-  assert.equal(result.status, "failed");
-  assert.equal(result.reason_code, "simulated_unavailable");
-  assert.equal(result.primary_writeback_preserved, true);
+test("outbox qualification verifies bounded history coverage and never claims sustained parity", async (t) => {
+  const { f, head } = await qualifiedFixture(t);
+  const result = await qualify(f, head);
+  assert.equal(result.status, "qualified"); assert.equal(result.qualified, true);
+  assert.equal(result.scope, "bounded"); assert.equal(result.sustained_parity_verified, false);
+  assert.equal(result.sustained_parity_verdict, "not_evaluated");
   assert.equal(result.decision_read_from_shadow, false);
+  assert.equal((result.evidence as JsonObject).operation_count, 3);
+  assert.equal((await qualify(f, head, { minimum_operations: 4 })).status, "insufficient_evidence");
+  assert.equal((await qualify(f, head, { required_event_kinds: ["task_lease_acquire"] })).status, "insufficient_evidence");
 });
 
-test("runtime shadow inspection reports missing, matched, and drifted evidence", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-inspect-"));
-  const input = await request(root);
-  const inspection = {
-    schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: input.goal_id,
-    projection: input.projection,
-  };
-
-  const missing = await inspectCoordinationRuntimeShadow(inspection);
-  assert.equal(missing.status, "missing");
-  assert.equal(missing.bootstrap_required, true);
-  assert.equal(missing.parity_matches, false);
-  assert.equal(missing.decision_read_from_shadow, false);
-
-  assert.equal((await commitCoordinationRuntimeShadow(input)).status, "applied");
-  const matched = await inspectCoordinationRuntimeShadow(inspection);
-  assert.equal(matched.status, "matched");
-  assert.equal(matched.bootstrap_required, false);
-  assert.equal(matched.parity_matches, true);
-  assert.equal(matched.decision_read_from_shadow, false);
-
-  const driftedInput = structuredClone(inspection);
-  (driftedInput.projection.todos[0] as Record<string, unknown>).claimed_by = "agent-b";
-  const drifted = await inspectCoordinationRuntimeShadow(driftedInput);
-  assert.equal(drifted.status, "drifted");
-  assert.equal(drifted.parity_matches, false);
-  assert.notEqual(
-    drifted.expected_projection_sha256,
-    drifted.observed_projection_sha256,
-  );
-  assert.equal(drifted.decision_read_from_shadow, false);
+test("handoff mode and complete Todo fields participate in the common semantic digest", async (t) => {
+  const { f, head } = await qualifiedFixture(t);
+  const changed = structuredClone(head); changed.handoff_mode = "soft_claim";
+  assert.equal((await qualify(f, changed)).status, "drifted");
+  const source = structuredClone(head);
+  (source.todos as JsonObject[])[0]!.source_section = "User Todo";
+  (source.todo_read_model as JsonObject).records_sha256 = canonicalAuthoritySha256(source.todos);
+  assert.equal((await qualify(f, source)).status, "drifted");
 });
 
-test("runtime shadow Todo read candidate requires exact legacy parity", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-todo-read-"));
-  const input = await request(root);
-  const readRequest = {
-    schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: input.goal_id,
-    todo_id: "todo_one",
-    projection: input.projection,
-  };
-
-  const missing = await readCoordinationRuntimeShadowTodoCandidate(readRequest);
-  assert.equal(missing.status, "missing");
-  assert.equal(missing.read_candidate_qualified, false);
-
-  assert.equal((await commitCoordinationRuntimeShadow(input)).status, "applied");
-  const matched = await readCoordinationRuntimeShadowTodoCandidate(readRequest);
-  assert.equal(matched.status, "matched");
-  assert.equal(matched.read_candidate_qualified, true);
-  assert.equal(matched.decision_read_from_shadow, false);
-  assert.deepEqual(matched.todo, input.projection.todos[0]);
-  assert.deepEqual(matched.todo_ids, ["todo_one"]);
-
-  const driftedProjection = structuredClone(input.projection);
-  (driftedProjection.todos[0] as Record<string, unknown>).claimed_by = "agent-b";
-  const drifted = await readCoordinationRuntimeShadowTodoCandidate({
-    ...readRequest,
-    projection: driftedProjection,
-  });
-  assert.equal(drifted.status, "drifted");
-  assert.equal(drifted.read_candidate_qualified, false);
-  assert.equal(drifted.parity_matches, false);
+test("pending entries and malformed cursor block eligibility without destroying evidence", async (t) => {
+  const { f, head } = await qualifiedFixture(t);
+  const cursorPath = join(f.root, "authority-shadow", "outbox", "goal-a", "todos", "drain-cursor.json");
+  const original = await readFile(cursorPath);
+  const bad = JSON.parse(original.toString()); bad.last_seq = true;
+  await writeFile(cursorPath, JSON.stringify(bad));
+  assert.equal((await qualify(f, head)).qualified, false);
+  assert.equal(JSON.parse(await readFile(cursorPath, "utf8")).last_seq, true);
+  await writeFile(cursorPath, original);
+  const pending = await pendingEntry(f, 4, { handoff_mode: "hard_lease", todos: head.todos }, { marker: false });
+  const result = await qualify(f, head);
+  assert.equal(result.status, "not_ready"); assert.equal(result.qualified, false);
+  const proof = await readLocalAuthorityShadow({ schema_version: schemas.LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA,
+    runtime_root: f.root, goal_id: "goal-a", receipt_operation_id: (pending.entry as JsonObject).entry_id, scan_limit: 10000 });
+  assert.equal(proof.status, "loaded"); assert.equal((proof.proof as JsonObject).receipt, null);
 });
 
-test("runtime shadow Todo read candidate fails closed for missing or duplicate Todo ids", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-todo-read-invalid-"));
-  const input = await request(root);
-  assert.equal((await commitCoordinationRuntimeShadow(input)).status, "applied");
-
-  const absent = await readCoordinationRuntimeShadowTodoCandidate({
-    schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: input.goal_id,
-    todo_id: "todo_absent",
-    projection: input.projection,
-  });
-  assert.equal(absent.status, "todo_missing");
-  assert.equal(absent.read_candidate_qualified, false);
-
-  const duplicateProjection = structuredClone(input.projection);
-  duplicateProjection.todos.push(structuredClone(duplicateProjection.todos[0]!));
-  const duplicateRoot = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-todo-duplicate-"));
-  assert.equal((await commitCoordinationRuntimeShadow({
-    ...input,
-    runtime_root: duplicateRoot,
-    operation_id: "todo:goal-a:duplicate:v1",
-    projection: duplicateProjection,
-  })).status, "applied");
-  const duplicate = await readCoordinationRuntimeShadowTodoCandidate({
-    schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
-    runtime_root: duplicateRoot,
-    goal_id: input.goal_id,
-    todo_id: "todo_one",
-    projection: duplicateProjection,
-  });
-  assert.equal(duplicate.status, "failed");
-  assert.equal(duplicate.reason_code, "shadow_todo_read_unavailable");
-  assert.equal(duplicate.read_candidate_qualified, false);
+test("qualification preserves unrecognized residue, symlink partitions and invalid UTF-8 cursors as ineligible", async (t) => {
+  const { f, head } = await qualifiedFixture(t);
+  const directory = join(f.root, "authority-shadow", "outbox", "goal-a", "todos");
+  const residue = join(directory, ".tmp-unfinished");
+  await writeFile(residue, "half a durable write");
+  assert.equal((await qualify(f, head)).qualified, false);
+  assert.equal(await readFile(residue, "utf8"), "half a durable write");
+  await unlink(residue);
+  const cursorPath = join(directory, "drain-cursor.json");
+  const original = await readFile(cursorPath);
+  const cursor = JSON.parse(original.toString());
+  cursor.last_provider_revision = "replacement-\ufffd";
+  const invalid = Buffer.from(JSON.stringify(cursor));
+  const offset = invalid.indexOf(Buffer.from("\ufffd"));
+  await writeFile(cursorPath, Buffer.concat([invalid.subarray(0, offset), Buffer.from([0xff]), invalid.subarray(offset + 3)]));
+  assert.equal((await qualify(f, head)).reason_code, "outbox_file_invalid");
+  await writeFile(cursorPath, original);
+  await symlink(directory, join(f.root, "authority-shadow", "outbox", "goal-a", "leases"));
+  assert.equal((await qualify(f, head)).qualified, false);
 });
 
-test("runtime shadow qualification requires sustained operation and event coverage", async () => {
-  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-qualify-"));
-  const bootstrap = await bootstrapRequest(root);
-  assert.equal((await bootstrapCoordinationRuntimeShadow(bootstrap)).status, "applied");
+test("qualification requires the active outbox manifest to match its exact capture binding", async (t) => {
+  const { f, head } = await qualifiedFixture(t);
+  const path = join(f.root, "authority-shadow", "outbox", "goal-a", "manifest.json");
+  const original = await readFile(path);
+  await unlink(path);
+  assert.equal((await qualify(f, head)).qualified, false);
+  assert.equal((await readLocalAuthorityShadow({ schema_version: schemas.LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA,
+    runtime_root: f.root, goal_id: "goal-a", scan_limit: 10000 })).status, "loaded");
+  const foreign = JSON.parse(original.toString()); foreign.capture_lineage_id = "foreign-manifest";
+  await writeFile(path, JSON.stringify(foreign));
+  assert.equal((await qualify(f, head)).qualified, false);
+  assert.equal(JSON.parse(await readFile(path, "utf8")).capture_lineage_id, "foreign-manifest");
+  await writeFile(path, original);
+  assert.equal((await qualify(f, head)).qualified, true);
+});
 
-  const first = await request(root, "todo:goal-a:todo_one:v2");
-  assert.equal((await commitCoordinationRuntimeShadow(first)).status, "applied");
-  const second = await request(root, "lease:goal-a:todo_one:v3");
-  second.event_kind = "task_lease_acquire";
-  second.source_version = "state:3";
-  assert.equal((await commitCoordinationRuntimeShadow(second)).status, "applied");
-  const third = await request(root, "todo:goal-a:todo_one:v4");
-  third.source_version = "state:4";
-  assert.equal((await commitCoordinationRuntimeShadow(third)).status, "applied");
+test("an observation transaction mixed into the candidate invalidates both qualification and read-candidate", async (t) => {
+  const { f, head } = await qualifiedFixture(t);
+  const loaded = await f.store.loadAuthority(); assert.equal(loaded.status, "loaded"); if (loaded.status !== "loaded") return;
+  await f.store.commitAuthority({ expected_provider_revision: loaded.provider_revision, operation_id: "foreign-mirror",
+    events: [{ schema_version: "loopx_coordination_runtime_shadow_event_v0" }],
+    next_projection: loaded.head, receipts: [{ schema_version: "loopx_coordination_runtime_shadow_receipt_v0" }] });
+  assert.equal((await qualify(f, head)).qualified, false);
+  const read = await readCoordinationRuntimeShadowTodoCandidate({ ...await sourceRequest(f, head),
+    schema_version: schemas.COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA, todo_id: "todo_1" });
+  assert.equal(read.read_candidate_qualified, false);
+});
 
-  const input = {
-    schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    projection: third.projection,
-    minimum_operations: 3,
-    required_event_kinds: ["todo_claim", "task_lease_acquire"],
-  };
-  const qualified = await qualifyCoordinationRuntimeShadow(input);
-  assert.equal(qualified.status, "qualified");
-  assert.equal(qualified.qualified, true);
-  assert.equal(qualified.parity_matches, true);
-  assert.equal(
-    (qualified.evidence as Record<string, unknown>).operation_count,
-    3,
-  );
-  assert.deepEqual(
-    (qualified.evidence as Record<string, unknown>).observed_event_kinds,
-    ["task_lease_acquire", "todo_claim"],
-  );
-  assert.equal(qualified.decision_read_from_shadow, false);
+test("source snapshot drift prevents inspection even when the supplied projection matches", async (t) => {
+  const f = await fixture(t);
+  const request = { ...await sourceRequest(f, f.baseline), schema_version: schemas.COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA };
+  await writeFile(f.statePath, "external edit after source read\n");
+  const result = await inspectCoordinationRuntimeShadow(request);
+  assert.equal(result.status, "failed"); assert.equal(result.reason_code, "source_changed_retry");
+  assert.equal((await f.store.loadAuthority() as { cursor: string }).cursor, "1");
+});
 
-  const insufficient = await qualifyCoordinationRuntimeShadow({
-    ...input,
-    minimum_operations: 4,
-  });
-  assert.equal(insufficient.status, "insufficient_evidence");
-  assert.equal(insufficient.qualified, false);
+test("read-candidate requires the same bounded eligibility before returning a Todo", async (t) => {
+  const { f, head } = await qualifiedFixture(t);
+  const request = { ...await sourceRequest(f, head), schema_version: schemas.COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA, todo_id: "todo_1" };
+  const result = await readCoordinationRuntimeShadowTodoCandidate(request);
+  assert.equal(result.status, "matched"); assert.equal(result.read_candidate_qualified, true);
+  assert.equal(result.scope, "bounded"); assert.equal(result.decision_read_from_shadow, false);
+  assert.deepEqual(result.todo, todo("todo_1"));
+});
 
-  const missingKind = await qualifyCoordinationRuntimeShadow({
-    ...input,
-    required_event_kinds: ["todo_complete"],
-  });
-  assert.equal(missingKind.status, "insufficient_evidence");
-  assert.deepEqual(
-    (missingKind.evidence as Record<string, unknown>).missing_required_event_kinds,
-    ["todo_complete"],
-  );
+test("legacy mirror writes remain retired and cannot alter a new profile", async (t) => {
+  const f = await fixture(t);
+  const before = await f.store.loadAuthority();
+  const result = await commitCoordinationRuntimeShadow({ runtime_root: f.root, goal_id: "goal-a" });
+  assert.equal(result.reason_code, "legacy_lineage_read_only");
+  assert.deepEqual(await f.store.loadAuthority(), before);
+});
 
-  const driftedProjection = structuredClone(third.projection);
-  (driftedProjection.todos[0] as Record<string, unknown>).status = "done";
-  const drifted = await qualifyCoordinationRuntimeShadow({
-    ...input,
-    projection: driftedProjection,
-  });
-  assert.equal(drifted.status, "drifted");
-  assert.equal(drifted.qualified, false);
+test("rollback can archive invalid cursor and pending entries without reading or editing primary content", async (t) => {
+  const f = await fixture(t);
+  await pendingEntry(f, 1, { handoff_mode: "hard_lease", todos: [todo()] }, { marker: false });
+  const primary = await readFile(f.statePath);
+  const loaded = await f.store.loadAuthority(); assert.equal(loaded.status, "loaded"); if (loaded.status !== "loaded") return;
+  await writeFile(join(f.root, "authority-shadow", "outbox", "goal-a", "todos", "drain-cursor.json"), "invalid cursor");
+  const result = await rollbackCoordinationRuntimeShadow({
+    schema_version: schemas.COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA, runtime_root: f.root, goal_id: "goal-a",
+    projection: {}, source_snapshot: { state_path: f.statePath }, operation_id: "rollback:test",
+    expected_provider_revision: loaded.provider_revision, expected_bootstrap_operation_id: null });
+  assert.equal(result.status, "applied"); assert.deepEqual(await readFile(f.statePath), primary);
+  assert.equal((await f.store.loadAuthority()).status, "missing");
 });

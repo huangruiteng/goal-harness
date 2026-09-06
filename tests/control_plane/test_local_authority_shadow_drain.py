@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -12,53 +13,20 @@ from loopx.control_plane.coordination.local_authority_shadow_projection import (
     partition_digest,
     text_digest,
 )
-from loopx.file_lock import exclusive_file_lock
+from loopx.file_lock import exclusive_file_lock, exclusive_cross_runtime_file_lock
+from loopx.control_plane.coordination.shadow_management import require_shadow_primary_write_allowed
+from shadow_e2e_fixture import workspace
 from loopx.history import load_registry
 from loopx.registry import find_registry_goal
-from loopx.todos import add_goal_todo, list_goal_todos
+from loopx.todos import list_goal_todos
 
 
-GOAL_ID = "goal-drain"
+GOAL_ID = "goal-e2e"
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    state = repo / "ACTIVE_GOAL_STATE.md"
-    state.write_text(
-        "---\n"
-        f"goal_id: {GOAL_ID}\n"
-        "handoff_mode: hard_lease\n"
-        "updated_at: 2026-09-03T00:00:00+00:00\n"
-        "---\n\n"
-        "## Agent Todo\n\n",
-        encoding="utf-8",
-    )
-    runtime_root = tmp_path / "runtime"
-    registry = tmp_path / "registry.json"
-    registry.write_text(
-        json.dumps(
-            {
-                "common_runtime_root": str(runtime_root),
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "domain": "harness_self_improvement",
-                        "status": "active",
-                        "repo": str(repo),
-                        "state_file": state.name,
-                        "adapter": {"kind": "harness_self_improvement"},
-                        "coordination": {
-                            "agent_model": "peer_v1",
-                            "registered_agents": ["agent-a"],
-                        },
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    return registry, state, runtime_root
+    real = workspace(tmp_path / "repo")
+    return real.registry, real.state, real.runtime
 
 
 def _record_todo_write(
@@ -70,7 +38,7 @@ def _record_todo_write(
     mark_committed: bool = True,
     write_file: bool = True,
 ) -> outbox.TodoPartitionCapture:
-    """Simulate a hooked writer: capture around one add_goal_todo write."""
+    """Prepare a source transaction without invoking a second capture-enabled writer."""
 
     original = state.read_text(encoding="utf-8")
     goal = find_registry_goal(load_registry(registry), GOAL_ID)
@@ -83,42 +51,26 @@ def _record_todo_write(
         original_text=original,
         projector=adapter.todo_partition_projector(goal, state_path=state),
     )
-    if write_file:
-        result = add_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            role="agent",
-            text=text,
-            task_class="advancement_task",
-        )
-        assert result["ok"] is True
-        new_text = state.read_text(encoding="utf-8")
-    else:
-        # The bytes the writer would have produced, without producing them.
-        result = add_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            role="agent",
-            text=text,
-            task_class="advancement_task",
-        )
-        assert result["ok"] is True
-        new_text = state.read_text(encoding="utf-8")
-        state.write_text(original, encoding="utf-8")
+    todo_id = f"todo_{uuid.uuid4().hex[:12]}"
+    new_text = original + (
+        f"- [ ] {text}\n"
+        f"  <!-- loopx:todo todo_id={todo_id} status=open claimed_by=agent-a -->\n"
+    )
     capture.prepare(new_text)
     assert capture.outcome.failure is None
     assert capture.outcome.entry_id is not None
+    if write_file:
+        state.write_text(new_text, encoding="utf-8")
     if mark_committed:
         capture.committed()
     return capture
 
 
 def _drain(registry: Path, runtime_root: Path, **overrides: object) -> adapter.DrainResult:
+    limits = {"max_entries": 20, "budget_seconds": 10, **overrides}
     return adapter.drain_local_authority_shadow_outbox(
-        registry_path=registry,
-        runtime_root=runtime_root,
-        goal_id=GOAL_ID,
-        **overrides,  # type: ignore[arg-type]
+        registry_path=registry, runtime_root=runtime_root, goal_id=GOAL_ID,
+        **limits,  # type: ignore[arg-type]
     )
 
 
@@ -137,20 +89,20 @@ def test_drain_delivers_each_committed_entry_once_in_order_and_verifies_readback
 
     assert result.ok is True
     assert result.outcome == "drained"
-    assert result.config_enabled is False
+    assert result.config_enabled is True
     assert (result.delivered, result.replayed, result.no_op) == (3, 0, 0)
     assert result.pending_after == 0
     assert result.prepared_only_after == 0
     assert result.budget_exhausted is False
     assert result.candidate_readback_verified is True
-    assert result.last_cursor == "3"
-    assert (result.cursor_before, result.cursor_after, result.drained_count) == (None, "3", 3)
+    assert result.last_cursor == "4"
+    assert (result.cursor_before, result.cursor_after, result.drained_count) == ("1", "4", 3)
     payload = result.to_payload()
     assert payload["ok"] is True
     assert payload["drained_count"] == 3
-    assert payload["cursor_after"] == "3"
+    assert payload["cursor_after"] == "4"
     assert [item["outcome"] for item in result.entries] == ["delivered"] * 3
-    assert [item["cursor"] for item in result.entries] == ["1", "2", "3"]
+    assert [item["cursor"] for item in result.entries] == ["2", "3", "4"]
     assert [item["entry_id"] for item in result.entries] == [
         capture.outcome.entry_id for capture in captures
     ]
@@ -177,10 +129,10 @@ def test_drain_delivers_each_committed_entry_once_in_order_and_verifies_readback
         todo["todo_id"] for todo in listed["todos"]
     )
     assert view["head_digest"] == head_digest(head) == result.head_digest
-    assert [tx["operation_id"] for tx in view["scan"]["transactions"]] == [
+    assert [tx["operation_id"] for tx in view["scan"]["transactions"][1:]] == [
         capture.outcome.entry_id for capture in captures
     ]
-    receipts = [tx["receipts"][0] for tx in view["scan"]["transactions"]]
+    receipts = [tx["receipts"][0] for tx in view["scan"]["transactions"][1:]]
     assert all(receipt["source_transaction_correlated"] is True for receipt in receipts)
     assert all(receipt["durable_source_outbox"] is True for receipt in receipts)
     assert all(receipt["parity_verdict"] == "not_evaluated" for receipt in receipts)
@@ -210,21 +162,23 @@ def test_drain_replays_when_store_committed_but_cursor_was_not_written(
     assert first.pending_after == 1
     monkeypatch.undo()
 
+    calls = _commit_entry_calls(monkeypatch)
     second = _drain(registry, runtime_root)
     assert second.ok is True
+    assert "coordination.runtime_shadow.commit_entry" not in calls
     assert (second.delivered, second.replayed) == (0, 1)
     assert second.entries[0]["entry_id"] == capture.outcome.entry_id
-    assert second.entries[0]["cursor"] == "1"
+    assert second.entries[0]["cursor"] == "2"
     assert second.pending_after == 0
     assert second.candidate_readback_verified is True
     view = adapter.read_local_authority_shadow(runtime_root=runtime_root, goal_id=GOAL_ID, scan_limit=10)
-    assert len(view["scan"]["transactions"]) == 1
+    assert len(view["scan"]["transactions"]) == 2
 
 
 def test_drain_defers_when_another_drainer_holds_the_lock(tmp_path: Path) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
     _record_todo_write(registry, state, runtime_root, "Pending behind a drainer")
-    with exclusive_file_lock(
+    with exclusive_cross_runtime_file_lock(
         outbox.drain_lock_target(runtime_root, GOAL_ID), timeout_seconds=1.0, operation="test_hold"
     ):
         result = _drain(registry, runtime_root, lock_timeout_seconds=0.05)
@@ -251,13 +205,13 @@ def test_drain_batch_is_bounded_and_reports_what_it_left(tmp_path: Path) -> None
     second = _drain(registry, runtime_root)
     assert second.delivered == 1
     assert second.pending_after == 0
-    assert (second.cursor_before, second.cursor_after) == ("2", "3")
+    assert (second.cursor_before, second.cursor_after) == ("3", "4")
     view = adapter.read_local_authority_shadow(runtime_root=runtime_root, goal_id=GOAL_ID)
-    assert view["cursor"] == "3"
+    assert view["cursor"] == "4"
     assert view["head"]["partitions"]["todos"]["seq"] == 3
 
 
-def test_drain_stops_in_order_when_the_store_boundary_misbehaves(
+def test_drain_stops_in_order_on_real_candidate_corruption(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
@@ -265,24 +219,29 @@ def test_drain_stops_in_order_when_the_store_boundary_misbehaves(
         _record_todo_write(registry, state, runtime_root, f"Ordered {index}")
     real = adapter.effect_runtime_result
     calls: list[str] = []
+    saved: list[bytes] = []
+    candidate = next((runtime_root / "authority-shadow" / "file-v0").glob("authority-store-*.json"))
 
-    def flaky(method: str, params: object, **kwargs: object) -> object:
-        calls.append(method)
-        if method == "coordination.runtime_shadow.commit_entry" and len(calls) == 2:
-            return {"schema_version": "garbage"}
+    def corrupt_before_second_commit(method: str, params: object, **kwargs: object) -> object:
+        if method == "coordination.runtime_shadow.commit_entry":
+            calls.append(method)
+            if len(calls) == 2:
+                saved.append(candidate.read_bytes())
+                candidate.write_text("{malformed candidate history")
+        # The real TypeScript handler and real FileAuthorityStore decide every result.
         return real(method, params, **kwargs)
 
-    monkeypatch.setattr(adapter, "effect_runtime_result", flaky)
+    monkeypatch.setattr(adapter, "effect_runtime_result", corrupt_before_second_commit)
     result = _drain(registry, runtime_root)
     assert result.outcome == "stopped"
     assert result.delivered == 1
-    assert result.stopped_at is not None
-    assert result.stopped_at["seq"] == 2
-    assert result.stopped_at["reason_code"] == "shadow_commit_entry_result_invalid"
+    assert result.stopped_at is not None and result.stopped_at["seq"] == 2
+    assert result.stopped_at["outcome"] in {"failed", "unavailable"}
     assert result.pending_after == 2
     assert [entry.seq for entry in outbox.list_entries(_todo_dir(runtime_root))] == [2, 3]
+    assert candidate.read_text() == "{malformed candidate history"
     monkeypatch.undo()
-
+    candidate.write_bytes(saved[0])
     recovered = _drain(registry, runtime_root)
     assert recovered.delivered == 2
     assert recovered.pending_after == 0
@@ -293,8 +252,8 @@ def test_prepared_only_entries_resolve_only_under_a_free_primary_lock(tmp_path: 
     proven = _record_todo_write(registry, state, runtime_root, "Marker lost after write", mark_committed=False)
     with exclusive_file_lock(state, timeout_seconds=1.0, operation="writer_in_flight"):
         busy = _drain(registry, runtime_root)
-    assert busy.outcome == "drained"
-    assert busy.in_flight_partitions == ["todos"]
+    assert busy.outcome == "stopped"
+    assert busy.reason_code == "primary_writer_busy"
     assert busy.prepared_only_after == 1
     assert busy.delivered == 0
 
@@ -306,7 +265,7 @@ def test_prepared_only_entries_resolve_only_under_a_free_primary_lock(tmp_path: 
     assert result.entries[0]["entry_id"] == proven.outcome.entry_id
     view = adapter.read_local_authority_shadow(runtime_root=runtime_root, goal_id=GOAL_ID, scan_limit=5)
     assert view["head"]["partitions"]["todos"]["partition_digest"] == proven.outcome.partition_digest
-    receipt = view["scan"]["transactions"][0]["receipts"][0]
+    receipt = view["scan"]["transactions"][1]["receipts"][0]
     assert receipt["resolution"] == "committed_proven_by_readback"
 
     abandoned = _record_todo_write(
@@ -318,41 +277,27 @@ def test_prepared_only_entries_resolve_only_under_a_free_primary_lock(tmp_path: 
     assert result.entries[0]["resolution"] == "abandoned"
     assert result.entries[0]["entry_id"] == abandoned.outcome.entry_id
     view = adapter.read_local_authority_shadow(runtime_root=runtime_root, goal_id=GOAL_ID, scan_limit=5)
-    assert view["cursor"] == "2"
+    assert view["cursor"] == "3"
     assert view["head"]["partitions"]["todos"]["seq"] == 1
-    assert view["scan"]["transactions"][1]["events"][0]["kind"] == "source_transaction_abandoned"
+    assert view["scan"]["transactions"][2]["events"][0]["kind"] == "source_transaction_abandoned"
 
 
-def test_unexplained_prepared_only_entry_triggers_reseed_under_the_primary_lock(tmp_path: Path) -> None:
+def test_unexplained_prepared_entry_holds_without_reseed_or_deletion(tmp_path: Path) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
     _record_todo_write(registry, state, runtime_root, "Baseline")
     assert _drain(registry, runtime_root).delivered == 1
     stale = _record_todo_write(registry, state, runtime_root, "Half-recorded", mark_committed=False)
-    # An unhooked writer edits the file after the crash: neither digest matches.
-    state.write_text(
-        state.read_text(encoding="utf-8") + "\n- [ ] (agent) foreign edit <!-- todo_id: todo_0000000000ff -->\n",
-        encoding="utf-8",
-    )
-
+    state.write_text(state.read_text() + "\nExternal source change after the writer stopped.\n")
+    before = {str(path.relative_to(runtime_root)): path.read_bytes()
+              for path in (runtime_root / "authority-shadow").rglob("*") if path.is_file()}
     result = _drain(registry, runtime_root)
-
-    assert result.ok is True
-    assert result.reseeded == 1
-    assert result.no_op == 1
-    assert [item["resolution"] for item in result.entries] == ["unproved", "seed"]
-    assert result.entries[0]["entry_id"] == stale.outcome.entry_id
-    view = adapter.read_local_authority_shadow(runtime_root=runtime_root, goal_id=GOAL_ID, scan_limit=10)
-    kinds = [tx["events"][0]["kind"] for tx in view["scan"]["transactions"]]
-    assert kinds == ["source_transaction_delivered", "source_transaction_unproved", "partition_seeded"]
-    listed = list_goal_todos(registry_path=registry, goal_id=GOAL_ID, runtime_root_arg=str(runtime_root))
-    assert [todo["todo_id"] for todo in view["head"]["todos"]] == sorted(
-        todo["todo_id"] for todo in listed["todos"]
-    )
-    assert len(view["head"]["todos"]) == 3
-    assert view["head"]["partitions"]["todos"]["seq"] == 3
-    seed_receipt = view["scan"]["transactions"][2]["receipts"][0]
-    assert seed_receipt["write_class"] == "reseed_after_crash_gap"
-    assert seed_receipt["source_bytes_digest"] == text_digest(state.read_text(encoding="utf-8"))
+    assert result.outcome == "stopped"
+    assert result.reason_code == "outbox_source_unproved"
+    assert result.delivered == result.no_op == 0
+    assert result.entries == []
+    assert [entry.entry_id for entry in outbox.list_entries(_todo_dir(runtime_root))] == [stale.outcome.entry_id]
+    assert {str(path.relative_to(runtime_root)): path.read_bytes()
+            for path in (runtime_root / "authority-shadow").rglob("*") if path.is_file()} == before
 
 
 def test_lease_partition_entries_retain_complete_records_at_drain(tmp_path: Path) -> None:
@@ -375,12 +320,16 @@ def test_lease_partition_entries_retain_complete_records_at_drain(tmp_path: Path
         "acquire_ttl_seconds": 1800,
     }
     bytes_digest = text_digest(json.dumps(record, indent=2) + "\n")
-    entry_id = outbox.entry_identity(goal_id=GOAL_ID, partition="leases", seq=1, source_ref=bytes_digest)
+    binding = require_shadow_primary_write_allowed(runtime_root, GOAL_ID)
+    assert binding is not None
+    entry_id = outbox.entry_identity(goal_id=GOAL_ID, partition="leases", seq=1, source_ref=bytes_digest,
+                                    capture_lineage_id=binding["capture_lineage_id"], source_root_digest=binding["source_root_digest"])
     outbox.durable_write_json(
         directory / outbox.entry_file_name(1, entry_id, "prepared"),
         {
             "schema_version": outbox.OUTBOX_ENTRY_SCHEMA,
             "goal_id": GOAL_ID,
+            "capture_lineage_id": binding["capture_lineage_id"],
             "partition": "leases",
             "seq": 1,
             "entry_id": entry_id,
@@ -388,6 +337,7 @@ def test_lease_partition_entries_retain_complete_records_at_drain(tmp_path: Path
             "source": {
                 "kind": "task_lease_record",
                 "previous_bytes_digest": None,
+                "previous_partition_digest": partition_digest({"leases": []}),
                 "bytes_digest": bytes_digest,
                 "lease": {"todo_id": record["todo_id"], "version": 2, "lease_epoch": 1, "status": "active", "updated_at": record["updated_at"]},
                 "previous_lease": None,
@@ -401,9 +351,12 @@ def test_lease_partition_entries_retain_complete_records_at_drain(tmp_path: Path
     )
     outbox.durable_write_json(
         directory / outbox.entry_file_name(1, entry_id, "committed"),
-        {"schema_version": outbox.OUTBOX_COMMIT_SCHEMA, "entry_id": entry_id, "committed_at": "2026-09-03T00:01:00.100Z"},
+        {"schema_version": outbox.OUTBOX_COMMIT_SCHEMA, "entry_id": entry_id, "capture_lineage_id": binding["capture_lineage_id"], "committed_at": "2026-09-03T00:01:00.100Z"},
     )
 
+    primary_lease = outbox.lease_directory(runtime_root, GOAL_ID) / (record["todo_id"] + ".json")
+    primary_lease.parent.mkdir(parents=True, exist_ok=True)
+    primary_lease.write_text(json.dumps(record, indent=2) + "\n")
     result = _drain(registry, runtime_root)
 
     assert result.ok is True
@@ -411,7 +364,7 @@ def test_lease_partition_entries_retain_complete_records_at_drain(tmp_path: Path
     view = adapter.read_local_authority_shadow(runtime_root=runtime_root, goal_id=GOAL_ID, scan_limit=5)
     head = view["head"]
     assert head["todos"] == []
-    assert head["handoff_mode"] is None
+    assert head["handoff_mode"] == "hard_lease"
     assert head["leases"] == [record]
     expected_digest = partition_digest({"leases": head["leases"]})
     assert head["partitions"]["leases"] == {"seq": 1, "partition_digest": expected_digest}
@@ -424,8 +377,9 @@ def test_status_reports_backlog_candidate_and_growth_facts(tmp_path: Path) -> No
     empty = adapter.local_authority_shadow_status(registry_path=registry, runtime_root=runtime_root, goal_id=GOAL_ID)
     assert empty["ok"] is True
     assert empty["config"]["status"] == "disabled"
-    assert empty["candidate"]["status"] == "missing"
-    assert empty["store_bytes"] == 0
+    assert empty["candidate"]["status"] == "loaded"
+    assert empty["candidate"]["cursor"] == "1"
+    assert empty["store_bytes"] > 0
     assert empty["retention_pressure"] is False
     assert str(runtime_root) not in json.dumps(empty)
 
@@ -445,7 +399,7 @@ def test_status_reports_backlog_candidate_and_growth_facts(tmp_path: Path) -> No
         "invalid": None,
     }
     assert drained["candidate"]["status"] == "loaded"
-    assert drained["candidate"]["cursor"] == "1"
+    assert drained["candidate"]["cursor"] == "2"
     assert drained["candidate"]["codec_agreement"] is True
     assert drained["candidate"]["head_schema_version"] == "loopx_coordination_runtime_shadow_projection_v0"
     assert drained["store_bytes"] > 0
@@ -505,17 +459,18 @@ def test_crash_between_the_two_unlinks_leaves_residue_the_next_drain_reclaims(
 ) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
     capture = _record_todo_write(registry, state, runtime_root, "Retired but half-removed")
-    real_remove = outbox.remove_entry_files
+    real_remove = outbox.reclaim_verified_files
 
-    def crash_between_unlinks(entry: outbox.OutboxEntry) -> None:
-        entry.prepared_path.unlink(missing_ok=True)
+    def crash_between_unlinks(files: object) -> None:
+        batch = list(files)
+        batch[0][0].unlink()
         raise OSError("simulated crash between the prepared and committed unlinks")
 
-    monkeypatch.setattr(outbox, "remove_entry_files", crash_between_unlinks)
+    monkeypatch.setattr(outbox, "reclaim_verified_files", crash_between_unlinks)
     first = _drain(registry, runtime_root)
     assert first.outcome == "stopped"
     assert first.reason_code == "shadow_drain_failed"
-    monkeypatch.setattr(outbox, "remove_entry_files", real_remove)
+    monkeypatch.setattr(outbox, "reclaim_verified_files", real_remove)
 
     # On disk: the cursor covers seq 1 and only the committed marker survives.
     marker_name = outbox.entry_file_name(1, str(capture.outcome.entry_id), "committed")
@@ -523,33 +478,34 @@ def test_crash_between_the_two_unlinks_leaves_residue_the_next_drain_reclaims(
     assert names == sorted([marker_name, "drain-cursor.json"])
     assert outbox.read_cursor(_todo_dir(runtime_root))["last_seq"] == 1
     # The marker is retired residue, not corruption: listing stays valid.
-    assert outbox.list_entries(_todo_dir(runtime_root)) == []
+    assert len(outbox.list_entries(_todo_dir(runtime_root), allow_committed_only=True)) == 1
     assert [path.name for path in outbox.retired_residue(_todo_dir(runtime_root))] == [marker_name]
     summary = outbox.outbox_summary(runtime_root, GOAL_ID)["todos"]
-    assert summary["invalid"] is None
-    assert summary["retired_residue"] == 1
+    assert summary["invalid"] == "outbox_file_invalid"
+    assert len(outbox.retired_residue(_todo_dir(runtime_root))) == 1
     assert summary["committed_pending"] == 0
     status = adapter.local_authority_shadow_status(registry_path=registry, runtime_root=runtime_root, goal_id=GOAL_ID)
-    assert status["ok"] is True
-    assert status["outbox"]["todos"]["retired_residue"] == 1
+    assert status["ok"] is False
+    assert status["outbox"]["todos"]["invalid"] == "outbox_file_invalid"
 
     calls = _commit_entry_calls(monkeypatch)
     second = _drain(registry, runtime_root)
     assert second.ok is True
     assert second.outcome == "drained"
     assert second.reclaimed_residue == 1
-    assert (second.delivered, second.replayed) == (0, 0)
+    assert (second.delivered, second.replayed) == (0, 1)
     assert "coordination.runtime_shadow.commit_entry" not in calls
     assert list(_todo_dir(runtime_root).iterdir()) == [_todo_dir(runtime_root) / "drain-cursor.json"]
     view = adapter.read_local_authority_shadow(runtime_root=runtime_root, goal_id=GOAL_ID, scan_limit=5)
-    assert view["cursor"] == "1"
+    assert view["cursor"] == "2"
 
     # A later write mints seq 2 from the cursor, never reusing the retired seq.
     later = _record_todo_write(registry, state, runtime_root, "After the reclaim")
     assert later.outcome.seq == 2
     third = _drain(registry, runtime_root)
     assert third.delivered == 1
-    assert third.reclaimed_residue == 0
+    # The newly delivered transaction also removes its two verified files.
+    assert third.reclaimed_residue == 2
 
 
 def test_crash_after_the_cursor_but_before_any_unlink_is_reclaimed_without_a_store_call(
@@ -557,14 +513,14 @@ def test_crash_after_the_cursor_but_before_any_unlink_is_reclaimed_without_a_sto
 ) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
     capture = _record_todo_write(registry, state, runtime_root, "Cursor written, files untouched")
-    real_remove = outbox.remove_entry_files
+    real_remove = outbox.reclaim_verified_files
 
-    def crash_before_unlinks(entry: outbox.OutboxEntry) -> None:
+    def crash_before_unlinks(files: object) -> None:
         raise OSError("simulated crash after the cursor write")
 
-    monkeypatch.setattr(outbox, "remove_entry_files", crash_before_unlinks)
+    monkeypatch.setattr(outbox, "reclaim_verified_files", crash_before_unlinks)
     assert _drain(registry, runtime_root).outcome == "stopped"
-    monkeypatch.setattr(outbox, "remove_entry_files", real_remove)
+    monkeypatch.setattr(outbox, "reclaim_verified_files", real_remove)
     names = sorted(path.name for path in _todo_dir(runtime_root).iterdir())
     entry_id = str(capture.outcome.entry_id)
     assert names == [
@@ -572,7 +528,7 @@ def test_crash_after_the_cursor_but_before_any_unlink_is_reclaimed_without_a_sto
         outbox.entry_file_name(1, entry_id, "prepared"),
         "drain-cursor.json",
     ]
-    assert outbox.list_entries(_todo_dir(runtime_root)) == []
+    assert len(outbox.list_entries(_todo_dir(runtime_root), allow_committed_only=True)) == 1
 
     calls = _commit_entry_calls(monkeypatch)
     result = _drain(registry, runtime_root)
@@ -602,14 +558,14 @@ def test_drain_fails_closed_on_an_entry_recorded_for_another_runtime_root(tmp_pa
     capture = _record_todo_write(registry, state, runtime_root, "Written under a foreign root")
     entry_id = str(capture.outcome.entry_id)
     prepared_path = _todo_dir(runtime_root) / outbox.entry_file_name(1, entry_id, "prepared")
-    record = json.loads(prepared_path.read_text(encoding="utf-8"))
+    record = json.loads(prepared_path.read_text())
     record["source_root_digest"] = outbox.runtime_root_digest(tmp_path / "elsewhere")
     outbox.durable_write_json(prepared_path, record)
-
+    before = prepared_path.read_bytes()
     result = _drain(registry, runtime_root)
-
     assert result.outcome == "stopped"
-    assert result.reason_code == "source_root_mismatch"
+    assert result.reason_code == "outbox_file_invalid"
     assert result.delivered == 0
-    assert result.pending_after == 1
-    assert [entry.seq for entry in outbox.list_entries(_todo_dir(runtime_root))] == [1]
+    assert prepared_path.read_bytes() == before
+    with pytest.raises(outbox.OutboxError):
+        outbox.list_entries(_todo_dir(runtime_root))

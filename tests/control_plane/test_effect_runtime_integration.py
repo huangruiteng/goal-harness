@@ -16,6 +16,7 @@ from loopx.control_plane import effect_runtime
 from loopx.control_plane.coordination.runtime_shadow import (
     RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
     bootstrap_coordination_runtime_shadow,
+    build_runtime_shadow_source_snapshot,
     dispatch_coordination_runtime_shadow,
     inspect_coordination_runtime_shadow,
     read_coordination_runtime_shadow_todo_candidate,
@@ -155,7 +156,7 @@ def test_managed_runtime_is_reused_and_restart_safe_for_typed_write(
     )
 
 
-def test_coordination_runtime_shadow_crosses_python_typescript_boundary(
+def test_retired_coordination_snapshot_mirror_is_rejected_across_runtime_boundary(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -201,15 +202,13 @@ def test_coordination_runtime_shadow_crosses_python_typescript_boundary(
         projection=request["projection"],
     )
 
-    assert applied["status"] == "applied"
-    assert applied["parity"]["receipt_matches"] is True
-    assert applied["parity"]["projection_readback"]["verified"] is True
-    assert replayed["status"] == "replayed"
-    assert replayed["cursor"] == applied["cursor"] == "1"
-    assert read_candidate["status"] == "matched"
-    assert read_candidate["todo"]["claimed_by"] == "agent-a"
-    assert read_candidate["read_candidate_qualified"] is True
+    assert applied["status"] == "failed"
+    assert applied["reason_code"] == "legacy_lineage_read_only"
+    assert replayed["status"] == "failed"
+    assert replayed["reason_code"] == "legacy_lineage_read_only"
+    assert read_candidate["read_candidate_qualified"] is False
     assert read_candidate["decision_read_from_shadow"] is False
+    assert not (tmp_path / "state/authority-shadow/file-v0").exists()
 
     effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 
@@ -221,6 +220,8 @@ def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundar
     monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: tmp_path / "runtime")
     goal = {
         "id": "shadow-bootstrap-goal",
+        "repo": str(tmp_path),
+        "state_file": "ACTIVE_GOAL_STATE.md",
         "coordination": {
             "runtime_shadow": {
                 "enabled": True,
@@ -229,13 +230,14 @@ def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundar
             }
         },
     }
-    projection = {
-        "schema_version": "loopx_coordination_runtime_shadow_projection_v0",
-        "goal_id": "shadow-bootstrap-goal",
-        "source_authority": "legacy_markdown_and_task_lease",
-        "todos": [{"todo_id": "todo_existing", "status": "open"}],
-        "leases": [],
-    }
+    state_path = tmp_path / "ACTIVE_GOAL_STATE.md"
+    state_path.write_text("---\ngoal_id: shadow-bootstrap-goal\nhandoff_mode: hard_lease\n---\n\n## Agent Todo\n\n"
+        "- [ ] Preserve the existing Todo.\n"
+        "  <!-- loopx:todo todo_id=todo_existing status=open -->\n", encoding="utf-8")
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(json.dumps({"common_runtime_root": str(tmp_path / "state"), "goals": [goal]}), encoding="utf-8")
+    projection, source_snapshot = build_runtime_shadow_source_snapshot(goal=goal, runtime_root=tmp_path / "state",
+        state_path=state_path, registry_path=registry_path)
     request = {
         "goal": goal,
         "runtime_root": tmp_path / "state",
@@ -243,6 +245,7 @@ def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundar
         "operation_id": "bootstrap:shadow-bootstrap-goal:state-1",
         "source_version": "state:1",
         "projection": projection,
+        "source_snapshot": source_snapshot,
     }
 
     applied = bootstrap_coordination_runtime_shadow(**request)
@@ -252,6 +255,7 @@ def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundar
         runtime_root=tmp_path / "state",
         goal_id="shadow-bootstrap-goal",
         projection=projection,
+        source_snapshot=source_snapshot,
     )
 
     assert applied["status"] == "applied"
@@ -269,6 +273,7 @@ def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundar
             f"rollback:shadow-bootstrap-goal:{applied['provider_revision']}"
         ),
         "expected_provider_revision": str(applied["provider_revision"]),
+        "source_snapshot": source_snapshot,
     }
     rolled_back = rollback_coordination_runtime_shadow(**rollback_request)
     rollback_replay = rollback_coordination_runtime_shadow(**rollback_request)
@@ -277,6 +282,7 @@ def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundar
         runtime_root=tmp_path / "state",
         goal_id="shadow-bootstrap-goal",
         projection=projection,
+        source_snapshot=source_snapshot,
     )
 
     assert rolled_back["status"] == "applied"

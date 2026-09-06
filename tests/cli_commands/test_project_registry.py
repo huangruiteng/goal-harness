@@ -1927,7 +1927,7 @@ def test_sync_global_rejects_malformed_project_collections(
         payload = source
     else:
         target_path = global_path
-        target_path.parent.mkdir(parents=True)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"schema_version": "0.1", "goals": []}
     if malformation == "non-list":
         payload["projects"] = {}

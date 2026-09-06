@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -17,12 +16,12 @@ from loopx.control_plane.coordination.local_authority import (
 from loopx.control_plane.coordination.runtime_shadow import (
     build_todo_runtime_shadow_projection,
 )
-from loopx.control_plane.effect_runtime import effect_runtime_result
 from loopx.control_plane.todos.active_state_editing import TODO_SECTION_HEADINGS
 from loopx.control_plane.coordination.legacy_writer_fence import (
     legacy_coordination_writer_fence_path,
 )
-from loopx.todos import add_goal_todo, list_goal_todos
+from loopx.todos import add_goal_todo, list_goal_todos, update_goal_todo
+from canonical_authority_fixture import initialize_canonical_authority
 
 
 def _engage_fence(runtime_root: Path, goal_id: str = "goal-a") -> None:
@@ -39,85 +38,6 @@ def _todo_read_model(todo_count: int) -> dict[str, object]:
         "schema_version": "loopx_todo_canonical_read_record_v0",
         "todo_count": todo_count,
     }
-
-
-def _promote_local_projection(
-    *,
-    runtime_root: Path,
-    goal_id: str,
-    projection: dict[str, object],
-    operation_suffix: str,
-) -> str:
-    canonical_bytes = json.dumps(
-        projection,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    projection_sha256 = hashlib.sha256(canonical_bytes).hexdigest()
-    source_version = f"state:{operation_suffix}:1"
-
-    bootstrap = effect_runtime_result(
-        "coordination.runtime_shadow.bootstrap",
-        {
-            "schema_version": "loopx_coordination_runtime_shadow_bootstrap_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": goal_id,
-            "operation_id": f"bootstrap:{goal_id}:{operation_suffix}",
-            "source_version": f"state:{operation_suffix}:0",
-            "projection": projection,
-        },
-    )
-    assert bootstrap["status"] == "applied"
-    mirrored = effect_runtime_result(
-        "coordination.runtime_shadow.commit",
-        {
-            "schema_version": "loopx_coordination_runtime_shadow_commit_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": goal_id,
-            "operation_id": f"todo:{goal_id}:{operation_suffix}:qualify",
-            "event_kind": "todo_update",
-            "source_version": source_version,
-            "projection": projection,
-        },
-    )
-    assert mirrored["status"] == "applied"
-    provider_revision = str(mirrored["provider_revision"])
-    fence = {
-        "schema_version": "loopx_legacy_coordination_writer_fence_v0",
-        "state": "engaged",
-        "goal_id": goal_id,
-        "fence_id": f"legacy-writer-fence:{goal_id}:{operation_suffix}",
-        "source_version": source_version,
-        "source_projection_sha256": projection_sha256,
-        "expected_shadow_provider_revision": provider_revision,
-    }
-    engaged = effect_runtime_result(
-        "coordination.local_authority.legacy_writer_fence.engage",
-        {
-            "schema_version": "loopx_legacy_coordination_writer_fence_engage_request_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": goal_id,
-            "fence": fence,
-        },
-    )
-    assert engaged["status"] == "applied"
-    promoted = effect_runtime_result(
-        "coordination.local_authority.promote",
-        {
-            "schema_version": "loopx_local_coordination_promotion_request_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": goal_id,
-            "operation_id": f"promote:{goal_id}:{operation_suffix}",
-            "expected_shadow_provider_revision": provider_revision,
-            "expected_shadow_projection_sha256": projection_sha256,
-            "minimum_operations": 1,
-            "required_event_kinds": ["todo_update"],
-            "writer_fence": fence,
-        },
-    )
-    assert promoted["status"] == "applied"
-    return provider_revision
 
 
 def test_absent_fence_preserves_legacy_path_without_starting_typescript(
@@ -399,7 +319,7 @@ def test_todo_list_uses_provider_after_cutover_even_when_markdown_disagrees(
     assert result["authority_read"]["legacy_fallback_used"] is False
 
 
-def test_promoted_hard_lease_claim_cli_atomically_acquires_ownership(
+def test_canonical_hard_lease_claim_cli_atomically_acquires_ownership(
     tmp_path: Path,
 ) -> None:
     runtime_root = tmp_path / "runtime"
@@ -445,12 +365,7 @@ def test_promoted_hard_lease_claim_cli_atomically_acquires_ownership(
         todos=[todo],
     )
     projection["handoff_mode"] = "hard_lease"
-    _promote_local_projection(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        projection=projection,
-        operation_suffix="atomic-claim",
-    )
+    initialize_canonical_authority(runtime_root, "goal-a", projection, state_path=state_file)
     state_file.unlink()
 
     command = [
@@ -524,10 +439,10 @@ def test_promoted_hard_lease_claim_cli_atomically_acquires_ownership(
     assert not state_file.exists()
 
 
-def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
+def test_real_canonical_provider_preserves_complete_complex_todo_semantics(
     tmp_path: Path,
 ) -> None:
-    """Exercise builder -> shadow -> promotion -> production Todo list."""
+    """Preserve the full record through a real already canonical provider."""
 
     runtime_root = tmp_path / "runtime"
     project = tmp_path / "project"
@@ -622,13 +537,9 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     projection = build_todo_runtime_shadow_projection(
         goal_id="goal-a",
         todos=[complex_todo, successor, claimable],
+        handoff_mode="soft_claim",
     )
-    _promote_local_projection(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        projection=projection,
-        operation_suffix="complex",
-    )
+    initialize_canonical_authority(runtime_root, "goal-a", projection, state_path=state_file)
 
     state_file.unlink()
     result = list_goal_todos(registry_path=registry_path, goal_id="goal-a")

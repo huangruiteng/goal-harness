@@ -15,8 +15,26 @@ import {
   TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
 } from "../../loopx/control_plane/work_items/task_lease_lifecycle.ts";
 import { evaluateTaskLeaseLifecycleDecision } from "../../loopx/control_plane/work_items/task_lease_lifecycle_decision.ts";
+import { shadowManagementStatePath } from "../../loopx/control_plane/coordination/shadow_management.ts";
 
 const ACQUIRE_NOW = new Date("2026-09-01T03:00:00.000Z");
+
+test("maintenance corruption blocks native acquire and release before lease mutation", async (t) => {
+  const root = await workspace(t);
+  const acquired = await executeTaskLeaseAcquire(await acquireRequest(root));
+  assert.equal(acquired.ok, true);
+  const path = join(root, "runtime", "goals", "goal-a", "task-leases", "todo_target.json");
+  const before = await readFile(path, "utf8");
+  await atomicWriteJson(shadowManagementStatePath(join(root, "runtime"), "goal-a"), {});
+  const released = await executeTaskLeaseLifecycle(await lifecycleRequest(root, "release"));
+  assert.equal(released.ok, false);
+  assert.equal(released.error_code, "shadow_management_state_invalid");
+  assert.equal(await readFile(path, "utf8"), before);
+  const retry = await executeTaskLeaseAcquire(await acquireRequest(root, {idempotency_key: "new-key"}));
+  assert.equal(retry.ok, false);
+  assert.equal(retry.error_code, "shadow_management_state_invalid");
+  assert.equal(await readFile(path, "utf8"), before);
+});
 
 function lifecycleDecision(
   operation: "renew" | "transfer" | "release",
@@ -625,8 +643,9 @@ test("user-gate auto-acquire returns a persistent fence that can be closed", asy
   );
   assert.equal(checked.ok, true);
   const autoCapture = checked.coordination_runtime_shadow_capture as Record<string, unknown>;
-  assert.equal(typeof autoCapture.entry_id, "string");
-  assert.equal(autoCapture.seq, 1);
+  assert.equal(autoCapture.entry_id, null);
+  assert.equal(autoCapture.seq, null);
+  assert.equal(autoCapture.skipped_reason, "bootstrap_required");
   assert.equal(autoCapture.failure, null);
   const fence = checked.fence as Record<string, unknown>;
   assert.equal(fence.auto_acquired, true);
@@ -650,8 +669,9 @@ test("user-gate auto-acquire returns a persistent fence that can be closed", asy
   assert.equal(closed.ok, true);
   assert.equal(closed.released, true);
   const closeCapture = closed.coordination_runtime_shadow_capture as Record<string, unknown>;
-  assert.equal(typeof closeCapture.entry_id, "string");
-  assert.equal(closeCapture.seq, 2);
+  assert.equal(closeCapture.entry_id, null);
+  assert.equal(closeCapture.seq, null);
+  assert.equal(closeCapture.skipped_reason, "bootstrap_required");
   assert.equal(closeCapture.failure, null);
   assert.equal((await lease(root)).status, "released");
 });

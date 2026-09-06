@@ -1596,6 +1596,7 @@ def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -
 
 
 def test_capability_binding_follows_event_projected_successor(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
     event_log = tmp_path / "todo-events.jsonl"
     store = AppendOnlyStateEventStore(event_log)
     store.append(
@@ -1621,6 +1622,8 @@ def test_capability_binding_follows_event_projected_successor(tmp_path: Path) ->
     result = complete_event_projected_goal_todo(
         goal_id=GOAL_ID,
         context={
+            "registry_path": registry,
+            "state_path": state,
             "item": parent,
             "role": "agent",
             "event_log_path": event_log,
@@ -1670,6 +1673,8 @@ def test_capability_binding_follows_event_projected_successor(tmp_path: Path) ->
     duplicate = complete_event_projected_goal_todo(
         goal_id=GOAL_ID,
         context={
+            "registry_path": registry,
+            "state_path": state,
             "item": completed_parent,
             "role": "agent",
             "event_log_path": event_log,
