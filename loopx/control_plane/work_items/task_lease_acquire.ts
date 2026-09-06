@@ -589,9 +589,22 @@ export function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
   ) {
     return false;
   }
-  if (typeof lease.expires_at !== "string") return false;
+  if (typeof lease.expires_at !== "string") {
+    throw new TaskLeaseAcquireError(
+      "active lease expires_at must be a valid timestamp",
+      "corrupt_lease",
+      { expires_at: lease.expires_at ?? null },
+    );
+  }
   const expiresAt = parseLeaseTimestamp(lease.expires_at);
-  return expiresAt !== null && expiresAt.valueOf() > at.valueOf();
+  if (expiresAt === null) {
+    throw new TaskLeaseAcquireError(
+      "active lease expires_at must be a valid timestamp",
+      "corrupt_lease",
+      { expires_at: lease.expires_at },
+    );
+  }
+  return expiresAt.valueOf() > at.valueOf();
 }
 
 export function utcIsoformat(value: Date): string {

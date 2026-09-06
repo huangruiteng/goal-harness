@@ -472,3 +472,27 @@ test("corrupt bool integers fail closed and legacy epoch advances", async (t) =>
   assert.equal(migrated.ok, true);
   assert.equal((await persistedLease(root)).lease_epoch, 2);
 });
+
+test("corrupt active expiration fails closed without replacing the lease", async (t) => {
+  const root = await workspace(t);
+  await mkdir(join(root, "runtime", "goals", "goal-a", "task-leases"), { recursive: true });
+  const existing = {
+    schema_version: "task_lease_v0",
+    goal_id: "goal-a",
+    todo_id: "todo_target",
+    owner: "agent-b",
+    idempotency_key: "existing-owner",
+    write_scopes: ["loopx/**"],
+    acquire_ttl_seconds: 120,
+    version: 1,
+    lease_epoch: 1,
+    status: "active",
+    expires_at: "not-a-timestamp",
+  };
+  await writeFile(leasePath(root), JSON.stringify(existing), "utf8");
+
+  const result = await executeTaskLeaseAcquire(await request(root), { now: () => FIXED_NOW });
+
+  assert.equal(result.error_code, "corrupt_lease");
+  assert.deepEqual(await persistedLease(root), existing);
+});
