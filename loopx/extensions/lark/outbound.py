@@ -198,7 +198,10 @@ def lark_provider_preview_matches_outbound(
 
 
 def lark_readback_matches_outbound(
-    *, outbound_text: str, message: Mapping[str, Any]
+    *,
+    outbound_text: str,
+    message: Mapping[str, Any],
+    verified_bot_aliases: Mapping[str, str] | None = None,
 ) -> bool:
     expected_text, identity_tokens = _canonical_expected_text(outbound_text)
     actual_text = _message_text(message)
@@ -222,7 +225,13 @@ def lark_readback_matches_outbound(
         if not isinstance(mention, Mapping):
             return False
         key = str(mention.get("key") or "")
-        matches = _mention_identities(mention).intersection(identity_tokens)
+        identities = _mention_identities(mention)
+        identities.update(
+            (verified_bot_aliases or {})[identity]
+            for identity in tuple(identities)
+            if identity in (verified_bot_aliases or {})
+        )
+        matches = identities.intersection(identity_tokens)
         if not key or len(matches) != 1:
             return False
         identity = next(iter(matches))

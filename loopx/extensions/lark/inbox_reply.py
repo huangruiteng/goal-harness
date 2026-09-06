@@ -275,6 +275,7 @@ def _deliver_lark_inbox_outbound(
         )
 
     expected_mentions = expected_lark_mention_identities(reply_text)
+    bot_alias_candidates: dict[str, set[str]] = {}
     if expected_mentions:
         member_identity_sets: dict[str, set[str]] = {}
         membership_failed = False
@@ -284,10 +285,11 @@ def _deliver_lark_inbox_outbound(
                 base
                 + [
                     "im",
-                    "chat.members",
-                    "get",
+                    "+chat-members-list",
                     "--chat-id",
                     chat_id,
+                    "--member-types",
+                    "user,bot",
                     "--member-id-type",
                     identity_kind,
                     "--page-all",
@@ -300,9 +302,18 @@ def _deliver_lark_inbox_outbound(
             if members.get("returncode") != 0:
                 membership_failed = True
                 break
-            member_identity_sets[identity_kind] = lark_member_identities(
-                _json_object(members.get("stdout"))
+            member_payload = _json_object(members.get("stdout"))
+            member_identity_sets[identity_kind] = lark_member_identities(member_payload)
+            member_data = member_payload.get("data", member_payload)
+            bots = (
+                member_data.get("bots", []) if isinstance(member_data, Mapping) else []
             )
+            for member in bots if isinstance(bots, list) else []:
+                if not isinstance(member, Mapping):
+                    continue
+                app_id, member_id = member.get("app_id"), member.get("member_id")
+                if isinstance(app_id, str) and app_id and isinstance(member_id, str):
+                    bot_alias_candidates.setdefault(app_id, set()).add(member_id)
         if membership_failed or any(
             identity not in member_identity_sets.get(identity_kind, set())
             for identity, identity_kind in expected_mentions.items()
@@ -470,6 +481,13 @@ def _deliver_lark_inbox_outbound(
         and lark_readback_matches_outbound(
             outbound_text=reply_text,
             message=readback_message,
+            # mget may report a bot's app_id instead of its member_id. Only
+            # accept an unambiguous mapping from this chat's verified bot bucket.
+            verified_bot_aliases={
+                app_id: next(iter(identities))
+                for app_id, identities in bot_alias_candidates.items()
+                if len(identities) == 1 and next(iter(identities)) in expected_mentions
+            },
         )
     )
     reaction_cleanup = (

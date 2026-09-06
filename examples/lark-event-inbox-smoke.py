@@ -347,11 +347,14 @@ def main() -> None:
                     return successful_runner(args)
                 if args[3:6] == ["im", "chats", "get"]:
                     return {"returncode": 0, "stdout": "{}", "stderr": ""}
-                if args[3:6] == ["im", "chat.members", "get"]:
+                if args[3:5] == ["im", "+chat-members-list"]:
                     return {
                         "returncode": 0,
                         "stdout": json.dumps(
-                            {"items": [{"member_id": "ou_reviewer_fixture"}]}
+                            {
+                                "users": [],
+                                "bots": [{"member_id": "ou_reviewer_fixture"}],
+                            }
                         ),
                         "stderr": "",
                     }
