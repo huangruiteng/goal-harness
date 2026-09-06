@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Desktop shell capability set",
   "windows": ["main"],
-  "permissions": ["core:default", "notification:default"]
+  "permissions": ["core:default", "notification:default", "allow-desktop-update", "allow-desktop-update-status"]
 }

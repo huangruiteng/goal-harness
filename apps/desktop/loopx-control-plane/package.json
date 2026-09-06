@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "license": "Apache-2.0",
   "scripts": {
+    "prebuild": "python3 ../../../scripts/desktop_runtime_bundle.py",
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build"

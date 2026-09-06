@@ -150,7 +150,7 @@ type DataSource =
   | { kind: "url"; label: string };
 
 async function fetchStatusPayload(url: string) {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} while loading ${url}`);
   }
@@ -2750,12 +2750,12 @@ function StatusRequestView({
                   <>
                     <p className="mt-2 break-words text-sm leading-6 text-slate-500 dark:text-zinc-400">
                       {statusServiceUnavailable
-                        ? "LoopX 状态服务未连接。请从 dashboard 目录运行 npm run dev；它会同时启动 5173、8766 和 8767。"
+                        ? "本地状态服务暂时未连接。升级或启动期间可能短暂断开，请重试；仍失败时重新打开 LoopX App，或运行 loopx doctor。"
                         : error}
                     </p>
                     {statusServiceUnavailable ? (
                       <p className="mt-2 text-xs leading-5 text-slate-400 dark:text-zinc-500">
-                        远程 SSH 开发只需转发 5173；状态请求会通过 Vite 转发到远程 8766。
+                        重新加载不会执行任务，也不会改变 Goal 配置。
                       </p>
                     ) : null}
                     <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -2768,7 +2768,9 @@ function StatusRequestView({
                       </Button>
                     </div>
                   </>
-                ) : null}
+                ) : <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-zinc-400" role="status">
+                  正在读取 Goal 状态，历史较多时可能需要几秒。页面仍在响应，请稍候。 / Loading Goal state; this may take a few seconds.
+                </p>}
               </div>
             </CardContent>
           </Card>

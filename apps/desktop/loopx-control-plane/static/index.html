@@ -11,6 +11,18 @@
       <header><span aria-hidden="true" class="mark">L</span><h1>LoopX</h1></header>
       <p id="status">正在启动本地控制面…</p>
       <div aria-hidden="true" class="progress"></div>
+      <p>启动较慢时仍会自动重试；不会自动升级安装包。</p>
+      <details>
+        <summary>恢复与更新 / Recovery & updates</summary>
+        <p>重新连接不会执行任务。更新 App 与匹配的运行时可能短暂重启服务。</p>
+        <button id="retry" type="button">重新加载 / Reload</button>
+        <label>更新通道 <select id="channel"><option value="stable">稳定版 / Stable</option><option value="main">main 开发版</option></select></label>
+        <button id="update" type="button">检查更新 / Check for updates</button>
+        <p id="update-status" role="status"></p>
+        <button id="repair" type="button">修复当前版本 / Repair this version</button>
+        <button id="rollback" type="button" hidden>恢复上版并准备重启 / Restore previous version</button>
+        <p>仍失败时运行 <code>loopx doctor</code> 检查安装。不要删除 Goal 数据。</p>
+      </details>
     </main>
     <script src="boot.js"></script>
   </body>
