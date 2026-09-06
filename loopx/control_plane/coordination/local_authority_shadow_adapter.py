@@ -789,8 +789,8 @@ class _PartitionDrainer:
                 view, transactions = self._proof()
                 if self._result.cursor_before is None:
                     self._result.cursor_before = view.get("cursor")
-                pending = self._reconcile(transactions)
                 self._record_view(view)
+                pending = self._reconcile(transactions)
                 if not pending:
                     return
                 if self._budget.exhausted():
@@ -846,8 +846,9 @@ class _PartitionDrainer:
                         "shadow_commit_entry_result_invalid",
                         "ACK differs from exact receipt",
                     )
-                self._reconcile(transactions, delivered_entry_id=entry.entry_id)
+                # Preserve verified commit evidence even if local cleanup fails.
                 self._record_view(view)
+                self._reconcile(transactions, delivered_entry_id=entry.entry_id)
             summary = {
                 "entry_id": entry.entry_id,
                 "partition": entry.partition,

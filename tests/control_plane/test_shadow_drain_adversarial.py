@@ -14,6 +14,40 @@ from loopx.control_plane.coordination import local_authority_shadow_outbox as ou
 pytestmark = pytest.mark.stage2c_e2e
 
 
+@pytest.mark.parametrize("window", ["before_commit", "after_commit", "after_cursor"])
+def test_cleanup_permission_failure_reports_verified_commit_and_recovers(
+    tmp_path: Path, window: str,
+) -> None:
+    """A failed local checkpoint cannot hide a proven candidate transaction."""
+    w = workspace(tmp_path)
+    w.crash(window, "todo", "add", "--role", "agent", "--text", "Durable despite cleanup failure")
+    directory = outbox.partition_directory(w.runtime, w.goal, "todos")
+    before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    mode = directory.stat().st_mode & 0o777
+    directory.chmod(0o500)
+    try:
+        # Exercise a real filesystem denial, with the provider still writable.
+        with pytest.raises(PermissionError):
+            (directory / "permission-control").write_bytes(b"must not be writable")
+        stopped = w.drain()
+        assert stopped["ok"] is False and stopped["reason_code"], stopped
+        assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+        view = adapter.read_local_authority_shadow(runtime_root=w.runtime, goal_id=w.goal, scan_limit=20)
+        assert len(view["proof"]["transactions"]) == 2  # Baseline and the actual mutation.
+        assert stopped["candidate_readback_verified"] is True, stopped
+        assert stopped["provider_revision"] == view["provider_revision"], stopped
+    finally:
+        directory.chmod(mode)
+    recovered = w.drain()
+    assert recovered["ok"] is True and recovered["replayed"] == 1, recovered
+    assert recovered["delivered"] == 0, recovered
+    assert outbox.read_cursor(directory)["last_seq"] == 1
+    assert {path.name for path in directory.iterdir()} == {"drain-cursor.json"}
+    assert adapter.read_local_authority_shadow(
+        runtime_root=w.runtime, goal_id=w.goal, scan_limit=20,
+    )["proof"]["transactions"] == view["proof"]["transactions"]
+
+
 def test_missing_cursor_cannot_reuse_a_sequence_when_the_next_writer_arrives_first(tmp_path: Path) -> None:
     w = workspace(tmp_path)
     w.add("First complete transaction")
