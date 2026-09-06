@@ -132,6 +132,18 @@ def move_guard_outside_lock(name: str) -> Callable[[str], str]:
 WRITER_TEST = "tests/control_plane/test_shadow_writer_boundaries.py::"
 FENCE_TEST = WRITER_TEST + "test_cli_waiting_for_todo_mutex_rechecks_fence_after_engagement"
 CASES.extend([
+    Case("management_result_binding", ((COORDINATION + "shadow_management.ts", replacement(
+        "  await validateReplayResult(request, manifest, prior.result, state);",
+        "  // DELIBERATE MUTANT: trust a cached result from another operation.")),),
+         "tests/control_plane/test_shadow_management_variant_e2e.py::test_rollback_result_cannot_borrow_another_goals_archive_evidence[historical]"),
+    Case("cross_goal_source_guard", ((COORDINATION + "legacy_writer_fence.py", replacement(
+        "    resolved_source = state_file.resolve(strict=False)",
+        "    return  # DELIBERATE MUTANT: allow another goal to bypass source authority.\n    resolved_source = state_file.resolve(strict=False)")),),
+         "tests/control_plane/test_shadow_writer_variant_e2e.py::test_other_goal_cannot_write_a_protected_goal_source_via_state_override[active_capture]"),
+    Case("cleanup_hides_verified_commit", ((COORDINATION + "local_authority_shadow_adapter.py", replacement(
+        "                self._record_view(view)\n                self._reconcile(transactions, delivered_entry_id=entry.entry_id)",
+        "                self._reconcile(transactions, delivered_entry_id=entry.entry_id)\n                self._record_view(view)")),),
+         "tests/control_plane/test_shadow_drain_adversarial.py::test_cleanup_permission_failure_reports_verified_commit_and_recovers[before_commit]"),
     Case("native_update_maintenance", ((COORDINATION + "local_authority_runtime.ts",
          remove_native_update_maintenance),),
          "tests/control_plane/test_shadow_native_todo_update_e2e.py::test_native_update_holds_before_primary_for_management[native-bootstrapping-cli]"),
