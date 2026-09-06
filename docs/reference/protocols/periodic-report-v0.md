@@ -290,6 +290,13 @@ loopx periodic-report request \
   --execute
 ```
 
+One complete active source adapter is selected automatically. If several
+provider adapters are active, a new request must include
+`--source-adapter-id <adapter-id>`. Replay of an already journaled request does
+not require the selector. Settlement reads the owner `adapter_id` from that
+journal and resolves only the matching discovered settler; discovery order
+cannot change ownership, and another provider is never used as a fallback.
+
 This action is the report-intent decision. Neither LoopX Core nor the provider
 adapter classifies message strings, searches for report keywords, or scans the
 inbox for candidate requests. The provider adapter receives the exact opaque

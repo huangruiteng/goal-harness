@@ -39,7 +39,7 @@ from .post_writeback_hook import (
     evaluate_periodic_report_trigger_evaluation_intent,
 )
 from .request_action import (
-    SourceSettler,
+    PeriodicReportRequestPorts,
     periodic_report_request_intents,
     request_entry_for_intent,
     settle_periodic_report_request,
@@ -994,8 +994,7 @@ def consume_pending_periodic_report_intent(
     goal_id: str,
     agent_id: str,
     execute: bool,
-    provider_request_settler: SourceSettler | None = None,
-    provider_request_adapter_id: str | None = None,
+    provider_request_ports: PeriodicReportRequestPorts | None = None,
 ) -> dict[str, Any]:
     intents = pending_periodic_report_intents(
         registry_path=registry_path,
@@ -1076,8 +1075,7 @@ def consume_pending_periodic_report_intent(
                 goal_id=goal_id,
                 agent_id=agent_id,
                 intent=intent,
-                settle_source=provider_request_settler,
-                adapter_id=provider_request_adapter_id,
+                request_ports=provider_request_ports,
                 execute=execute,
             )
             result = {
@@ -1323,8 +1321,7 @@ def consume_pending_periodic_report_intent(
             goal_id=goal_id,
             agent_id=agent_id,
             intent=intent,
-            settle_source=provider_request_settler,
-            adapter_id=provider_request_adapter_id,
+            request_ports=provider_request_ports,
             execute=True,
         )
         durable["source_settlement"] = settlement

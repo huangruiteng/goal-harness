@@ -69,6 +69,13 @@ loopx periodic-report request \
   --execute
 ```
 
+When exactly one complete source adapter is active, the command selects it
+automatically. With multiple active providers, the Agent selects the provider
+explicitly with `--source-adapter-id <adapter-id>`. The journal retains that
+adapter identity, and later settlement resolves only that owner regardless of
+extension discovery order. A temporarily unavailable owner leaves the request
+pending; LoopX never falls through to another provider.
+
 There is no keyword or regular-expression classifier. The provider adapter
 binds only the exact source selected by the Agent and checks authorship,
 addressing, Goal/Agent connection, target, and inbox identity. A manifest-

@@ -5,8 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from loopx.capabilities.periodic_report import request_action
 from loopx.capabilities.periodic_report.request_action import (
+    REQUEST_ADAPTER_PHASE,
+    REQUEST_BIND_PORT,
+    REQUEST_HOOK_ID,
+    REQUEST_SETTLE_PORT,
     discover_periodic_report_request_ports,
+)
+from loopx.extensions.hook_adapters import (
+    ExtensionHookAdapterDiscovery,
+    ExtensionHookAdapterPortBinding,
 )
 from loopx.extensions.lark.goal_channel_contracts import (
     GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
@@ -117,9 +126,57 @@ def test_lark_request_ports_are_discovered_from_manifest(tmp_path: Path) -> None
         extension_state_file=state_file,
     )
 
-    assert ports.adapter_id == "lark-periodic-report-source"
-    assert callable(ports.bind_source)
-    assert callable(ports.settle_source)
+    assert ports.adapter_ids == ("lark-periodic-report-source",)
+    adapter = ports.adapters["lark-periodic-report-source"]
+    assert callable(adapter.bind_source)
+    assert callable(adapter.settle_source)
+
+
+def test_request_port_discovery_preserves_multiple_complete_adapters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def bind_source(**_kwargs: object) -> dict[str, object]:
+        return {}
+
+    def settle_source(**_kwargs: object) -> dict[str, object]:
+        return {}
+
+    bindings = tuple(
+        ExtensionHookAdapterPortBinding(
+            extension_id=f"fixture-{adapter_id}",
+            adapter_id=adapter_id,
+            capability_id="periodic-report",
+            target_hook_id=REQUEST_HOOK_ID,
+            phase=REQUEST_ADAPTER_PHASE,
+            port_name=port_name,
+            handler=handler,
+        )
+        for adapter_id in ("source-b", "source-a")
+        for port_name, handler in (
+            (REQUEST_BIND_PORT, bind_source),
+            (REQUEST_SETTLE_PORT, settle_source),
+        )
+    )
+    monkeypatch.setattr(
+        request_action,
+        "discover_extension_hook_adapters",
+        lambda **_kwargs: ExtensionHookAdapterDiscovery(
+            ports=tuple(reversed(bindings)), failures=()
+        ),
+    )
+
+    ports = discover_periodic_report_request_ports(
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        goal_id="goal-alpha",
+        agent_id="agent-alpha",
+    )
+
+    assert ports.adapter_ids == ("source-a", "source-b")
+    assert ports.select_source_adapter("source-b").adapter_id == "source-b"
+    with pytest.raises(ValueError, match="ambiguous"):
+        ports.select_source_adapter(None)
 
 
 def test_lark_inbox_rejects_same_name_mention_with_different_provider_identity() -> (

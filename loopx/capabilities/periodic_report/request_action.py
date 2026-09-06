@@ -36,10 +36,46 @@ SourceSettler = Callable[..., Mapping[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
+class PeriodicReportRequestAdapter:
+    adapter_id: str
+    bind_source: SourceBinder
+    settle_source: SourceSettler
+
+
+@dataclass(frozen=True, slots=True)
 class PeriodicReportRequestPorts:
-    adapter_id: str | None
-    bind_source: SourceBinder | None
-    settle_source: SourceSettler | None
+    adapters: Mapping[str, PeriodicReportRequestAdapter]
+
+    @property
+    def adapter_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self.adapters))
+
+    def select_source_adapter(
+        self, adapter_id: str | None
+    ) -> PeriodicReportRequestAdapter:
+        selected_id = str(adapter_id or "").strip()
+        if selected_id:
+            selected = self.adapters.get(selected_id)
+            if selected is None:
+                raise ValueError(
+                    "periodic-report request source adapter is unavailable: "
+                    f"{selected_id}"
+                )
+            return selected
+        if len(self.adapters) == 1:
+            return next(iter(self.adapters.values()))
+        if not self.adapters:
+            raise ValueError("periodic-report request source adapter is unavailable")
+        raise ValueError(
+            "periodic-report request source adapter is ambiguous; "
+            "select one with --source-adapter-id"
+        )
+
+    def settlement_adapter(
+        self, adapter_id: object
+    ) -> PeriodicReportRequestAdapter | None:
+        owner_id = str(adapter_id or "").strip()
+        return self.adapters.get(owner_id) if owner_id else None
 
 
 def _digest(value: object) -> str:
@@ -96,9 +132,7 @@ def discover_periodic_report_request_ports(
     extension_state_file: Path | None = None,
 ) -> PeriodicReportRequestPorts:
     discovery = discover_extension_hook_adapters(
-        state_file=(
-            extension_state_file or default_extension_state_file(runtime_root)
-        ),
+        state_file=(extension_state_file or default_extension_state_file(runtime_root)),
         phase=REQUEST_ADAPTER_PHASE,
         capability_id="periodic-report",
         target_hook_id=REQUEST_HOOK_ID,
@@ -107,26 +141,24 @@ def discover_periodic_report_request_ports(
         goal_id=goal_id,
         agent_id=agent_id,
     )
-    adapters: dict[str, dict[str, SourceBinder | SourceSettler]] = {}
+    adapter_ports: dict[str, dict[str, SourceBinder | SourceSettler]] = {}
+    ambiguous_adapter_ids: set[str] = set()
     for binding in discovery.ports:
-        adapters.setdefault(binding.adapter_id, {})[binding.port_name] = binding.handler
-    complete = [
-        (adapter_id, ports)
-        for adapter_id, ports in adapters.items()
-        if set(ports) == {REQUEST_BIND_PORT, REQUEST_SETTLE_PORT}
-    ]
-    if len(complete) != 1:
-        return PeriodicReportRequestPorts(
-            adapter_id=None,
-            bind_source=None,
-            settle_source=None,
+        ports = adapter_ports.setdefault(binding.adapter_id, {})
+        if binding.port_name in ports:
+            ambiguous_adapter_ids.add(binding.adapter_id)
+        ports[binding.port_name] = binding.handler
+    complete = {
+        adapter_id: PeriodicReportRequestAdapter(
+            adapter_id=adapter_id,
+            bind_source=ports[REQUEST_BIND_PORT],
+            settle_source=ports[REQUEST_SETTLE_PORT],
         )
-    adapter_id, ports = complete[0]
-    return PeriodicReportRequestPorts(
-        adapter_id=adapter_id,
-        bind_source=ports[REQUEST_BIND_PORT],
-        settle_source=ports[REQUEST_SETTLE_PORT],
-    )
+        for adapter_id, ports in sorted(adapter_ports.items())
+        if adapter_id not in ambiguous_adapter_ids
+        and set(ports) == {REQUEST_BIND_PORT, REQUEST_SETTLE_PORT}
+    }
+    return PeriodicReportRequestPorts(adapters=complete)
 
 
 def _normalize_source_receipt(
@@ -160,8 +192,7 @@ def _normalize_source_receipt(
         or value.get("agent_id") != agent_id
         or value.get("source_ref") != source_ref
         or value.get("requester_kind") != "user"
-        or value.get("addressing_source")
-        not in {"provider_mention", "verified_reply"}
+        or value.get("addressing_source") not in {"provider_mention", "verified_reply"}
         or value.get("raw_content_returned") is not False
         or value.get("external_writes_performed") is not False
     ):
@@ -249,8 +280,8 @@ def record_periodic_report_request(
     goal_id: str,
     agent_id: str,
     source_ref: str,
-    bind_source: SourceBinder | None,
-    adapter_id: str | None,
+    request_ports: PeriodicReportRequestPorts | None,
+    source_adapter_id: str | None,
     execute: bool,
 ) -> dict[str, Any]:
     if not _IDENTITY_RE.fullmatch(goal_id) or not _IDENTITY_RE.fullmatch(agent_id):
@@ -280,8 +311,9 @@ def record_periodic_report_request(
             "raw_content_returned": False,
             "external_writes_performed": False,
         }
-    if bind_source is None or not adapter_id:
+    if request_ports is None:
         raise ValueError("periodic-report request source adapter is unavailable")
+    source_adapter = request_ports.select_source_adapter(source_adapter_id)
     profile_ref, trigger_policy = _request_profile(
         registry_path=registry_path,
         runtime_root=runtime_root,
@@ -289,7 +321,7 @@ def record_periodic_report_request(
         agent_id=agent_id,
     )
     source_receipt = _normalize_source_receipt(
-        bind_source(
+        source_adapter.bind_source(
             registry_path=registry_path,
             runtime_root=runtime_root,
             goal_id=goal_id,
@@ -307,7 +339,7 @@ def record_periodic_report_request(
         "goal_id": goal_id,
         "agent_id": agent_id,
         "requested_at": source_receipt["observed_at"],
-        "adapter_id": adapter_id,
+        "adapter_id": source_adapter.adapter_id,
         "source_receipt": source_receipt,
         "profile_ref": profile_ref,
         "trigger_policy": trigger_policy,
@@ -414,8 +446,7 @@ def settle_periodic_report_request(
     goal_id: str,
     agent_id: str,
     intent: Mapping[str, Any],
-    settle_source: SourceSettler | None,
-    adapter_id: str | None,
+    request_ports: PeriodicReportRequestPorts | None,
     execute: bool,
 ) -> dict[str, Any]:
     entry = request_entry_for_intent(
@@ -432,7 +463,12 @@ def settle_periodic_report_request(
             "write_performed": False,
             "external_writes_performed": False,
         }
-    if settle_source is None or adapter_id != entry.get("adapter_id"):
+    source_adapter = (
+        request_ports.settlement_adapter(entry.get("adapter_id"))
+        if request_ports is not None
+        else None
+    )
+    if source_adapter is None:
         return {
             "ok": False,
             "schema_version": SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
@@ -440,7 +476,7 @@ def settle_periodic_report_request(
             "write_performed": False,
             "external_writes_performed": False,
         }
-    result = settle_source(
+    result = source_adapter.settle_source(
         registry_path=registry_path,
         runtime_root=runtime_root,
         goal_id=goal_id,
@@ -456,7 +492,11 @@ def settle_periodic_report_request(
     ):
         raise ValueError("periodic-report source settlement receipt is invalid")
     normalized = dict(result)
-    if execute and normalized.get("ok") is True and normalized.get("status") == "settled":
+    if (
+        execute
+        and normalized.get("ok") is True
+        and normalized.get("status") == "settled"
+    ):
         request_id = str(entry["request_id"])
         path = _request_path(runtime_root, goal_id, request_id)
         with exclusive_file_lock(path, operation="periodic_report_request_settlement"):
@@ -474,6 +514,7 @@ def settle_periodic_report_request(
 
 
 __all__ = [
+    "PeriodicReportRequestAdapter",
     "PeriodicReportRequestPorts",
     "REQUEST_ACTION_SCHEMA",
     "REQUEST_ADAPTER_PHASE",

@@ -113,6 +113,13 @@ def register_periodic_report_commands(
     request.add_argument("--goal-id", required=True)
     request.add_argument("--agent-id", required=True)
     request.add_argument("--source-ref", required=True)
+    request.add_argument(
+        "--source-adapter-id",
+        help=(
+            "Select the manifest-discovered source adapter. Required when more "
+            "than one complete adapter is active."
+        ),
+    )
     request.add_argument("--execute", action="store_true")
     request.add_argument(
         "--extension-state-file",
@@ -470,8 +477,8 @@ def handle_periodic_report_command(
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
                 source_ref=args.source_ref,
-                bind_source=ports.bind_source,
-                adapter_id=ports.adapter_id,
+                request_ports=ports,
+                source_adapter_id=args.source_adapter_id,
                 execute=bool(args.execute),
             )
         elif args.periodic_report_command == "consume-pending":
@@ -496,8 +503,7 @@ def handle_periodic_report_command(
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
                 execute=bool(args.execute),
-                provider_request_settler=ports.settle_source,
-                provider_request_adapter_id=ports.adapter_id,
+                provider_request_ports=ports,
             )
         elif args.periodic_report_command in {
             "configure-machine-defaults",

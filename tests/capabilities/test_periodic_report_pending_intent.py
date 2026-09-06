@@ -15,6 +15,8 @@ from loopx.capabilities.periodic_report.pending_intent import (
     periodic_report_pending_intent_interaction_hook,
 )
 from loopx.capabilities.periodic_report.request_action import (
+    PeriodicReportRequestAdapter,
+    PeriodicReportRequestPorts,
     SOURCE_BINDING_RECEIPT_SCHEMA,
     SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
     periodic_report_request_intents,
@@ -485,14 +487,17 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
         "addressing_source": "provider_mention",
         "binding_revision": "sha256:" + "b" * 64,
     }
-    source_digest = "sha256:" + hashlib.sha256(
-        json.dumps(
-            source_identity,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    source_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                source_identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     bind_calls: list[str] = []
 
     def bind_source(**kwargs: object) -> dict[str, object]:
@@ -505,69 +510,12 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
             "external_writes_performed": False,
         }
 
-    accepted = record_periodic_report_request(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        source_ref=source_ref,
-        bind_source=bind_source,
-        adapter_id="fixture-periodic-report-source",
-        execute=True,
-    )
-    replay = record_periodic_report_request(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        source_ref=source_ref,
-        bind_source=lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("replay must not rebind provider source")
-        ),
-        adapter_id="fixture-periodic-report-source",
-        execute=True,
-    )
-
-    assert accepted["status"] == "accepted"
-    assert replay["status"] == "already_requested"
-    assert bind_calls == [source_ref]
-    intents = periodic_report_request_intents(
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-    )
-    assert len(intents) == 1
-    assert source_ref not in json.dumps(intents[0], ensure_ascii=False)
-    mismatch_calls: list[bool] = []
-    mismatch = settle_periodic_report_request(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        intent=intents[0],
-        settle_source=lambda **_kwargs: mismatch_calls.append(True) or {},
-        adapter_id="different-periodic-report-source",
-        execute=True,
-    )
-    assert mismatch["status"] == "adapter_unavailable"
-    assert mismatch_calls == []
-
-    editorial_required = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    assert editorial_required["status"] == "editorial_required"
-    _write_editorial_response(editorial_required)
     settlement_calls: list[bool] = []
+    other_settlement_calls: list[bool] = []
 
     def settle_source(**kwargs: object) -> dict[str, object]:
         receipts = list(
-            (runtime / "goals" / GOAL_ID / "periodic_reports").glob(
-                "*/receipt.json"
-            )
+            (runtime / "goals" / GOAL_ID / "periodic_reports").glob("*/receipt.json")
         )
         assert len(receipts) == 1
         assert json.loads(receipts[0].read_text(encoding="utf-8"))["status"] == (
@@ -584,14 +532,105 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
             "external_writes_performed": False,
         }
 
+    def settle_other(**kwargs: object) -> dict[str, object]:
+        other_settlement_calls.append(bool(kwargs["execute"]))
+        raise AssertionError("non-owner adapter must not receive settlement")
+
+    owner_adapter = PeriodicReportRequestAdapter(
+        adapter_id="fixture-periodic-report-source",
+        bind_source=bind_source,
+        settle_source=settle_source,
+    )
+    other_adapter = PeriodicReportRequestAdapter(
+        adapter_id="different-periodic-report-source",
+        bind_source=lambda **_kwargs: {},
+        settle_source=settle_other,
+    )
+    ports_forward = PeriodicReportRequestPorts(
+        adapters={
+            owner_adapter.adapter_id: owner_adapter,
+            other_adapter.adapter_id: other_adapter,
+        }
+    )
+    ports_reverse = PeriodicReportRequestPorts(
+        adapters={
+            other_adapter.adapter_id: other_adapter,
+            owner_adapter.adapter_id: owner_adapter,
+        }
+    )
+
+    accepted = record_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        source_ref=source_ref,
+        request_ports=ports_forward,
+        source_adapter_id=owner_adapter.adapter_id,
+        execute=True,
+    )
+    replay = record_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        source_ref=source_ref,
+        request_ports=ports_reverse,
+        source_adapter_id=None,
+        execute=True,
+    )
+
+    assert accepted["status"] == "accepted"
+    assert replay["status"] == "already_requested"
+    assert bind_calls == [source_ref]
+    intents = periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    assert len(intents) == 1
+    assert source_ref not in json.dumps(intents[0], ensure_ascii=False)
+    mismatch = settle_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        intent=intents[0],
+        request_ports=PeriodicReportRequestPorts(
+            adapters={other_adapter.adapter_id: other_adapter}
+        ),
+        execute=True,
+    )
+    assert mismatch["status"] == "adapter_unavailable"
+    assert other_settlement_calls == []
+    assert (
+        len(
+            periodic_report_request_intents(
+                runtime_root=runtime,
+                goal_id=GOAL_ID,
+                agent_id=AGENT_ID,
+            )
+        )
+        == 1
+    )
+
+    editorial_required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    assert editorial_required["status"] == "editorial_required"
+    _write_editorial_response(editorial_required)
+
     first = consume_pending_periodic_report_intent(
         registry_path=registry,
         runtime_root=runtime,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         execute=True,
-        provider_request_settler=settle_source,
-        provider_request_adapter_id="fixture-periodic-report-source",
+        provider_request_ports=ports_reverse,
     )
     retry = consume_pending_periodic_report_intent(
         registry_path=registry,
@@ -599,8 +638,7 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         execute=True,
-        provider_request_settler=settle_source,
-        provider_request_adapter_id="fixture-periodic-report-source",
+        provider_request_ports=ports_forward,
     )
 
     assert first["status"] == "delivery_ready"
@@ -608,6 +646,7 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
     assert retry["settlement_only_retry"] is True
     assert retry["source_settlement"]["status"] == "settled"
     assert settlement_calls == [True, True]
+    assert other_settlement_calls == []
     durable = next(
         (runtime / "goals" / GOAL_ID / "periodic_reports").glob("*/receipt.json")
     )
@@ -616,11 +655,14 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
     assert persisted["settlement_only_retry"] is True
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
     assert state.count("action_kind=deliver_periodic_report_goal_channel") == 1
-    assert periodic_report_request_intents(
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-    ) == []
+    assert (
+        periodic_report_request_intents(
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+        )
+        == []
+    )
 
 
 def test_report_artifacts_leave_no_temp_residue(tmp_path: Path) -> None:
