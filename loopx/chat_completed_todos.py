@@ -8,10 +8,7 @@ import json
 from secrets import token_urlsafe
 from threading import Lock
 from time import monotonic
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-
-from .paths import resolve_runtime_root
 
 
 class CompletedTodoPages:
@@ -59,8 +56,8 @@ class CompletedTodoPages:
 
 class CompletedTodoRequestMixin:
     def _completed_todos(self) -> None:
-        # Reuse the Chat projection/redaction policy; do not expose raw records.
-        from .chat_server import _compact_todo
+        # This loopback-only workspace read preserves task text and evidence.
+        # Select display fields without returning the authority's internal metadata.
         from .todos import list_goal_todos
 
         if not self._require_loopback_origin():
@@ -70,7 +67,7 @@ class CompletedTodoRequestMixin:
         agent_id = query.get("agent_id", [""])[0]
         cursor = query.get("cursor", [""])[0]
         try:
-            registry, goal = self._registry_and_goal(goal_id)
+            self._registry_and_goal(goal_id)
 
             def load():
                 payload = list_goal_todos(
@@ -78,12 +75,18 @@ class CompletedTodoRequestMixin:
                     role="agent", status="done",
                     runtime_root_arg=self.server.runtime_root_override,
                 )
-                protected = [Path(str(goal.get("repo") or ".")).resolve(), resolve_runtime_root(registry)]
                 ordered = sorted(enumerate(payload["todos"]), key=lambda pair: (str(pair[1].get("completed_at") or ""), pair[0]), reverse=True)
                 return [
-                    _compact_todo(item, protected_paths=protected)
+                    {
+                        "todo_id": item["todo_id"],
+                        "text": str(item.get("text") or item.get("title") or ""),
+                        "claimed_by": item.get("claimed_by"),
+                        "evidence": item.get("evidence") or item.get("note") or None,
+                        "priority": item.get("priority"),
+                        "task_class": item.get("task_class"),
+                    }
                     for _, item in ordered
-                    if item.get("task_class") != "continuous_monitor"
+                    if item.get("todo_id") and item.get("task_class") != "continuous_monitor"
                     and (not agent_id or item.get("claimed_by") == agent_id)
                 ]
 

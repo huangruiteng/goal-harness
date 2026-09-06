@@ -1759,7 +1759,6 @@ export function PersonalWorkspacePage({
             ) : null}
             {selectedGoal && selectedGoalTab === "tasks" ? (
               <GoalTasksView
-                canLoadCompleted={!readOnly}
                 historyEnabled={!readOnly}
                 goal={selectedGoal}
                 items={items}

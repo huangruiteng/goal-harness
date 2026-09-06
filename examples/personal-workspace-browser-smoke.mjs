@@ -1916,6 +1916,21 @@ async function main() {
     await page.screenshot({ path: resolve(outputDir, 'completed-history-4087.png'), fullPage: false, animations: 'disabled' });
     await historyScroll.evaluate(element => { element.scrollTop = 0; });
     await completedColumn.getByText('Completed A', { exact: true }).waitFor();
+    // Both presentations retain one snapshot, including archived history and evidence.
+    let historyRequests = 0;
+    page.on('request', request => { if (request.url().includes('/api/chat/completed-todos?')) historyRequests += 1; });
+    await page.getByRole('button', { name: '列表', exact: true }).click();
+    const listHistory = page.getByTestId('completed-task-lane');
+    await listHistory.getByRole('button', { name: '已完成', exact: false }).click();
+    await listHistory.getByText('4087', { exact: true }).waitFor();
+    await listHistory.getByText('Completed A', { exact: true }).waitFor();
+    await listHistory.locator('.personal-task-lane-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await listHistory.getByText('Completed historical Task 4087', { exact: true }).waitFor();
+    if (await listHistory.locator('.personal-completed-row').count() > 20) throw new Error('List history DOM grew with accumulated pages');
+    await page.screenshot({ path: resolve(outputDir, 'completed-history-list.png'), fullPage: false, animations: 'disabled' });
+    await page.getByRole('button', { name: '看板', exact: true }).click();
+    await completedColumn.getByText('Completed A', { exact: true }).waitFor();
+    if (historyRequests) throw new Error('Switching presentation replaced the completed-history snapshot');
     await page.locator(".personal-goal-link", { hasText: "Multi Agent Projection" }).click();
     const multiAgentHeader = await page.locator(".personal-channel-title p").innerText();
     if (!multiAgentHeader.includes("2 个工作 Agent") || multiAgentHeader.includes("codex-older-lane ·")) {

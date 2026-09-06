@@ -730,9 +730,6 @@
 .personal-task-lane-filter label { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 9px; border: 1px solid var(--pw-line-strong); border-radius: 8px; background: var(--pw-bg); }
 .personal-task-lane-filter select { max-width: 300px; border: 0; outline: 0; background: transparent; color: var(--pw-text); font: inherit; font-size: 11.5px; font-weight: 600; appearance: none; }
 .personal-task-board { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
-.personal-completed-query { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 4px; color: var(--pw-muted); font-size: 12px; }
-.personal-completed-query button { min-height: 36px; padding: 6px 10px; border: 1px solid var(--pw-line); border-radius: 6px; background: var(--pw-card); color: var(--pw-text); cursor: pointer; }
-.personal-completed-query p { flex-basis: 100%; color: var(--pw-red); }
 .personal-channel-scroll:has(.personal-task-board.is-list-view) { overflow-y: auto; }
 .personal-task-board.is-list-view { height: auto; min-height: 100%; gap: 24px; }
 .personal-task-view-toolbar { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; }
@@ -743,6 +740,14 @@
 .personal-task-view-switch button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 5px; background: transparent; color: var(--pw-muted); font: inherit; font-size: 13px; cursor: pointer; }
 .personal-task-view-switch button[aria-pressed="true"] { background: var(--pw-text); color: var(--pw-bg); }
 .personal-task-grouped-list { display: grid; gap: 24px; padding-bottom: 24px; }
+.personal-completed-list { border: 1px solid var(--pw-line); border-radius: 12px; background: var(--pw-card); }
+.personal-completed-list > header { padding: 2px 16px; min-height: 48px; color: var(--pw-text); }
+.personal-completed-list > header > button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; min-height: 44px; }
+.personal-completed-list .personal-task-lane-scroll { height: 480px; max-height: 60vh; overflow-y: auto; }
+.personal-completed-list .personal-task-lane-scroll[hidden] { display: none; }
+.personal-completed-list .personal-completed-row > button { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px 12px; width: 100%; height: 100%; padding: 16px; border: 0; border-bottom: 1px solid var(--pw-line); background: transparent; text-align: left; }
+.personal-completed-list .personal-completed-row > button > strong { -webkit-line-clamp: 2; }
+.personal-completed-list .personal-completed-row > button > small { grid-column: 2; }
 .personal-task-group { min-width: 0; border: 1px solid var(--pw-line); border-radius: 12px; background: var(--pw-card); }
 .personal-task-group > summary { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 10px 16px; list-style: none; cursor: pointer; }
 .personal-task-group > summary::-webkit-details-marker { display: none; }

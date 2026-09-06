@@ -8,7 +8,6 @@ import type {
   WorkspaceTimelineItem,
 } from "./personal-workspace-model";
 import { localizedAttentionAge, useWorkspaceI18n } from "./i18n";
-import { fetchCompletedTodos } from "../../data/chat";
 import { CompletedTaskLane } from "./completed-task-lane";
 
 function TaskLane({
@@ -17,14 +16,12 @@ function TaskLane({
   label,
   tone,
   listView = false,
-  reveal = false,
 }: {
   children: ReactNode;
   count: number;
   label: string;
   tone: "attention" | "done" | "progress" | "schedule";
   listView?: boolean;
-  reveal?: boolean;
 }) {
   const labelId = useId();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -74,7 +71,7 @@ function TaskLane({
   if (listView) {
     if (!count && tone !== "done") return null;
     return (
-      <details className={`personal-task-group tone-${tone}`} open={tone !== "done" || reveal ? true : undefined}>
+      <details className={`personal-task-group tone-${tone}`} open>
         <summary><ChevronDown size={16} /><strong>{label}</strong><span>{count}</span></summary>
         <div className="personal-task-list-rows">{children}</div>
       </details>
@@ -117,7 +114,6 @@ export function GoalTasksView({
   onSelect,
   selectedTodoId = null,
   userTodos,
-  canLoadCompleted = false,
 }: {
   historyEnabled?: boolean;
   goal: WorkspaceGoal;
@@ -129,14 +125,9 @@ export function GoalTasksView({
   onSelect: (selection: WorkspaceDrawerSelection) => void;
   selectedTodoId?: string | null;
   userTodos: WorkspaceModel["userTodos"];
-  canLoadCompleted?: boolean;
 }) {
   const { t } = useWorkspaceI18n();
   const [listView, setListView] = useState(false);
-  const [completedPage, setCompletedPage] = useState<{
-    key: string; items: WorkspaceGoal["agentTodos"]; total: number; next: number | null;
-  } | null>(null);
-  const [completedRequest, setCompletedRequest] = useState<{ key: string; loading: boolean; error: string | null } | null>(null);
   const [laneSelection, setLaneSelection] = useState({ goalId: "", laneId: "all" });
   const selectedTodoRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -167,33 +158,9 @@ export function GoalTasksView({
     .filter((todo) => todo.taskClass !== "continuous_monitor" && !todo.done)
     .filter((todo) => laneMatches(todo.claimedBy))
     .sort((left, right) => priorityRank(left) - priorityRank(right));
-  const recentDoneAgentTodos = goal.agentTodos
+  const doneAgentTodos = goal.agentTodos
     .filter((todo) => todo.taskClass !== "continuous_monitor" && todo.done)
     .filter((todo) => laneMatches(todo.claimedBy));
-  const completedKey = JSON.stringify([goal.goalId, selectedLaneId]);
-  const completedKeyRef = useRef(completedKey);
-  completedKeyRef.current = completedKey;
-  const currentPage = completedPage?.key === completedKey ? completedPage : null;
-  const currentRequest = completedRequest?.key === completedKey ? completedRequest : null;
-  const doneAgentTodos = currentPage?.items ?? recentDoneAgentTodos;
-  async function loadCompleted() {
-    if (!canLoadCompleted || currentRequest?.loading) return;
-    setCompletedRequest({ key: completedKey, loading: true, error: null });
-    try {
-      const result = await fetchCompletedTodos(goal.goalId, selectedLaneId === "all" ? undefined : selectedLaneId, currentPage?.next ?? 0);
-      if (completedKeyRef.current !== completedKey) return;
-      const incoming = result.items.map((todo) => ({
-        todoId: todo.todo_id, text: todo.text, done: true, status: todo.status,
-        priority: todo.priority, claimedBy: todo.claimed_by, taskClass: todo.task_class,
-      }));
-      const merged = new Map([...(currentPage?.next != null ? currentPage.items : []), ...incoming].map((todo) => [todo.todoId, todo]));
-      setCompletedPage({ key: completedKey, items: [...merged.values()], total: result.total, next: result.next_offset });
-      setCompletedRequest({ key: completedKey, loading: false, error: null });
-    } catch (error) {
-      if (completedKeyRef.current !== completedKey) return;
-      setCompletedRequest({ key: completedKey, loading: false, error: error instanceof Error ? error.message : t("tasks.loadFailed") });
-    }
-  }
   const scheduleItems = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "schedule" }> =>
     item.kind === "schedule" && laneMatches(item.schedule.agentId));
   const executionRuns = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "run" }> =>
@@ -319,25 +286,7 @@ export function GoalTasksView({
         ))}
         {!scheduleItems.length ? <p className="personal-task-empty">{t("tasks.emptySchedules")}</p> : null}
       </TaskLane>
-      {listView ? <>
-      <TaskLane listView={listView} reveal={doneAgentTodos.some((todo) => todo.todoId === selectedTodoId)} count={currentPage?.total ?? (selectedLaneId === "all" ? Math.max(goal.doneTodoCount ?? 0, doneAgentTodos.length) : doneAgentTodos.length)} label={t("tasks.completed")} tone="done">
-        <div className="personal-completed-query">
-          <span>{currentPage ? t("tasks.loadedCompleted", { shown: doneAgentTodos.length, total: currentPage.total }) : t("tasks.recentCompleted", { count: doneAgentTodos.length })}</span>
-          {canLoadCompleted ? <button type="button" disabled={currentRequest?.loading} onClick={() => void loadCompleted()}>{currentRequest?.loading ? t("common.loading") : currentPage?.next != null ? t("tasks.loadMore") : currentPage ? t("tasks.refreshCompleted") : t("tasks.loadAllCompleted")}</button> : null}
-          {currentRequest?.error ? <p role="alert">{currentRequest.error}</p> : null}
-        </div>
-        {doneAgentTodos.map((todo) => (
-          <button aria-pressed={selectedTodoId === todo.todoId} className={selectedTodoId === todo.todoId ? "is-selected" : undefined} key={todo.todoId} onClick={() => onSelect({ item: { ...todo, goalId: goal.goalId, goalTitle: goal.title, ownerLabel: todo.claimedBy ?? goal.agentLabel ?? goal.agentId }, kind: "todo" })} ref={selectedTodoId === todo.todoId ? (element) => { selectedTodoRef.current = element; } : undefined} type="button">
-            <span className="is-done">✓</span><strong>{todo.text}</strong><small>{todo.claimedBy ?? goal.agentLabel ?? goal.agentId}</small>
-          </button>
-        ))}
-        {!doneAgentTodos.length ? <p className="personal-task-empty">{(goal.doneTodoCount ?? 0) > 0
-          ? t("tasks.completedSummary", { count: goal.doneTodoCount ?? 0 })
-          : t("tasks.emptyCompleted")}</p> : null}
-      </TaskLane>
-      </> : <>
-      <CompletedTaskLane key={`${goal.goalId}:${selectedLaneId}:${historyEnabled}`} goal={goal} agentId={selectedLaneId} seed={doneAgentTodos} enabled={historyEnabled} onSelect={onSelect} />
-      </>}
+      <CompletedTaskLane key={`${goal.goalId}:${selectedLaneId}:${historyEnabled}`} goal={goal} agentId={selectedLaneId} seed={doneAgentTodos} enabled={historyEnabled} listView={listView} onSelect={onSelect} />
       </div>
       {isEmpty ? (
         <p className="personal-task-empty">
