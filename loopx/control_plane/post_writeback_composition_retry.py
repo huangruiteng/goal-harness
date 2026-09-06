@@ -20,7 +20,19 @@ POST_WRITEBACK_COMPOSITION_RETRY_ERROR_CODES = (
     "source_projection_failed",
     "dispatch_failed",
 )
-_COMPOSITION_RETRY_JOURNAL_ROW_LIMIT = 512
+POST_WRITEBACK_COMPOSITION_RETRY_PROJECTION_SCHEMA_VERSION = (
+    "loopx_post_writeback_composition_retry_projection_v0"
+)
+POST_WRITEBACK_COMPOSITION_RETRY_REPLAY_ACTION = (
+    "Replay the committed CLI mutation that recorded this receipt with the "
+    "same goal/event/todo/turn/effect identity and state_version: the primary "
+    "writeback is idempotent, hook sidecars dedupe provider work, and a clean "
+    "projection composition settles the receipt."
+)
+# Journals fold back to one row per receipt id (under the append lock) once
+# they cross this bound; reads scan every row so no unresolved receipt is
+# ever silently dropped from the pending view.
+_COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT = 512
 
 
 def _now_iso() -> str:
@@ -39,14 +51,40 @@ def composition_retry_receipt_log_path(runtime_root: Path, goal_id: str) -> Path
     )
 
 
+def _normalized_hook_set_digest(
+    hook_identities: Sequence[Mapping[str, str]],
+) -> str:
+    """Render the order-insensitive hook set so identities stay comparable."""
+
+    pairs = sorted(
+        {
+            (
+                str(item.get("hook_id") or "")[:200],
+                str(item.get("capability_id") or "")[:200],
+            )
+            for item in hook_identities
+            if str(item.get("hook_id") or "")
+        }
+    )
+    encoded = json.dumps(pairs, sort_keys=True, ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
 def composition_retry_receipt_id(
     *,
     goal_id: str,
     event_kind: str,
     identity: Mapping[str, Any],
     state_version: str,
+    hook_identities: Sequence[Mapping[str, str]],
 ) -> str:
-    """Bind one receipt to the exact primary writeback it observes."""
+    """Bind one receipt to the exact primary writeback and hook set it observes.
+
+    The hook set is part of the identity: a composition that later succeeds
+    with a different registered hook set settles a different receipt (or no
+    receipt at all), so a replaced or removed hook can never mark the original
+    failure resolved.
+    """
 
     stable = {
         "goal_id": str(goal_id or ""),
@@ -56,6 +94,7 @@ def composition_retry_receipt_id(
         "turn_instance_id": str(identity.get("turn_instance_id") or ""),
         "effect_id": str(identity.get("effect_id") or ""),
         "state_version": str(state_version or ""),
+        "hook_set_digest": _normalized_hook_set_digest(hook_identities),
     }
     encoded = json.dumps(stable, sort_keys=True, ensure_ascii=True).encode("utf-8")
     return "pwcr_" + hashlib.sha256(encoded).hexdigest()[:16]
@@ -97,9 +136,7 @@ def build_composition_retry_receipt(
         if not hook_id or hook_id in seen_hook_ids:
             continue
         seen_hook_ids.add(hook_id)
-        bounded_identities.append(
-            {"hook_id": hook_id, "capability_id": capability_id}
-        )
+        bounded_identities.append({"hook_id": hook_id, "capability_id": capability_id})
     return {
         "schema_version": POST_WRITEBACK_COMPOSITION_RETRY_RECEIPT_SCHEMA_VERSION,
         "receipt_id": composition_retry_receipt_id(
@@ -107,6 +144,7 @@ def build_composition_retry_receipt(
             event_kind=event_kind,
             identity=identity,
             state_version=state_version,
+            hook_identities=bounded_identities,
         ),
         "status": status,
         "error_code": error_code,
@@ -128,16 +166,23 @@ def build_composition_retry_receipt(
 
 
 def _iter_composition_retry_rows(
-    log_path: Path, *, row_limit: int = _COMPOSITION_RETRY_JOURNAL_ROW_LIMIT
+    log_path: Path, *, row_limit: int | None = None
 ) -> list[dict[str, Any]]:
-    """Read a bounded suffix of valid journal rows, oldest first."""
+    """Read every valid journal row, oldest first.
+
+    The read is untruncated on purpose: folding to the newest row per receipt
+    id must observe the latest state of *every* receipt, so a bounded suffix
+    that silently drops an unresolved row is never acceptable here. Storage
+    governance happens at append time via compaction instead.
+    """
 
     try:
         lines = log_path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
+    selected = lines if row_limit is None else lines[-max(0, row_limit) :]
     rows: list[dict[str, Any]] = []
-    for line in lines[-max(0, row_limit) :]:
+    for line in selected:
         text = line.strip()
         if not text:
             continue
@@ -207,10 +252,53 @@ def append_composition_retry_receipt(
             current = _current_composition_retry_row(handle, receipt_id)
             if current is not None and current.get("status") == "settled":
                 return current, False
-            handle.write(
-                json.dumps(payload, sort_keys=True, ensure_ascii=False) + "\n"
-            )
+            handle.write(json.dumps(payload, sort_keys=True, ensure_ascii=False) + "\n")
+            _compact_composition_retry_journal(handle)
     return payload, True
+
+
+def _compact_composition_retry_journal(handle: Any) -> None:
+    """Fold the journal back to one row per receipt id once it grows.
+
+    Runs under the append lock, so compaction never races another writer.
+    Keeping only the newest row per receipt id preserves every receipt's
+    latest lifecycle state (the only fact readers consume) while bounding
+    storage on high-churn goals.
+    """
+
+    handle.seek(0)
+    lines = handle.read().splitlines()
+    if len(lines) <= _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT:
+        handle.seek(0, 2)
+        return
+    latest: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for line in lines:
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            row = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if (
+            not isinstance(row, dict)
+            or row.get("schema_version")
+            != POST_WRITEBACK_COMPOSITION_RETRY_RECEIPT_SCHEMA_VERSION
+            or not isinstance(row.get("receipt_id"), str)
+            or row.get("status") not in {"retryable", "settled"}
+        ):
+            continue
+        receipt_id = str(row["receipt_id"])
+        if receipt_id not in latest:
+            order.append(receipt_id)
+        latest[receipt_id] = row
+    handle.seek(0)
+    handle.truncate()
+    for receipt_id in order:
+        handle.write(
+            json.dumps(latest[receipt_id], sort_keys=True, ensure_ascii=False) + "\n"
+        )
 
 
 def settle_composition_retry_receipt(
@@ -246,9 +334,7 @@ def settle_composition_retry_receipt(
             if current is None:
                 return {}, False
             handle.seek(0, 2)
-            handle.write(
-                json.dumps(settled, sort_keys=True, ensure_ascii=False) + "\n"
-            )
+            handle.write(json.dumps(settled, sort_keys=True, ensure_ascii=False) + "\n")
     return settled, True
 
 
@@ -257,19 +343,8 @@ def pending_composition_retry_receipts(
 ) -> list[dict[str, Any]]:
     """Read unconsumed retryable receipts for one goal, newest row per receipt."""
 
-    rows = _iter_composition_retry_rows(
+    return pending_composition_retry_receipts_for_path(
         composition_retry_receipt_log_path(runtime_root, goal_id)
-    )
-    latest: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        latest[str(row.get("receipt_id"))] = row
-    return sorted(
-        (
-            dict(row)
-            for row in latest.values()
-            if row.get("status") == "retryable"
-        ),
-        key=lambda row: str(row.get("receipt_id") or ""),
     )
 
 
@@ -283,6 +358,68 @@ __all__ = [
     "composition_retry_receipt_id",
     "composition_retry_receipt_log_path",
     "composition_retry_receipt_ref",
+    "collect_pending_composition_retry_projection",
     "pending_composition_retry_receipts",
+    "pending_composition_retry_receipts_for_path",
     "settle_composition_retry_receipt",
 ]
+
+
+def pending_composition_retry_receipts_for_path(
+    journal_path: Path,
+) -> list[dict[str, Any]]:
+    """Read unconsumed retryable receipts from one journal path."""
+
+    latest: dict[str, dict[str, Any]] = {}
+    for row in _iter_composition_retry_rows(journal_path):
+        latest[str(row.get("receipt_id"))] = row
+    return sorted(
+        (dict(row) for row in latest.values() if row.get("status") == "retryable"),
+        key=lambda row: str(row.get("receipt_id") or ""),
+    )
+
+
+def collect_pending_composition_retry_projection(
+    runtime_root: Path,
+    goal_id: str | None,
+    *,
+    max_items: int = 20,
+) -> dict[str, Any] | None:
+    """Collect pending composition retry receipts for status/doctor readback.
+
+    Returns None when nothing is pending so the status output stays unchanged
+    on healthy goals; otherwise returns a bounded public-safe projection with
+    the replay guidance, letting a later turn or operator discover and clear
+    outstanding composition retries through the normal read model.
+    """
+
+    root = runtime_root.expanduser()
+    goals_root = root / "goals"
+    if goal_id:
+        journal_paths = [composition_retry_receipt_log_path(root, goal_id)]
+    elif goals_root.is_dir():
+        journal_paths = sorted(path for path in goals_root.iterdir() if path.is_dir())
+        journal_paths = [
+            path / "post_writeback_hooks" / POST_WRITEBACK_COMPOSITION_RETRY_LOG_NAME
+            for path in journal_paths
+        ]
+    else:
+        journal_paths = []
+    pending: list[dict[str, Any]] = []
+    for journal_path in journal_paths:
+        if not journal_path.is_file():
+            continue
+        for row in pending_composition_retry_receipts_for_path(journal_path):
+            pending.append(row)
+            if len(pending) >= max_items:
+                break
+        if len(pending) >= max_items:
+            break
+    if not pending:
+        return None
+    return {
+        "schema_version": POST_WRITEBACK_COMPOSITION_RETRY_PROJECTION_SCHEMA_VERSION,
+        "pending_count": len(pending),
+        "pending": pending,
+        "replay_action": POST_WRITEBACK_COMPOSITION_RETRY_REPLAY_ACTION,
+    }

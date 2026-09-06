@@ -159,6 +159,7 @@ def dispatch_committed_cli_post_writeback_hooks(
             event_kind=event_kind,
             identity=identity,
             state_version=state_version,
+            hook_identities=_composition_hook_identities(hooks),
         )
     except Exception:  # Optional hooks never alter primary truth.
         return _composition_failure_dispatch(

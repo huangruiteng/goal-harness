@@ -14,9 +14,12 @@ from loopx.control_plane.capability_hooks import (
     PostWritebackHookRegistration,
 )
 from loopx.control_plane.post_writeback_composition_retry import (
+    _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT,
+    POST_WRITEBACK_COMPOSITION_RETRY_PROJECTION_SCHEMA_VERSION,
     POST_WRITEBACK_COMPOSITION_RETRY_RECEIPT_SCHEMA_VERSION,
     append_composition_retry_receipt,
     build_composition_retry_receipt,
+    collect_pending_composition_retry_projection,
     composition_retry_receipt_id,
     composition_retry_receipt_log_path,
     composition_retry_receipt_ref,
@@ -50,9 +53,7 @@ def _identity() -> dict[str, str]:
     }
 
 
-def _hook(
-    *, producer_calls: list[int] | None = None
-) -> PostWritebackHookRegistration:
+def _hook(*, producer_calls: list[int] | None = None) -> PostWritebackHookRegistration:
     def producer(value: object) -> dict[str, object]:
         if producer_calls is not None:
             producer_calls.append(1)
@@ -145,9 +146,7 @@ def test_failed_projection_preserves_actionable_hook_identity(
     assert failure["hook_id"] == "periodic_report.stage_completion"
     assert failure["capability_id"] == "periodic-report"
     assert failure["error_code"] == "source_projection_failed"
-    assert failure["durable_receipt_ref"].startswith(
-        "post-writeback-composition:pwcr_"
-    )
+    assert failure["durable_receipt_ref"].startswith("post-writeback-composition:pwcr_")
 
     pending = pending_composition_retry_receipts(runtime_root, "goal-1")
     (receipt,) = pending
@@ -188,34 +187,31 @@ def test_replay_after_transient_recovery_projects_once_and_settles_receipt(
 
     hooks = (_hook(producer_calls=producer_calls),)
 
-    failed = _dispatch(
-        registry_path, hooks=hooks, projection_builder=flaky_builder
-    )
+    failed = _dispatch(registry_path, hooks=hooks, projection_builder=flaky_builder)
     assert failed["failures"][0]["error_code"] == "source_projection_failed"
-    assert [receipt["status"] for receipt in pending_composition_retry_receipts(runtime_root, "goal-1")] == ["retryable"]
+    assert [
+        receipt["status"]
+        for receipt in pending_composition_retry_receipts(runtime_root, "goal-1")
+    ] == ["retryable"]
 
-    recovered = _dispatch(
-        registry_path, hooks=hooks, projection_builder=flaky_builder
-    )
+    recovered = _dispatch(registry_path, hooks=hooks, projection_builder=flaky_builder)
     assert recovered["failures"] == []
     assert recovered["intent_count"] == 1
     assert len(producer_calls) == 1
     assert len(projection_calls) == 2
     assert pending_composition_retry_receipts(runtime_root, "goal-1") == []
     rows = _journal_rows(runtime_root)
-    assert [row["status"] for row in rows if row["receipt_id"] == rows[-1]["receipt_id"]][-1] == "settled"
+    assert [
+        row["status"] for row in rows if row["receipt_id"] == rows[-1]["receipt_id"]
+    ][-1] == "settled"
 
-    replayed = _dispatch(
-        registry_path, hooks=hooks, projection_builder=flaky_builder
-    )
+    replayed = _dispatch(registry_path, hooks=hooks, projection_builder=flaky_builder)
     assert replayed["intent_count"] == 1
     assert replayed["replayed_hooks"] == ["periodic_report.stage_completion"]
     assert len(producer_calls) == 1
     assert len(projection_calls) == 3
     assert pending_composition_retry_receipts(runtime_root, "goal-1") == []
-    settled_ids = {
-        row["receipt_id"] for row in _journal_rows(runtime_root)
-    }
+    settled_ids = {row["receipt_id"] for row in _journal_rows(runtime_root)}
     assert len(settled_ids) == 1
 
 
@@ -242,9 +238,7 @@ def test_composition_replay_keeps_primary_writeback_idempotent(
     second_failure = _dispatch(
         registry_path, hooks=hooks, projection_builder=flaky_builder
     )
-    recovered = _dispatch(
-        registry_path, hooks=hooks, projection_builder=flaky_builder
-    )
+    recovered = _dispatch(registry_path, hooks=hooks, projection_builder=flaky_builder)
 
     for result in (first_failure, second_failure, recovered):
         assert result["primary_writeback_preserved"] is True
@@ -260,11 +254,18 @@ def test_composition_replay_keeps_primary_writeback_idempotent(
 
 
 def test_composition_retry_receipt_id_binds_primary_writeback_identity() -> None:
+    hooks = [
+        {
+            "hook_id": "periodic_report.stage_completion",
+            "capability_id": "periodic-report",
+        }
+    ]
     base = composition_retry_receipt_id(
         goal_id="goal-1",
         event_kind="todo_complete",
         identity=_identity(),
         state_version="vision-revision-2",
+        hook_identities=hooks,
     )
     assert base.startswith("pwcr_")
     assert base == composition_retry_receipt_id(
@@ -272,30 +273,42 @@ def test_composition_retry_receipt_id_binds_primary_writeback_identity() -> None
         event_kind="todo_complete",
         identity=_identity(),
         state_version="vision-revision-2",
+        hook_identities=list(reversed(hooks)),
     )
     assert base != composition_retry_receipt_id(
         goal_id="goal-1",
         event_kind="todo_complete",
         identity=_identity(),
         state_version="vision-revision-3",
+        hook_identities=hooks,
     )
     assert base != composition_retry_receipt_id(
         goal_id="goal-2",
         event_kind="todo_complete",
         identity=_identity(),
         state_version="vision-revision-2",
+        hook_identities=hooks,
     )
-    assert composition_retry_receipt_ref(base) == (
-        f"post-writeback-composition:{base}"
+    assert base != composition_retry_receipt_id(
+        goal_id="goal-1",
+        event_kind="todo_complete",
+        identity=_identity(),
+        state_version="vision-revision-2",
+        hook_identities=[],
     )
+    assert composition_retry_receipt_ref(base) == (f"post-writeback-composition:{base}")
 
 
 def test_composition_retry_journal_append_is_idempotent_and_terminal(
     tmp_path: Path,
 ) -> None:
-    journal_path = tmp_path / "goals" / "goal-1" / (
-        "post_writeback_hooks"
-    ) / "composition-retry-receipts.jsonl"
+    journal_path = (
+        tmp_path
+        / "goals"
+        / "goal-1"
+        / ("post_writeback_hooks")
+        / "composition-retry-receipts.jsonl"
+    )
     receipt = build_composition_retry_receipt(
         goal_id="goal-1",
         event_kind="todo_complete",
@@ -303,7 +316,10 @@ def test_composition_retry_journal_append_is_idempotent_and_terminal(
         state_version="vision-revision-2",
         committed_at="2026-09-06T00:00:00Z",
         hook_identities=[
-            {"hook_id": "periodic_report.stage_completion", "capability_id": "periodic-report"}
+            {
+                "hook_id": "periodic_report.stage_completion",
+                "capability_id": "periodic-report",
+            }
         ],
         error_code="source_projection_failed",
     )
@@ -325,16 +341,17 @@ def test_composition_retry_journal_append_is_idempotent_and_terminal(
         state_version="vision-revision-2",
         committed_at="2026-09-06T00:00:00Z",
         hook_identities=[
-            {"hook_id": "periodic_report.stage_completion", "capability_id": "periodic-report"}
+            {
+                "hook_id": "periodic_report.stage_completion",
+                "capability_id": "periodic-report",
+            }
         ],
     )
     assert settled_flag is True
     assert settled["status"] == "settled"
     assert settled["error_code"] is None
 
-    regressed, regressed_flag = append_composition_retry_receipt(
-        journal_path, receipt
-    )
+    regressed, regressed_flag = append_composition_retry_receipt(journal_path, receipt)
     assert regressed_flag is False
     assert regressed["status"] == "settled"
     rows = [
@@ -351,10 +368,32 @@ def test_composition_retry_journal_append_is_idempotent_and_terminal(
         identity=_identity(),
         state_version="vision-revision-2",
         committed_at="2026-09-06T00:00:00Z",
-        hook_identities=[],
+        hook_identities=[
+            {
+                "hook_id": "periodic_report.stage_completion",
+                "capability_id": "periodic-report",
+            }
+        ],
     )
     assert resettle_flag is False
     assert resettle["status"] == "settled"
+    assert len(rows) == 3
+
+    # A different registered hook set computes a different receipt identity,
+    # so it must not touch (let alone settle) the original failure's receipt.
+    foreign, foreign_flag = settle_composition_retry_receipt(
+        journal_path,
+        goal_id="goal-1",
+        event_kind="todo_complete",
+        identity=_identity(),
+        state_version="vision-revision-2",
+        committed_at="2026-09-06T00:00:00Z",
+        hook_identities=[
+            {"hook_id": "other.hook", "capability_id": "other-capability"}
+        ],
+    )
+    assert foreign_flag is False
+    assert foreign == {}
     assert len(rows) == 3
 
 
@@ -437,9 +476,7 @@ def test_journal_unavailable_degrades_to_identity_without_receipt_ref(
     assert failure["capability_id"] == "periodic-report"
     assert failure["error_code"] == "source_projection_failed"
     assert "durable_receipt_ref" not in failure
-    assert not composition_retry_receipt_log_path(
-        runtime_root, "goal-1"
-    ).exists()
+    assert not composition_retry_receipt_log_path(runtime_root, "goal-1").exists()
 
 
 def test_producer_failure_settles_composition_receipt_with_hook_level_trail(
@@ -488,3 +525,175 @@ def test_producer_failure_settles_composition_receipt_with_hook_level_trail(
         "a composed projection must settle the composition receipt even when a "
         "hook-level producer fails: hook failures carry their own durable trail"
     )
+
+
+def test_foreign_hook_set_cannot_settle_original_failure_receipt(
+    tmp_path: Path,
+) -> None:
+    """P1 probe: a changed hook set must not resolve the original failure."""
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+
+    def failing_builder(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("transient projection failure")
+
+    first = _dispatch(
+        registry_path,
+        hooks=(_hook(),),
+        projection_builder=failing_builder,
+    )
+    assert first["failures"][0]["hook_id"] == "periodic_report.stage_completion"
+    pending = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert len(pending) == 1
+
+    def other_hook() -> PostWritebackHookRegistration:
+        return PostWritebackHookRegistration(
+            hook_id="periodic_report.other_stage",
+            capability_id="periodic-report",
+            event_kinds=("todo_complete",),
+            intent_kinds=("periodic_report.trigger_evaluation",),
+            requested_read_scope=("stage_completion",),
+            producer=lambda value: {
+                "schema_version": POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
+                "hook_id": "periodic_report.other_stage",
+                "capability_id": "periodic-report",
+                "phase": "post_writeback",
+                "status": "not_applicable",
+                "intent": None,
+                "error_code": None,
+            },
+        )
+
+    def other_producer_fails(value: object) -> dict[str, object]:
+        raise RuntimeError("hook producer collapsed")
+
+    def other_registration() -> PostWritebackHookRegistration:
+        registration = other_hook()
+        object.__setattr__(registration, "producer", other_producer_fails)
+        return registration
+
+    second = _dispatch(
+        registry_path,
+        hooks=(other_registration(),),
+        projection_builder=lambda **_kwargs: _stage_projection(),
+    )
+    assert second["failures"][0]["hook_id"] == "periodic_report.other_stage"
+    still_pending = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert [row["receipt_id"] for row in still_pending] == [
+        row["receipt_id"] for row in pending
+    ], "the original hook-a receipt must survive a foreign hook-b composition"
+
+
+def test_pending_view_keeps_unresolved_receipts_beyond_the_compaction_bound(
+    tmp_path: Path,
+) -> None:
+    """P1 probe: bounded suffix reads must never hide an unresolved receipt."""
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+
+    def failing_builder(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("transient projection failure")
+
+    assert _dispatch(
+        registry_path, hooks=(_hook(),), projection_builder=failing_builder
+    )["failures"]
+    original = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert len(original) == 1
+    journal_path = composition_retry_receipt_log_path(runtime_root, "goal-1")
+
+    filler_identity = dict(_identity())
+    for index in range(_COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT + 8):
+        filler_identity["todo_id"] = f"todo_filler_{index:04d}"
+        append_composition_retry_receipt(
+            journal_path,
+            build_composition_retry_receipt(
+                goal_id="goal-1",
+                event_kind="todo_complete",
+                identity=filler_identity,
+                state_version=f"vision-revision-{index}",
+                committed_at="2026-09-06T00:00:00Z",
+                hook_identities=[
+                    {
+                        "hook_id": "periodic_report.stage_completion",
+                        "capability_id": "periodic-report",
+                    }
+                ],
+                error_code="source_projection_failed",
+            ),
+        )
+
+    after = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert original[0]["receipt_id"] in {row["receipt_id"] for row in after}
+    assert len(after) == _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT + 9
+
+    # Distinct unresolved receipts are all durable state, so compaction must
+    # not collapse them; re-observing one receipt, however, folds its rows.
+    filler_identity["todo_id"] = "todo_filler_0000"
+    append_composition_retry_receipt(
+        journal_path,
+        build_composition_retry_receipt(
+            goal_id="goal-1",
+            event_kind="todo_complete",
+            identity=filler_identity,
+            state_version="vision-revision-0",
+            committed_at="2026-09-06T00:00:00Z",
+            hook_identities=[
+                {
+                    "hook_id": "periodic_report.stage_completion",
+                    "capability_id": "periodic-report",
+                }
+            ],
+            error_code="source_projection_failed",
+        ),
+    )
+    rows = [
+        json.loads(line)
+        for line in journal_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    ids = [row["receipt_id"] for row in rows]
+    assert len(ids) == len(set(ids)) == len(after)
+    still_visible = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert original[0]["receipt_id"] in {row["receipt_id"] for row in still_visible}
+    assert len(still_visible) == len(after)
+
+
+def test_later_turn_discovers_and_clears_pending_composition_retries(
+    tmp_path: Path,
+) -> None:
+    """P1 probe: the read model surfaces pending retries and replay clears them."""
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+
+    def failing_builder(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("transient projection failure")
+
+    assert _dispatch(
+        registry_path, hooks=(_hook(),), projection_builder=failing_builder
+    )["failures"]
+
+    # A later turn (fresh process state) discovers the pending retry through
+    # the status readback projection instead of the original command response.
+    discovered = collect_pending_composition_retry_projection(runtime_root, None)
+    assert discovered is not None
+    assert discovered["pending_count"] == 1
+    assert discovered["pending"][0]["identity"]["goal_id"] == "goal-1"
+    assert discovered["schema_version"] == (
+        POST_WRITEBACK_COMPOSITION_RETRY_PROJECTION_SCHEMA_VERSION
+    )
+    assert "Replay the committed CLI mutation" in discovered["replay_action"]
+    healthy = collect_pending_composition_retry_projection(
+        tmp_path / "missing-runtime", None
+    )
+    assert healthy is None
+
+    # Replaying the same committed mutation composes cleanly and settles the
+    # receipt; the next readback no longer reports anything pending.
+    replay = _dispatch(
+        registry_path,
+        hooks=(_hook(),),
+        projection_builder=lambda **_kwargs: _stage_projection(),
+    )
+    assert replay["intent_count"] == 1
+    assert collect_pending_composition_retry_projection(runtime_root, None) is None
+    assert pending_composition_retry_receipts(runtime_root, "goal-1") == []
