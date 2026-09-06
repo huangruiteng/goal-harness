@@ -159,8 +159,16 @@ export LOOPX_DSH_SHADOW_OBSERVER_RUN_IDENTITY_JSON='{"worker_id":"<worker>","mod
 
 loopx reliability-diagnostics receipt --goal-id <goal-id> --format json
 loopx reliability-diagnostics status  --goal-id <goal-id> --format json
+loopx reliability-diagnostics status  --goal-id <goal-id> --with-receipt --format json
 loopx reliability-diagnostics ingest  --goal-id <goal-id> --input observer.ndjson --format json
 ```
+
+`status --with-receipt` returns both existing contracts from one ledger read.
+Omit the option to retain projection-only output. It grants no control authority
+and does not enable the observer. Concurrent appends are not atomic snapshots;
+partial records remain integrity failures. See the
+[DSH/Pi assessment](../../../docs/architecture/rfcs/harness-selection-dsh-pi-v0.md)
+before wiring this full-ledger CLI into a polling surface.
 
 The ledger lives at `<runtime-root>/reliability_diagnostics/<goal-id>.ndjson`;
 the default runtime root is the same one the rest of LoopX uses and the CLI

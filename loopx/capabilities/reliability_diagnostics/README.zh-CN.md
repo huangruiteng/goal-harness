@@ -136,8 +136,15 @@ export LOOPX_DSH_SHADOW_OBSERVER_RUN_IDENTITY_JSON='{"worker_id":"<worker>","mod
 
 loopx reliability-diagnostics receipt --goal-id <goal-id> --format json
 loopx reliability-diagnostics status  --goal-id <goal-id> --format json
+loopx reliability-diagnostics status  --goal-id <goal-id> --with-receipt --format json
 loopx reliability-diagnostics ingest  --goal-id <goal-id> --input observer.ndjson --format json
 ```
+
+`status --with-receipt` 从同一次 ledger 读取返回两个现有合同；省略该选项保留原来的
+projection-only 输出，不授予控制权限，也不激活 observer。并发追加不是原子快照，
+末尾半行仍会导致 integrity 失败。接入轮询前应阅读
+[DSH/Pi 评估](../../../docs/architecture/rfcs/harness-selection-dsh-pi-v0.zh-CN.md)
+中的全量读取与身份边界。
 
 ledger 位于 `<runtime-root>/reliability_diagnostics/<goal-id>.ndjson`；默认 runtime root
 与 LoopX 其它部分一致，CLI 只打印相对的 `ledger_ref`。`ingest` 会重新校验每一行；干净的
