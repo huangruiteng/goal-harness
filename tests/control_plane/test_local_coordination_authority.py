@@ -1065,3 +1065,37 @@ def test_promoted_claim_protocol_failures_stay_unavailable(
         )
     assert not isinstance(exc_info.value, ValueError)
     assert exc_info.value.code == reason_code
+
+
+def test_protocol_failure_kind_absent_means_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A legacy failure result without the kind field is an outage, not a decision."""
+
+    _engage_fence(tmp_path)
+
+    def _legacy_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": "loopx_coordination_todo_claim_result_v0",
+            "status": "failed",
+            "reason_code": "todo_not_open",
+            "reason": "todo claim requires status=open",
+        }
+
+    monkeypatch.setattr(
+        "loopx.control_plane.coordination.local_authority.effect_runtime_result",
+        _legacy_failure,
+    )
+    with pytest.raises(LocalCoordinationAuthorityUnavailable) as exc_info:
+        claim_canonical_todo_if_promoted(
+            registry_path=_claim_registry(tmp_path),
+            runtime_root=tmp_path,
+            goal_id="goal-a",
+            todo_id="todo_a",
+            role="agent",
+            claimed_by="agent-a",
+            actor_agent_id="agent-a",
+            dry_run=False,
+        )
+    assert not isinstance(exc_info.value, ValueError)
