@@ -20,7 +20,7 @@ from loopx.control_plane.todos.active_state_editing import TODO_SECTION_HEADINGS
 from loopx.control_plane.coordination.legacy_writer_fence import (
     legacy_coordination_writer_fence_path,
 )
-from loopx.todos import add_goal_todo, list_goal_todos, update_goal_todo
+from loopx.todos import add_goal_todo, list_goal_todos
 from canonical_authority_fixture import initialize_canonical_authority
 
 
