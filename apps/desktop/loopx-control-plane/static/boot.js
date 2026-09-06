@@ -54,6 +54,8 @@ const errors = {
   update_check_timeout: "检查更新超时。请稍后重试。",
   update_network_failed: "无法连接更新服务器。请检查网络后重试。",
   update_download_or_signature_failed: "更新包下载或签名校验失败，尚未安装。请重新检查更新。",
+  app_install_failed: "App 安装未能完成，本次更新未生效。可直接重启继续使用当前版本，或重新检查更新后再试。",
+  backup_failed: "无法备份当前版本，更新已停止。请检查磁盘空间后重试。",
 };
 function render(state) {
   if (!state?.phase) return;

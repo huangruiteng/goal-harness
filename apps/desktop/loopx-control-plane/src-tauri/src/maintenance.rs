@@ -18,6 +18,7 @@ pub struct Maintenance {
     snapshot: Mutex<Value>,
     pending: Mutex<Option<(String, Update)>>,
     last_failure: Mutex<Value>,
+    install_journal_discarded: AtomicBool,
 }
 impl Maintenance {
     fn acquire(&self) -> Result<BusyGuard<'_>, String> {
@@ -150,9 +151,23 @@ pub async fn desktop_update(
     }
     let outcome = perform(&app, &action, &channel, url).await;
     if let Err(error) = &outcome {
-        state.publish("error", json!({"code":error,"channel":channel}));
+        state.publish_failure(error, &channel);
     }
     outcome
+}
+impl Maintenance {
+    // App-install failures discard the stale continuation journal (see
+    // perform); surface that in the failure diagnostics exactly once.
+    fn publish_failure(&self, code: &str, channel: &str) -> Value {
+        let mut details = json!({"code": code, "channel": channel});
+        if code == "app_install_failed" {
+            details["journal_discarded"] = self
+                .install_journal_discarded
+                .swap(false, Ordering::AcqRel)
+                .into();
+        }
+        self.publish("error", details)
+    }
 }
 async fn perform(
     app: &AppHandle,
@@ -245,10 +260,21 @@ async fn perform(
         .map_err(|_| "backup_failed")??;
     bundled_runtime::record_pending(app, &update.version, channel)?;
     let target = update.version.clone();
-    tauri::async_runtime::spawn_blocking(move || update.install(bytes))
+    let installed = tauri::async_runtime::spawn_blocking(move || update.install(bytes))
         .await
         .map_err(|_| "app_install_failed")?
-        .map_err(|_| "app_install_failed")?;
+        .map_err(|_| "app_install_failed");
+    if installed.is_err() {
+        // The journal recorded before replacement names the approved runtime
+        // whose app never shipped. The on-disk app still pairs with the
+        // runtime already installed, so discard the journal instead of
+        // wedging the next start into the recovery panel.
+        state.install_journal_discarded.store(
+            matches!(bundled_runtime::discard_journal(app), Ok(true)),
+            Ordering::Release,
+        );
+        return Err("app_install_failed".into());
+    }
     *state.pending.lock().unwrap() = None;
     Ok(state.publish("restart_required", json!({"version":target})))
 }
@@ -412,5 +438,27 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn install_failures_report_journal_discard_exactly_once() {
+        let state = Maintenance::default();
+        state.install_journal_discarded.store(true, Ordering::Release);
+        let failure = state.publish_failure("app_install_failed", "stable");
+        assert_eq!(failure["details"]["journal_discarded"], true);
+        // The diagnostics flag is consumed with the failure it describes.
+        let repeat = state.publish_failure("app_install_failed", "stable");
+        assert_eq!(repeat["details"]["journal_discarded"], false);
+    }
+
+    #[test]
+    fn unrelated_failures_do_not_report_journal_discard() {
+        let state = Maintenance::default();
+        state.install_journal_discarded.store(true, Ordering::Release);
+        let failure = state.publish_failure("update_network_failed", "stable");
+        assert!(failure["details"].get("journal_discarded").is_none());
+        // Unrelated failures leave the flag for the install failure that owns it.
+        let install = state.publish_failure("app_install_failed", "stable");
+        assert_eq!(install["details"]["journal_discarded"], true);
     }
 }

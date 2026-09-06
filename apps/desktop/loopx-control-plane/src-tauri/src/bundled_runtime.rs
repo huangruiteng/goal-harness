@@ -67,11 +67,34 @@ pub fn resume_pending(app: &AppHandle) -> Result<(), String> {
             .map_err(|_| "update_state_invalid")?;
     // Never install runtime code from an App other than the approved target.
     if state["version"] != app.package_info().version.to_string() {
-        return Err("app_update_incomplete".into());
+        // A journal naming a different version means the approved installation
+        // never completed: the app update failed before replacing the app, or
+        // the app was rolled back. The running app still pairs with the
+        // runtime already on disk, so discard the stale journal instead of
+        // locking the next start into the recovery panel. The no-journal
+        // startup path re-validates that pairing.
+        discard_journal_at(&path)?;
+    } else {
+        install(app)?;
+        fs::remove_file(&path).map_err(|_| "update_state_unavailable")?;
     }
-    install(app)?;
-    fs::remove_file(path).map_err(|_| "update_state_unavailable")?;
     Ok(())
+}
+
+/// Remove a journal that names a runtime the on-disk app never became. Used
+/// when an app update fails after the journal was recorded: keeping it would
+/// wedge the next start into the recovery panel for an update that never
+/// shipped. Returns whether a journal file existed.
+pub fn discard_journal(app: &AppHandle) -> Result<bool, String> {
+    discard_journal_at(&journal(app)?)
+}
+
+fn discard_journal_at(path: &Path) -> Result<bool, String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err("update_state_unavailable".into()),
+    }
 }
 
 pub fn install(app: &AppHandle) -> Result<(), String> {
@@ -245,5 +268,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(extract(&bytes, dir.path()).is_err());
         assert!(!dir.path().join("escape").exists());
+    }
+    #[test]
+    fn discarding_journal_reports_existence_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join("desktop-update.json");
+        fs::write(&journal, "{\"version\":\"1.2.3\"}").unwrap();
+        assert_eq!(discard_journal_at(&journal), Ok(true));
+        assert!(!journal.exists());
+        assert_eq!(discard_journal_at(&journal), Ok(false));
+    }
+    #[test]
+    fn undiscardable_journal_surfaces_state_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory cannot be removed as a file, standing in for any
+        // filesystem-level failure to clear the journal.
+        let path = dir.path().join("occupied");
+        fs::create_dir(&path).unwrap();
+        assert_eq!(
+            discard_journal_at(&path),
+            Err("update_state_unavailable".into())
+        );
     }
 }
