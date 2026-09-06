@@ -75,6 +75,35 @@ golden 来让测试通过。
 
 ### Refactor Real-Path Gate / 重构真实路径门
 
+The PR review capability's `observable_semantics` evidence gate applies to
+behavior-bearing changes, including extractions and backend migrations; it
+does not infer equivalence from a refactor title. Reviewers inventory legacy
+caller branches at an immutable baseline and compare the same synthetic
+inputs at the exact head through the public entrypoint. Include successful
+and rejected paths, full diagnostics/remediation, validation precedence,
+supplied/omitted/empty/clear arguments, persisted readback, ownership and
+receipts, plus replay/concurrency where relevant. A provider suite whose
+implementations share the new rule is not a before/after compatibility test.
+
+重构评审必须区分“相同判定”和“相同可观察语义”：同样拒绝但丢失对象状态或修复
+提示仍是回归；新增认领前提可能阻断旧实现允许的未认领文案修正；`--note` 被 parser
+接受或出现在成功响应中，也不能证明它经过 dispatch 后落盘并能独立回读。先从旧调用
+方及公开契约列出合法／非法分支，再运行基线与精确 head 的对照，不从新实现生成期望。
+
+Show regression sensitivity: the focused case must fail on the historical
+defect or a deliberate dropped-field/detail or stronger-precondition mutation,
+then pass on the fix. Preserve intended changes as explicit justified deltas;
+do not freeze a known baseline bug or normalize away meaningful differences.
+Re-review the full inventory after a correction, not only the previous finding.
+Missing comparison evidence blocks an equivalence-based approval. This is a
+reviewer-executed requirement projected in the packet, not a machine proof
+that the comparison ran. The packet tests protect this requirement's delivery;
+runtime regressions must still test actual behavior.
+
+保留“旧缺陷／语义 mutation 失败、修复后通过”的证据；有意变更需单列理由与验证，
+不能盲目追求字节一致。复审重查完整兼容清单，不沿着上一条发现自动走向批准。缺少
+对照证据就不能宣称等价；packet 测试只证明要求被投影，不证明 agent 已执行或产品无缺陷。
+
 Refactors must exercise the affected production entrypoint and real backend
 before delivery. Unit tests, mocks, and in-memory conformance remain useful,
 but cannot replace that proof. For changes affecting PostgreSQL authority,

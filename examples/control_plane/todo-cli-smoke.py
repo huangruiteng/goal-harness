@@ -87,7 +87,7 @@ def main() -> int:
         root = Path(tmp)
         registry_path, state_file = write_fixture(root)
         legacy_registry_path, _ = write_fixture(root / "legacy", register_agents=False)
-        claim_state_registry_path, _ = write_fixture(root / "claim-state")
+        claim_state_registry_path, claim_state_file = write_fixture(root / "claim-state")
         original = state_file.read_text(encoding="utf-8")
 
         blocked_todo = run_cli(
@@ -105,6 +105,7 @@ def main() -> int:
             "--task-class",
             "advancement_task",
         )
+        before_rejected_claim = claim_state_file.read_text(encoding="utf-8")
         blocked_claim = run_cli_error(
             claim_state_registry_path,
             "todo",
@@ -118,7 +119,11 @@ def main() -> int:
             "--agent-id",
             "codex-main-control",
         )
-        assert "todo claim requires status=open" in blocked_claim["error"], blocked_claim
+        assert blocked_claim["error"] == (
+            f"todo claim requires status=open; todo_id '{blocked_todo['todo_id']}' "
+            "is status='blocked'"
+        ), blocked_claim
+        assert claim_state_file.read_text(encoding="utf-8") == before_rejected_claim
 
         bare_user_error = run_cli_error(
             registry_path,

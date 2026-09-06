@@ -91,7 +91,7 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
             _section(
                 "我的整体评价",
                 "150-300字",
-                "Use `code_volume`, `change_proportionality`, `default_off_isolation`, `authority_semantics`, validation results, residual risk, and exact-head freshness to state the verdict and the evidence needed for re-review.",
+                "Use `observable_semantics` to report baseline/head comparisons and remaining compatibility gaps; equal decision codes are insufficient. Use `code_volume`, `change_proportionality`, `default_off_isolation`, `authority_semantics`, validation results, residual risk, and exact-head freshness to state the verdict and the evidence needed for re-review.",
             ),
         ],
         "review_order": _review_order(key_files),
@@ -177,6 +177,69 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "or unverified evidence is not_yet_proven and cannot approve. "
                     "This is a reviewer-executed evidence requirement, not an "
                     "automatic similarity detector or proof that a search ran."
+                ),
+            },
+            {
+                "evidence_id": "observable_semantics",
+                "required_when": "behavior_bearing_change",
+                "verdict_values": [
+                    "equivalent",
+                    "intentional_change_validated",
+                    "unintended_drift",
+                    "not_yet_proven",
+                ],
+                "fields": [
+                    "baseline_revision",
+                    "reviewed_head",
+                    "caller_branch_inventory",
+                    "comparison_rows",
+                    "intentional_deltas",
+                    "regression_sensitivity",
+                    "unverified_dimensions",
+                    "verdict",
+                ],
+                "comparison_dimensions": [
+                    "accepted_inputs_and_defaults",
+                    "eligibility_and_rejection_precedence",
+                    "full_diagnostics_and_remediation",
+                    "argument_to_persistence_readback",
+                    "state_receipts_and_no_effects",
+                    "replay_and_concurrent_updates",
+                ],
+                "row_fields": [
+                    "input_and_pre_state",
+                    "entrypoint_and_backend",
+                    "baseline_observation",
+                    "head_observation",
+                    "expected_invariant_source",
+                    "validation_evidence",
+                ],
+                "rule": (
+                    "Inventory changed and bypassed caller branches from the immutable "
+                    "pre-change baseline, not just the new helper or PR title. Compare "
+                    "identical synthetic inputs through the real public entrypoint and "
+                    "affected backend at baseline and exact head. Include legal paths "
+                    "as well as rejection paths: stricter eligibility is not inherently "
+                    "compatible. For migrations compare before/after promotion, not "
+                    "only multiple providers sharing the new decision. Trace supplied, "
+                    "omitted, empty and clear argument intent through dispatch, mutation, "
+                    "persistence and a separate readback; a success payload or parser "
+                    "acceptance does not prove a note was saved or ownership unchanged. "
+                    "Compare exception/exit type, full diagnostic details and remediation, "
+                    "not just reason codes, prefixes or 'both reject'. Exercise overlapping "
+                    "invalid conditions to check rejection precedence and assert no "
+                    "unintended state/receipt/ownership effects. Mark non-applicable "
+                    "dimensions with reasons. Derive expected invariants from the public "
+                    "contract and legacy callers, never from the replacement output; "
+                    "baseline bugs require explicitly disclosed, justified changes rather "
+                    "than blind byte parity. Show a regression failing on the old defect "
+                    "or a deliberate semantic mutation (dropped argument/detail, stronger "
+                    "precondition), then passing on the fix. Normalize only documented "
+                    "nondeterminism, never away a semantic delta. Re-review the full "
+                    "inventory after fixes, not only the last finding. Missing baseline "
+                    "or real-path evidence is not_yet_proven, not equivalent. This is a "
+                    "reviewer-executed evidence gate, not automated execution or proof "
+                    "of equivalence from CI, metadata, or a completed review template."
                 ),
             },
             {
@@ -550,6 +613,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             "stale_head_verdict_allowed": False,
             "blocking_evidence_verdicts": {
                 "repository_reuse": ["unjustified_duplication", "not_yet_proven"],
+                "observable_semantics": ["unintended_drift", "not_yet_proven"],
                 "change_proportionality": [
                     "disproportionate",
                     "not_yet_proven",
@@ -567,6 +631,11 @@ def build_review_execution_contract() -> dict[str, Any]:
         },
         "verdict_policy": {
             "open_pr_blocking_finding": "REQUEST_CHANGES",
+            "open_pr_unresolved_semantics": (
+                "REQUEST_CHANGES when observable_semantics is unintended_drift or "
+                "not_yet_proven; equal decision codes, green suites, stricter checks "
+                "and resolution of the previous finding cannot establish compatibility"
+            ),
             "open_pr_unresolved_reuse": (
                 "REQUEST_CHANGES when repository_reuse is unjustified_duplication "
                 "or not_yet_proven, including missing/unverified search evidence; "
@@ -629,6 +698,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         required_evidence.append("typed_state_rule")
     if behavior_bearing_change:
         required_evidence.insert(3, "repository_reuse")
+        required_evidence.append("observable_semantics")
         if "scope_fit" not in required_evidence:
             required_evidence.append("scope_fit")
         required_evidence.append("default_off_isolation")
@@ -659,6 +729,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "symbol_map_required": code_change,
             "scope_fit_required": behavior_bearing_change,
             "repository_reuse_required": behavior_bearing_change,
+            "observable_semantics_required": behavior_bearing_change,
             "change_proportionality_required": code_change,
             "default_off_isolation_required": behavior_bearing_change,
             "authority_semantics_required": code_change,
