@@ -47,7 +47,12 @@ from .ack_policy import (
     autonomous_replan_ack_satisfies_obligation,
     replan_successor_transition_ack,
 )
-from .fallback_disposition import declared_fallback_gap_from_agent_vision
+from .fallback_disposition import (
+    VISION_FRONTIER_TODO_DELTA_ACTIONS,  # noqa: F401
+    agent_scoped_selectable_advancement_todo_ids,  # noqa: F401
+    declared_fallback_gap_from_agent_vision,
+    parse_vision_todo_delta_entries,
+)
 from .long_todo_chain import (
     LONG_TODO_CHAIN_TRIGGER,
     classify_long_todo_chain_ack,
@@ -92,13 +97,6 @@ VISION_PROFILE_MISSING_TRIGGER = "required_agent_vision_missing"
 TODO_SUCCESSION_GAP_TRIGGER = TODO_SUCCESSION_WARNING_REASON_CODE
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
 TODO_TASK_CLASS_MONITOR = "continuous_monitor"
-VISION_FRONTIER_TODO_DELTA_ACTIONS = {
-    "activate",
-    "create",
-    "reopen",
-    "resume",
-    "retain",
-}
 
 
 def safe_non_negative_int(value: Any) -> int:
@@ -394,11 +392,9 @@ def acceptance_gaps_from_agent_vision(
         gap["acceptance_summary"] = acceptance
     vision_todo_ids = [
         todo_id
-        for value in (agent_vision.get("todo_delta") or [])
-        if isinstance(value, str)
-        and (parts := value.strip().partition(":"))[1]
-        and parts[0].strip().lower() in VISION_FRONTIER_TODO_DELTA_ACTIONS
-        and (todo_id := _compact_projection_text(parts[2], limit=120))
+        for _, todo_id in parse_vision_todo_delta_entries(
+            agent_vision.get("todo_delta")
+        )
     ]
     if vision_todo_ids:
         gap["vision_todo_ids"] = list(dict.fromkeys(vision_todo_ids))
