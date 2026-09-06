@@ -1,0 +1,605 @@
+{
+  "schema_version": "workspace_stories_v2",
+  "notice": "Authored scenario replay using real LoopX state and deterministic local artifacts. No customer or live Agent execution claims.",
+  "stories": [
+    {
+      "id": "community-day",
+      "title": "Riverside Community Day",
+      "objective": "Deliver a one-day community event for 120 guests within $6000, with step-free access, a wet-weather plan, volunteer coverage and reviewed communications.",
+      "agents": [
+        "producer",
+        "logistics",
+        "editor",
+        "finance"
+      ],
+      "gates": [
+        {
+          "key": "venue",
+          "agent": "logistics",
+          "title": "Choose Riverside Hall: $5400 total, step-free access, 120 seats; hold expires Friday."
+        },
+        {
+          "key": "invite",
+          "agent": "editor",
+          "title": "Approve the invitation and accessibility wording before registrations open."
+        }
+      ],
+      "rows": [
+        [
+          "Riverside Hall",
+          2400
+        ],
+        [
+          "Catering: 120 × $18",
+          2160
+        ],
+        [
+          "Access services",
+          480
+        ],
+        [
+          "Print and materials",
+          360
+        ]
+      ],
+      "budget_limit": 6000,
+      "brief": "Venue shortlist: Riverside Hall seats 140 with step-free access; Garden Pavilion seats 160 but needs a $900 wet-weather tent; Library Studio seats 100 and cannot meet capacity. The hall plan totals $5400 with $600 contingency. A supplier revision increased the original catering quote by $240; the current plan already includes it. Two volunteer shifts still lack a first-aid lead.",
+      "monitors": [
+        [
+          "logistics",
+          "Check registration totals and dietary requests every six hours",
+          "6h",
+          "registrations"
+        ],
+        [
+          "finance",
+          "Review supplier quote changes and contingency exposure daily",
+          "1d",
+          "supplier-quotes"
+        ]
+      ],
+      "tasks": [
+        {
+          "key": "scope",
+          "agent": "producer",
+          "status": "done",
+          "title": "Agree capacity, access requirements and the $6000 ceiling",
+          "phase": "Discovery",
+          "after": null
+        },
+        {
+          "key": "venues",
+          "agent": "logistics",
+          "status": "done",
+          "title": "Compare three venues; rule out the 100-seat library",
+          "phase": "Discovery",
+          "after": "scope"
+        },
+        {
+          "key": "budget",
+          "agent": "finance",
+          "status": "done",
+          "title": "Reprice catering and verify $600 contingency remains",
+          "phase": "Planning",
+          "after": "venues"
+        },
+        {
+          "key": "access",
+          "agent": "logistics",
+          "status": "done",
+          "title": "Map the step-free route, quiet room and accessible toilets",
+          "phase": "Planning",
+          "after": "venues"
+        },
+        {
+          "key": "copy",
+          "agent": "editor",
+          "status": "done",
+          "title": "Draft registration copy, access guide and cancellation terms",
+          "phase": "Planning",
+          "after": "access"
+        },
+        {
+          "key": "rain",
+          "agent": "producer",
+          "status": "done",
+          "title": "Document the indoor fallback and evacuation responsibilities",
+          "phase": "Planning",
+          "after": "venues"
+        },
+        {
+          "key": "rota",
+          "agent": "producer",
+          "status": "done",
+          "title": "Map 18 volunteer shifts; identify two first-aid gaps",
+          "phase": "Planning",
+          "after": "scope"
+        },
+        {
+          "key": "reserve",
+          "agent": "logistics",
+          "status": "blocked",
+          "title": "Reserve Riverside Hall after the venue decision",
+          "phase": "Booking",
+          "after": "gate:venue"
+        },
+        {
+          "key": "deposit",
+          "agent": "finance",
+          "status": "blocked",
+          "title": "Release the $600 deposit after the signed venue agreement",
+          "phase": "Booking",
+          "after": "reserve"
+        },
+        {
+          "key": "launch-invite",
+          "agent": "editor",
+          "status": "blocked",
+          "title": "Open registration after invitation approval",
+          "phase": "Communications",
+          "after": "gate:invite"
+        },
+        {
+          "key": "access-copy",
+          "agent": "editor",
+          "status": "open",
+          "title": "Revise two access statements flagged by logistics",
+          "phase": "Communications",
+          "after": "copy"
+        },
+        {
+          "key": "first-aid",
+          "agent": "producer",
+          "status": "open",
+          "title": "Fill the two first-aid shifts and appoint a backup lead",
+          "phase": "Staffing",
+          "after": "rota"
+        },
+        {
+          "key": "dietary",
+          "agent": "logistics",
+          "status": "open",
+          "title": "Obtain allergen labels and separate preparation confirmation",
+          "phase": "Suppliers",
+          "after": "budget"
+        },
+        {
+          "key": "refund",
+          "agent": "finance",
+          "status": "open",
+          "title": "Reconcile refund terms across venue and caterer",
+          "phase": "Suppliers",
+          "after": "budget"
+        },
+        {
+          "key": "briefing",
+          "agent": "producer",
+          "status": "open",
+          "title": "Prepare the 15-minute volunteer briefing and escalation sheet",
+          "phase": "Staffing",
+          "after": "rain"
+        },
+        {
+          "key": "print",
+          "agent": "editor",
+          "status": "blocked",
+          "title": "Release signs after the revised access wording is approved",
+          "phase": "Production",
+          "after": "access-copy"
+        },
+        {
+          "key": "headcount",
+          "agent": "logistics",
+          "status": "deferred",
+          "title": "Lock the catering headcount after registration closes",
+          "phase": "Event week",
+          "after": "launch-invite"
+        },
+        {
+          "key": "reconcile",
+          "agent": "finance",
+          "status": "deferred",
+          "title": "Reconcile invoices and unused contingency after the event",
+          "phase": "Closeout",
+          "after": "deposit"
+        }
+      ]
+    },
+    {
+      "id": "research-brief",
+      "title": "Home Energy Buying Guide",
+      "objective": "Produce a five-section buying guide covering heat pumps, insulation and solar; compare three household profiles across a 10-year horizon, retain source disagreements, and obtain editorial approval before sharing.",
+      "agents": [
+        "researcher",
+        "analyst",
+        "fact-checker",
+        "editor"
+      ],
+      "gates": [
+        {
+          "key": "assumptions",
+          "agent": "analyst",
+          "title": "Choose the electricity-price and heat-pump efficiency assumptions before the comparison is finalized."
+        },
+        {
+          "key": "publish",
+          "agent": "editor",
+          "title": "Approve the five-section guide after evidence and limitations review."
+        }
+      ],
+      "rows": [
+        [
+          "Primary source cards",
+          7
+        ],
+        [
+          "Secondary source cards",
+          3
+        ],
+        [
+          "Conflicting source cards",
+          2
+        ]
+      ],
+      "brief": "The comparison uses three household profiles: a small flat using 6000 kWh of heat per year, a family home using 12000, and a detached home using 18000. Compare seasonal efficiency 2.5 / 3.0 / 3.5 and electricity tariffs $0.20 / $0.30 / $0.40 per kWh. Capital costs, climate, grants and discounting remain separate; operating-cost calculations alone are not payback estimates. Twelve source cards are a curated scenario inventory, with two unresolved assumptions retained for editorial review.",
+      "monitors": [
+        [
+          "researcher",
+          "Check source revisions weekly before final publication",
+          "7d",
+          "source-revisions"
+        ],
+        [
+          "analyst",
+          "Review tariff assumptions and update sensitivity tables weekly",
+          "7d",
+          "tariff-assumptions"
+        ]
+      ],
+      "tasks": [
+        {
+          "key": "scope",
+          "agent": "editor",
+          "status": "done",
+          "title": "Define the five sections and three household profiles",
+          "phase": "Scoping",
+          "after": null
+        },
+        {
+          "key": "sources",
+          "agent": "researcher",
+          "status": "done",
+          "title": "Classify 12 source cards by provenance and date",
+          "phase": "Evidence",
+          "after": "scope"
+        },
+        {
+          "key": "units",
+          "agent": "analyst",
+          "status": "done",
+          "title": "Normalize energy units and separate capital from running cost",
+          "phase": "Analysis",
+          "after": "sources"
+        },
+        {
+          "key": "conflicts",
+          "agent": "fact-checker",
+          "status": "done",
+          "title": "Record two conflicting assumptions without averaging them away",
+          "phase": "Review",
+          "after": "sources"
+        },
+        {
+          "key": "matrix",
+          "agent": "analyst",
+          "status": "done",
+          "title": "Generate 27 household / tariff / efficiency combinations",
+          "phase": "Analysis",
+          "after": "units"
+        },
+        {
+          "key": "limits",
+          "agent": "researcher",
+          "status": "done",
+          "title": "Draft climate, building-fabric and grant limitations",
+          "phase": "Evidence",
+          "after": "sources"
+        },
+        {
+          "key": "outline",
+          "agent": "editor",
+          "status": "done",
+          "title": "Structure the comparison around reader decisions",
+          "phase": "Editorial",
+          "after": "scope"
+        },
+        {
+          "key": "resolve",
+          "agent": "analyst",
+          "status": "blocked",
+          "title": "Finalize the base case after the assumption decision",
+          "phase": "Analysis",
+          "after": "gate:assumptions"
+        },
+        {
+          "key": "charts",
+          "agent": "analyst",
+          "status": "blocked",
+          "title": "Update the three comparison charts from the accepted base case",
+          "phase": "Analysis",
+          "after": "resolve"
+        },
+        {
+          "key": "savings",
+          "agent": "fact-checker",
+          "status": "open",
+          "title": "Remove two savings claims lacking a comparable baseline",
+          "phase": "Review",
+          "after": "conflicts"
+        },
+        {
+          "key": "grants",
+          "agent": "researcher",
+          "status": "open",
+          "title": "Check grant eligibility boundaries and expiry dates",
+          "phase": "Evidence",
+          "after": "limits"
+        },
+        {
+          "key": "tables",
+          "agent": "analyst",
+          "status": "open",
+          "title": "Review sensitivity extremes for unit and rounding errors",
+          "phase": "Analysis",
+          "after": "matrix"
+        },
+        {
+          "key": "language",
+          "agent": "editor",
+          "status": "open",
+          "title": "Rewrite the buyer checklist in plain language",
+          "phase": "Editorial",
+          "after": "outline"
+        },
+        {
+          "key": "citations",
+          "agent": "fact-checker",
+          "status": "open",
+          "title": "Trace every headline number to a source or calculation",
+          "phase": "Review",
+          "after": "matrix"
+        },
+        {
+          "key": "layout",
+          "agent": "editor",
+          "status": "blocked",
+          "title": "Freeze the five-section layout after chart review",
+          "phase": "Editorial",
+          "after": "charts"
+        },
+        {
+          "key": "share",
+          "agent": "editor",
+          "status": "blocked",
+          "title": "Share the guide only after final editorial approval",
+          "phase": "Publication",
+          "after": "gate:publish"
+        },
+        {
+          "key": "refresh",
+          "agent": "researcher",
+          "status": "deferred",
+          "title": "Refresh source dates immediately before publication",
+          "phase": "Publication",
+          "after": "layout"
+        },
+        {
+          "key": "corrections",
+          "agent": "fact-checker",
+          "status": "deferred",
+          "title": "Triage reader corrections after publication",
+          "phase": "Follow-up",
+          "after": "share"
+        }
+      ]
+    },
+    {
+      "id": "neighborhood-site",
+      "title": "Riverside Neighborhood Website",
+      "objective": "Ship six accessible pages with an event directory and contact form; review 18 routes and 24 accessibility criteria, retain a release hold, and prepare rollback and post-launch checks.",
+      "agents": [
+        "builder",
+        "designer",
+        "reviewer",
+        "maintainer"
+      ],
+      "gates": [
+        {
+          "key": "release",
+          "agent": "maintainer",
+          "title": "Approve the release candidate after mobile navigation, contact form and accessibility review."
+        },
+        {
+          "key": "content",
+          "agent": "designer",
+          "title": "Approve public contact details and image permissions before content freeze."
+        }
+      ],
+      "rows": [
+        [
+          "Pages",
+          6
+        ],
+        [
+          "Route inventory",
+          18
+        ],
+        [
+          "Accessibility criteria",
+          24
+        ]
+      ],
+      "brief": "Pages: Home, Events, Local guide, Volunteer, About and Contact. Release acceptance covers keyboard access, focus restoration, readable labels, form error recovery and mobile navigation. The current review has two navigation-label revisions and one missing form success announcement. Deployment has a separate owner decision; rollback retains the preceding asset manifest and redirects.",
+      "monitors": [
+        [
+          "maintainer",
+          "Review certificate expiry and deployment readiness daily",
+          "1d",
+          "release-readiness"
+        ],
+        [
+          "reviewer",
+          "Check dependency advisories before candidate freeze",
+          "1d",
+          "dependency-advisories"
+        ]
+      ],
+      "tasks": [
+        {
+          "key": "architecture",
+          "agent": "designer",
+          "status": "done",
+          "title": "Define six pages and the primary navigation hierarchy",
+          "phase": "Design",
+          "after": null
+        },
+        {
+          "key": "routes",
+          "agent": "builder",
+          "status": "done",
+          "title": "Generate the 18-route inventory and redirect plan",
+          "phase": "Build",
+          "after": "architecture"
+        },
+        {
+          "key": "criteria",
+          "agent": "reviewer",
+          "status": "done",
+          "title": "Create the 24-point keyboard and readability checklist",
+          "phase": "Review",
+          "after": "architecture"
+        },
+        {
+          "key": "content-map",
+          "agent": "designer",
+          "status": "done",
+          "title": "Map page content owners and image-permission questions",
+          "phase": "Content",
+          "after": "architecture"
+        },
+        {
+          "key": "release-plan",
+          "agent": "maintainer",
+          "status": "done",
+          "title": "Write deployment, rollback and asset-retention steps",
+          "phase": "Release",
+          "after": "routes"
+        },
+        {
+          "key": "form-plan",
+          "agent": "builder",
+          "status": "done",
+          "title": "Specify contact validation, success and failure states",
+          "phase": "Build",
+          "after": "architecture"
+        },
+        {
+          "key": "review-map",
+          "agent": "reviewer",
+          "status": "done",
+          "title": "Record two navigation revisions and a form announcement gap",
+          "phase": "Review",
+          "after": "criteria"
+        },
+        {
+          "key": "nav",
+          "agent": "builder",
+          "status": "open",
+          "title": "Fix the two navigation labels found during review",
+          "phase": "Refinement",
+          "after": "review-map"
+        },
+        {
+          "key": "form",
+          "agent": "builder",
+          "status": "open",
+          "title": "Add an accessible contact-form success announcement",
+          "phase": "Refinement",
+          "after": "form-plan"
+        },
+        {
+          "key": "mobile",
+          "agent": "reviewer",
+          "status": "open",
+          "title": "Recheck menu focus and back navigation at 390px",
+          "phase": "Review",
+          "after": "review-map"
+        },
+        {
+          "key": "images",
+          "agent": "designer",
+          "status": "open",
+          "title": "Replace two images with confirmed usage permission",
+          "phase": "Content",
+          "after": "content-map"
+        },
+        {
+          "key": "rollback",
+          "agent": "maintainer",
+          "status": "open",
+          "title": "Verify rollback manifest and redirect restoration steps",
+          "phase": "Release",
+          "after": "release-plan"
+        },
+        {
+          "key": "content-freeze",
+          "agent": "designer",
+          "status": "blocked",
+          "title": "Freeze contact details after content-owner approval",
+          "phase": "Content",
+          "after": "gate:content"
+        },
+        {
+          "key": "keyboard",
+          "agent": "reviewer",
+          "status": "blocked",
+          "title": "Repeat the keyboard path after navigation fixes",
+          "phase": "Review",
+          "after": "nav"
+        },
+        {
+          "key": "candidate",
+          "agent": "builder",
+          "status": "blocked",
+          "title": "Assemble the candidate after content and form acceptance",
+          "phase": "Release",
+          "after": "content-freeze"
+        },
+        {
+          "key": "deploy",
+          "agent": "maintainer",
+          "status": "blocked",
+          "title": "Deploy the accepted candidate after the release decision",
+          "phase": "Release",
+          "after": "gate:release"
+        },
+        {
+          "key": "uptime",
+          "agent": "maintainer",
+          "status": "deferred",
+          "title": "Verify uptime and form delivery after deployment",
+          "phase": "Follow-up",
+          "after": "deploy"
+        },
+        {
+          "key": "handoff",
+          "agent": "reviewer",
+          "status": "deferred",
+          "title": "Attach final acceptance notes for the maintenance handoff",
+          "phase": "Closeout",
+          "after": "uptime"
+        }
+      ]
+    }
+  ]
+}
