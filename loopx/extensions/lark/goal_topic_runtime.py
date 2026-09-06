@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import threading
@@ -470,6 +471,32 @@ class LarkGoalTopicRuntimeService:
         self._lock = threading.Lock()
         self._workers: dict[str, tuple[threading.Event, threading.Thread]] = {}
         self._health: dict[str, dict[str, Any]] = {}
+        self._closed = threading.Event()
+        self._startup_thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Discover existing bindings without blocking the HTTP readiness path."""
+
+        with self._lock:
+            if self._closed.is_set() or self._startup_thread is not None:
+                return
+            self._startup_thread = threading.Thread(
+                target=self._refresh_on_start,
+                name="loopx-lark-startup",
+                daemon=True,
+            )
+            self._startup_thread.start()
+
+    def _refresh_on_start(self) -> None:
+        while not self._closed.is_set():
+            try:
+                self.refresh()
+                return
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Lark binding discovery failed; retrying in the background"
+                )
+            self._closed.wait(5)
 
     @staticmethod
     def _now() -> str:
@@ -585,8 +612,42 @@ class LarkGoalTopicRuntimeService:
         self._update_health(profile, status="stopped", error_code=None)
 
     def refresh(self) -> None:
+        if self._closed.is_set():
+            return
         snapshot = self.snapshot_provider()
         desired = set(_active_profile_configs(snapshot))
+        # A filesystem read may outlive server shutdown (for example, while
+        # waiting for OS directory consent). Never start effects after close.
+        with self._lock:
+            if self._closed.is_set():
+                return
+            self._resume_session_queues(snapshot)
+            stale = set(self._workers) - desired
+            missing = desired - set(self._workers)
+            for profile in stale:
+                stop, _thread = self._workers.pop(profile)
+                stop.set()
+            for profile in sorted(missing):
+                stop = threading.Event()
+                self._health[profile] = {
+                    "status": "starting",
+                    "event_count": 0,
+                    "replied_count": 0,
+                    "last_event_status": None,
+                    "error_code": None,
+                    "restart_count": 0,
+                    "updated_at": self._now(),
+                }
+                thread = threading.Thread(
+                    target=self._profile_poller,
+                    args=(profile, stop),
+                    name=f"loopx-lark-{profile}",
+                    daemon=True,
+                )
+                self._workers[profile] = (stop, thread)
+                thread.start()
+
+    def _resume_session_queues(self, snapshot: Mapping[str, Any]) -> None:
         binding_payloads = snapshot.get("binding_payloads")
         contexts = snapshot.get("goal_contexts")
         if isinstance(binding_payloads, Mapping) and isinstance(contexts, Mapping):
@@ -617,31 +678,6 @@ class LarkGoalTopicRuntimeService:
                             work_dir=Path(work_dir).expanduser().resolve(),
                             objective=str(context.get("objective") or goal_id),
                         )
-        with self._lock:
-            stale = set(self._workers) - desired
-            missing = desired - set(self._workers)
-            for profile in stale:
-                stop, _thread = self._workers.pop(profile)
-                stop.set()
-            for profile in sorted(missing):
-                stop = threading.Event()
-                self._health[profile] = {
-                    "status": "starting",
-                    "event_count": 0,
-                    "replied_count": 0,
-                    "last_event_status": None,
-                    "error_code": None,
-                    "restart_count": 0,
-                    "updated_at": self._now(),
-                }
-                thread = threading.Thread(
-                    target=self._profile_poller,
-                    args=(profile, stop),
-                    name=f"loopx-lark-{profile}",
-                    daemon=True,
-                )
-                self._workers[profile] = (stop, thread)
-                thread.start()
 
     def active_profiles(self) -> list[str]:
         with self._lock:
@@ -649,6 +685,7 @@ class LarkGoalTopicRuntimeService:
 
     def close(self) -> None:
         with self._lock:
+            self._closed.set()
             workers = list(self._workers.values())
             self._workers.clear()
         for stop, _thread in workers:

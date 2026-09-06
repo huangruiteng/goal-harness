@@ -878,6 +878,8 @@ def collect_doctor(
     installation_only: bool = False,
 ) -> dict[str, Any]:
     if installation_only:
+        from .release_candidate import collect_installation_doctor
+
         return collect_installation_doctor(deep=deep)
     from .control_plane.runtime.runtime_projection_route import (
         collect_runtime_projection_route_diagnostics,
@@ -1342,47 +1344,6 @@ def collect_doctor(
     return payload
 
 
-def collect_installation_doctor(*, deep: bool) -> dict[str, Any]:
-    """Validate the package/toolchain without opening registered user projects.
-
-    Installers must not depend on workspace availability or macOS folder
-    consent. Keep the same representative package and runtime semantic checks
-    as deep doctor; ambient Goal, skill and provider health is a separate read.
-    """
-    from .control_plane.effect_runtime import collect_effect_runtime_readiness
-    from .release_candidate import collect_deep_install_checks
-
-    invocation = current_script_invocation_path()
-    command = resolve_command_path("loopx") or invocation
-    package_root = Path(__file__).resolve().parents[1]
-    selected = os.environ.get("LOOPX_RELEASE_ROOT")
-    runtime = collect_effect_runtime_readiness(deep=deep)
-    checks = [
-        {"id": "command_available", "required": True, "ok": command is not None},
-        {"id": "typescript_effect_runtime_ready", "required": True,
-         "ok": bool(runtime.get("ready")), "detail": runtime.get("status")},
-    ]
-    payload: dict[str, Any] = {
-        "mode": "deep" if deep else "standard",
-        "scope": "installation_only",
-        "checks": checks,
-        "typescript_control_plane": runtime,
-        "path": {"loopx": str(command) if command else None},
-    }
-    if deep:
-        candidate = collect_deep_install_checks(
-            command_path=command,
-            invocation_path=invocation,
-            package_root=package_root,
-            invocation_root=Path(selected).expanduser().resolve() if selected else package_root,
-            distribution_root=python_distribution_install(Path(__file__).resolve()).get("root"),
-        )
-        checks.extend(candidate["checks"])
-        payload["release_candidate"] = candidate
-    payload["ok"] = all(check["ok"] for check in checks)
-    return payload
-
-
 def render_doctor_markdown(payload: dict[str, Any]) -> str:
     release_provenance = payload.get("release_provenance") or {}
     default_release = release_provenance.get("default_release") or {}
@@ -1514,11 +1475,6 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
                 "```",
             ]
         )
-    typescript_control_plane = (
-        payload.get("typescript_control_plane")
-        if isinstance(payload.get("typescript_control_plane"), dict)
-        else {}
-    )
     if typescript_control_plane:
         lines.extend(
             [

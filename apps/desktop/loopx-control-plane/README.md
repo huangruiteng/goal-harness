@@ -64,6 +64,18 @@ Existing recovery controls remain available after that budget is exhausted,
 and externally corrected installations are still detected. A matching runtime
 completes a pending installation journal without reinstalling it.
 
+A listener that accepts TCP but does not answer HTTP is given a 15-second
+startup grace period. The supervisor can then replace it only after verifying
+its LoopX command, service kind and port, including a second PID readback before
+termination. Unknown listeners are retained and reported as startup errors.
+
+Chat begins serving its workspace and readiness endpoints independently of Lark
+binding discovery. Slow or permission-blocked project reads remain in one
+background initialization worker; discovery failures retry every five seconds.
+Closing the server fences late discovery results before any queue resumption
+or event consumer starts. Existing enabled bindings retain their routing and
+authorization rules.
+
 If startup cannot proceed, the embedded **Recovery & updates** screen stays
 available without a working HTTP service. **Repair this version** reinstalls
 the bundled runtime and then reconnects the same window automatically; it no

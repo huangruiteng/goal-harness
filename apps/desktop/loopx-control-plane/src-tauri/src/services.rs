@@ -82,6 +82,7 @@ impl ServiceKind {
 enum Probe {
     Matching,
     Unavailable,
+    Unresponsive,
     Foreign,
     Stale,
 }
@@ -152,7 +153,7 @@ impl ServiceSet {
                     // service (KeepAlive + throttle) has time to restart on the
                     // current release; unknown (Foreign) processes keep the
                     // hard error.
-                    terminate_stale_listener(kind, &executable, kind.port())?;
+                    terminate_verified_listener(kind, &executable, kind.port())?;
                     self.healed = true;
                     if Instant::now() >= stale_deadline {
                         return Err(ServiceError(format!(
@@ -162,6 +163,18 @@ impl ServiceSet {
                         )));
                     }
                     thread::sleep(Duration::from_millis(200));
+                }
+                Probe::Unresponsive => {
+                    // A bound socket is not HTTP readiness. Give slow startup
+                    // a full grace period, then replace only a verified LoopX
+                    // listener; unknown processes still fail closed.
+                    if Instant::now() < stale_deadline {
+                        thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                    terminate_verified_listener(kind, &executable, kind.port())?;
+                    self.healed = true;
+                    break;
                 }
                 Probe::Unavailable => break,
             }
@@ -180,11 +193,11 @@ impl ServiceSet {
                         )));
                     }
                     Probe::Stale => {
-                        terminate_stale_listener(kind, &executable, kind.port())?;
+                        terminate_verified_listener(kind, &executable, kind.port())?;
                         self.healed = true;
                         request_platform_managed_start(kind);
                     }
-                    Probe::Unavailable => {}
+                    Probe::Unavailable | Probe::Unresponsive => {}
                 }
                 thread::sleep(Duration::from_millis(100));
             }
@@ -222,11 +235,13 @@ impl ServiceSet {
                     )));
                 }
                 Probe::Stale => {
-                    terminate_stale_listener(kind, &executable, kind.port())?;
+                    terminate_verified_listener(kind, &executable, kind.port())?;
                     self.healed = true;
                     thread::sleep(Duration::from_millis(200));
                 }
-                Probe::Unavailable => thread::sleep(Duration::from_millis(100)),
+                Probe::Unavailable | Probe::Unresponsive => {
+                    thread::sleep(Duration::from_millis(100))
+                }
             }
         }
         Err(ServiceError(format!(
@@ -318,7 +333,7 @@ const DYNAMIC_MODULE_LAUNCH_MARKER: &str = r#"runpy.run_module(module, run_name=
 const RELEASE_ARGV_ZERO_MARKER: &str =
     r#"sys.argv[0] = os.path.join(release_root, "scripts", "loopx")"#;
 
-fn terminate_stale_listener(
+fn terminate_verified_listener(
     kind: ServiceKind,
     loopx_executable: &str,
     port: u16,
@@ -657,15 +672,17 @@ fn probe_on_port(
         port
     );
     if stream.write_all(request.as_bytes()).is_err() {
-        return Probe::Foreign;
+        return Probe::Unresponsive;
     }
     let mut response = String::new();
     if stream
         .take(MAX_PROBE_RESPONSE_BYTES + 1)
         .read_to_string(&mut response)
         .is_err()
-        || response.len() as u64 > MAX_PROBE_RESPONSE_BYTES
     {
+        return Probe::Unresponsive;
+    }
+    if response.len() as u64 > MAX_PROBE_RESPONSE_BYTES {
         return Probe::Foreign;
     }
     classify_response(kind, &response, expected_runtime_identity)

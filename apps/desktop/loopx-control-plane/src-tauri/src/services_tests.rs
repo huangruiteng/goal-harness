@@ -37,6 +37,7 @@ fn spawn_listener_fixture(
     let source = format!(
         r#"#!/usr/bin/env python3
 import socket
+import time
 
 payload = {payload:?}.encode("utf-8")
 server = socket.socket()
@@ -46,6 +47,9 @@ server.listen(8)
 while True:
     connection, _ = server.accept()
     connection.recv(65536)
+    if not payload:
+        time.sleep(60)
+        continue
     response = (
         b"HTTP/1.1 200 OK\r\n"
         b"Content-Type: application/json\r\n"
@@ -305,7 +309,7 @@ fn service_supervisor_reuses_matching_replaces_stale_and_rejects_foreign() {
             )),
         "fixture process must classify as LoopX: {stale_processes:?}"
     );
-    terminate_stale_listener(
+    terminate_verified_listener(
         ServiceKind::Status,
         stale_executable.to_string_lossy().as_ref(),
         stale_port,
@@ -334,7 +338,7 @@ fn service_supervisor_reuses_matching_replaces_stale_and_rejects_foreign() {
         Some(&current_identity),
         Probe::Foreign,
     );
-    let error = terminate_stale_listener(
+    let error = terminate_verified_listener(
         ServiceKind::Status,
         stale_executable.to_string_lossy().as_ref(),
         foreign_port,
@@ -347,6 +351,36 @@ fn service_supervisor_reuses_matching_replaces_stale_and_rejects_foreign() {
         .is_none());
     foreign.kill().expect("stop foreign fixture");
     foreign.wait().expect("reap foreign fixture");
+
+    // A silent listener must be distinct from a foreign HTTP response. Only
+    // the expected LoopX process may be terminated after the startup grace.
+    for confirmed in [true, false] {
+        let port = reserve_loopback_port();
+        let executable = fixture_root.join(if confirmed { "loopx" } else { "silent-foreign" });
+        let mut silent = spawn_listener_fixture(&executable, "chat", port, "");
+        wait_for_probe(
+            ServiceKind::Chat,
+            port,
+            Some(&current_identity),
+            Probe::Unresponsive,
+        );
+        let result = terminate_verified_listener(
+            ServiceKind::Chat,
+            stale_executable.to_string_lossy().as_ref(),
+            port,
+        );
+        if confirmed {
+            result.expect("replace a confirmed but unresponsive LoopX service");
+        } else {
+            assert!(result.is_err());
+            assert!(silent
+                .try_wait()
+                .expect("foreign listener status")
+                .is_none());
+            silent.kill().expect("clean up foreign fixture");
+        }
+        silent.wait().expect("reap silent fixture");
+    }
 
     fs::remove_dir_all(&fixture_root).expect("remove service supervisor fixture");
 }

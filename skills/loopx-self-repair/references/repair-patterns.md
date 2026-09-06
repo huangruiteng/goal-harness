@@ -207,6 +207,12 @@ Installation readiness must not traverse registered Goal workspaces or run
 host/provider integration checks. Use `doctor --deep --installation-only` to
 retain package/toolchain validation without waiting on user-folder consent;
 full operator diagnostics remain available through ordinary `doctor`.
+Prove HTTP readiness independently of optional integration discovery: a bound
+port may still have no serving loop. Block the snapshot reader in a real-server
+test, verify workspace/capability responses and shutdown, and fence late
+results from starting consumers or resuming queues after close. Distinguish
+silent sockets from foreign HTTP services; recovery must retain process and
+port ownership verification before restarting an unresponsive listener.
 
 For most repairs, capture:
 
