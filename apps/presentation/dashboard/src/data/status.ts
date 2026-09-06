@@ -87,6 +87,7 @@ export const todoGroupSchema = z.object({
   done_count: z.number().optional().default(0),
   advancement_done_count: z.number().optional(),
   items: z.array(todoItemSchema).optional().default([]),
+  deferred_items: z.array(todoItemSchema).optional(),
 });
 
 export const todoIndexItemSchema = todoItemSchema.extend({

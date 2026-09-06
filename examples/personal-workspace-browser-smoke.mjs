@@ -405,35 +405,43 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
       fixture.attention_queue.items.push({
         agent_todos: {
           advancement_done_count: 42,
-          done_count: 4,
+          done_count: 6,
+          deferred_count: 2,
           items: [
             currentTodo,
             { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle, title: idlessLongTitle },
+            { done: false, index: 7, role: "agent", status: "open", task_class: "advancement_task", text: "Full queue follow-up", title: "Full queue follow-up", todo_id: "todo-progress-full" },
+            { done: true, index: 8, role: "agent", status: "deferred", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
             { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
             { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
             { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
             { done: true, index: 6, role: "agent", status: "done", task_class: "continuous_monitor", text: "Completed Monitor", title: "Completed Monitor", todo_id: "todo-progress-monitor" },
           ],
-          open_count: 2,
+          deferred_items: [
+            { done: true, index: 8, role: "agent", status: "deferred", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
+            { done: true, index: 9, role: "agent", status: "deferred", task_class: "advancement_task", text: "Deferred follow-up outside preview", title: "Deferred follow-up outside preview", todo_id: "todo-progress-deferred-extra" },
+          ],
+          open_count: 3,
           source_section: "Agent Todo",
-          total_count: 6,
+          total_count: 9,
         },
         goal_id: "progress-projection",
         project_asset: {
           agent_todos: {
             advancement_done_count: 42,
-            done: 4,
+            done: 6,
+            deferred_count: 2,
             items: [
               currentTodo,
               { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle.slice(0, 220), title: idlessLongTitle.slice(0, 220) },
             ],
-            open: 2,
+            open: 3,
             recent_completed_advancement_items: [
               { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
               { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
               { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
             ],
-            total: 6,
+            total: 9,
           },
           gate: "none",
           next_action: "Current Todo",
@@ -1887,7 +1895,10 @@ async function main() {
     const progressHeader = page.locator(".personal-channel-title p");
     if (!(await progressHeader.innerText()).includes("Current Todo")) throw new Error(`Goal header did not prefer the current Todo: ${await progressHeader.innerText()}`);
     const progressColumn = page.locator(".personal-object-list", { hasText: "待执行 / 进行中" });
-    if ((await progressColumn.locator(".personal-task-card").count()) !== 2) throw new Error("Id-less long Todo was duplicated across compact and full projections");
+    if ((await progressColumn.locator(".personal-task-card").count()) !== 5) throw new Error("Id-less long Todo was duplicated across compact and full projections");
+    await progressColumn.getByText("Full queue follow-up", { exact: true }).waitFor();
+    await progressColumn.getByText("Deferred queue task", { exact: true }).waitFor();
+    await progressColumn.getByText("Deferred follow-up outside preview", { exact: true }).waitFor();
     const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
     const taskLaneScrollers = page.locator('.personal-task-kanban .personal-task-lane-scroll');
     if (await taskLaneScrollers.count() !== 4) throw new Error('Every desktop Task lane must own a scroll region');
