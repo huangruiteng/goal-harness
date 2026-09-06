@@ -627,6 +627,7 @@ def handle_project_lifecycle_command(
                 "appended": False,
                 "dry_run": bool(args.dry_run),
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
             print_payload(payload, fmt, render_state_refresh_markdown)
             return 1
@@ -683,6 +684,7 @@ def handle_project_lifecycle_command(
                 "appended": False,
                 "dry_run": bool(args.dry_run),
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
             if isinstance(exc, ReplanWritebackRejected):
                 transition = project_replan_writeback_rejection(
@@ -921,6 +923,7 @@ def handle_project_lifecycle_command(
                 "appended": False,
                 "dry_run": bool(args.dry_run),
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
         print_payload(payload, fmt, render_read_only_project_map_markdown)
         return 0 if payload.get("ok") else 1
@@ -961,6 +964,7 @@ def handle_project_lifecycle_command(
                 "appended": False,
                 "dry_run": bool(args.dry_run),
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
         print_payload(payload, fmt, render_reward_markdown)
         return 0 if payload.get("ok") else 1
@@ -990,6 +994,7 @@ def handle_project_lifecycle_command(
             "appended": False,
             "dry_run": bool(args.dry_run),
             "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
         }
     print_payload(payload, fmt, render_operator_gate_markdown)
     return 0 if payload.get("ok") else 1

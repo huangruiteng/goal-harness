@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from ..control_plane.coordination.legacy_writer_fence import LegacyCoordinationWriterFenced
+from ..control_plane.coordination.shadow_management import ShadowManagementError
+
 import argparse
 from collections.abc import Callable
 from pathlib import Path
@@ -128,7 +131,7 @@ def handle_handoff_mode_command(
                 runtime_root_arg=runtime_root_arg,
                 **path_args,
             )
-    except HandoffModeError as exc:
+    except (HandoffModeError, LegacyCoordinationWriterFenced, ShadowManagementError) as exc:
         payload = {
             "ok": False,
             "schema_version": "goal_handoff_mode_v0",

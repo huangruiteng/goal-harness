@@ -4,12 +4,18 @@ import json
 import re
 import shlex
 from pathlib import Path
+
+from .file_lock import exclusive_cross_runtime_file_lock
+from .registry import atomic_write_json, find_registry_goal
+from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction, require_legacy_state_replacement_allowed
+from .control_plane.coordination.runtime_shadow_writer_adapter import require_runtime_shadow_capture_prepared, begin_todo_runtime_shadow_capture, settle_todo_runtime_shadow_capture
 from typing import Any
 
 from .control_plane.runtime.time import now_local_iso
 from .control_plane.runtime.public_safety import public_safe_compact_text
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
+    atomic_write_state_text,
     insertion_anchor,
     section_bounds,
 )
@@ -33,7 +39,7 @@ from .orchestration import (
     DEFAULT_ORCHESTRATION_MODE,
     MULTI_SUBAGENT_ORCHESTRATION_MODE,
 )
-from .paths import DEFAULT_RUNTIME_ROOT, rel_or_abs
+from .paths import rel_or_abs, resolve_runtime_root
 from .registry_writability import probe_registry_write_path
 from .todos import add_todo_to_lines
 
@@ -751,7 +757,7 @@ def bootstrap_project(
     if not state_file.is_absolute():
         state_file = project / state_file
     goal_doc = resolve_project_path(project, goal_doc)
-    runtime_root = runtime_root.expanduser() if runtime_root else DEFAULT_RUNTIME_ROOT
+    runtime_root = resolve_runtime_root(read_json_if_exists(registry_path), str(runtime_root) if runtime_root else None, registry_path=registry_path)
     updated_at = now_iso()
     execution_profile = build_execution_profile(
         minimum_scale=execution_minimum_scale,
@@ -959,12 +965,30 @@ def bootstrap_project(
                 "private_boundary_note": "Add .loopx/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
                 "error": str(global_writability.get("error") or "global registry is not writable"),
             }
+    shadow_capture = None
+    shadow_evidence: dict[str, Any] = {}
     if not dry_run:
-        write_json(registry_path, registry)
-        if state_action in {"created", "replaced"}:
-            state_file.parent.mkdir(parents=True, exist_ok=True)
-            state_file.write_text(
-                render_state_markdown(
+        with exclusive_cross_runtime_file_lock(registry_path, operation="bootstrap_registry"), legacy_todo_write_transaction(
+            registry_path, goal_id, state_file, None, "bootstrap_state", False,
+            runtime_root=runtime_root,
+        ):
+            current_registry = read_json_if_exists(registry_path)
+            current_goal = find_registry_goal(current_registry, goal_id)
+            previous_root = resolve_runtime_root(current_registry, None, registry_path=registry_path)
+            if previous_root != runtime_root:
+                for previous_goal in current_registry.get("goals", []):
+                    if isinstance(previous_goal, dict) and previous_goal.get("id"):
+                        require_legacy_state_replacement_allowed(runtime_root=previous_root,
+                            goal_id=str(previous_goal["id"]), goal=previous_goal)
+            original = state_file.read_text(encoding="utf-8") if state_file.exists() else ""
+            if force or not state_file.exists():
+                require_legacy_state_replacement_allowed(runtime_root=runtime_root,
+                    goal_id=goal_id, goal=current_goal)
+            state_action = ("kept-existing-preserve-todos" if force and preserve_todos else "kept-existing") if state_file.exists() and (not force or preserve_todos) else "replaced" if state_file.exists() else "created"
+            planned = original
+            if state_action in {"created", "replaced"}:
+                declared_handoff_mode = goal_handoff_mode(original) if original and force else HANDOFF_MODE_LEGACY
+                planned = render_state_markdown(
                     project=project,
                     goal_id=goal_id,
                     adapter_kind=adapter_kind,
@@ -978,13 +1002,28 @@ def bootstrap_project(
                     codex_app_heartbeat=codex_app_heartbeat,
                     include_connection_validation=include_connection_validation,
                     handoff_mode=declared_handoff_mode,
-                ),
-                encoding="utf-8",
-            )
-        elif repaired_state_text is not None and repaired_todo_source_roles:
-            state_file.write_text(repaired_state_text, encoding="utf-8")
-            if todo_source_migration is not None:
-                todo_source_migration["applied"] = True
+                )
+            else:
+                planned, repaired_todo_source_roles = repair_missing_todo_source_sections(original)
+            if planned != original:
+                shadow_capture = begin_todo_runtime_shadow_capture(registry_path=registry_path,
+                    runtime_root=runtime_root, goal_id=goal_id, state_path=state_file,
+                    write_class="bootstrap_state", original_text=original)
+                shadow_capture.prepare(planned)
+                require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=runtime_root, goal_id=goal_id)
+                atomic_write_state_text(state_file, planned)
+                shadow_capture.committed()
+                if todo_source_migration is not None:
+                    todo_source_migration["applied"] = True
+            current_registry.setdefault("schema_version", "0.1")
+            current_registry["updated_at"] = updated_at.split("T")[0]
+            current_registry["common_runtime_root"] = str(runtime_root)
+            registry, registry_goal_action = merge_goal(current_registry, goal_entry, force=force)
+            atomic_write_json(registry_path, registry)
+        if shadow_capture is not None:
+            shadow_evidence = settle_todo_runtime_shadow_capture({}, registry_path=registry_path,
+                runtime_root=runtime_root, goal_id=goal_id, write_class="bootstrap_state",
+                capture=shadow_capture, observe_legacy=False, emit_disabled=False)
         if sync_global:
             global_sync = sync_project_registry_to_global(
                 registry_path=registry_path,
@@ -995,6 +1034,7 @@ def bootstrap_project(
             )
 
     return {
+        **shadow_evidence,
         "ok": True,
         "dry_run": dry_run,
         "project": str(project),

@@ -236,8 +236,9 @@ export class FileAuthorityStore implements AuthorityStore {
   readonly directory: string;
   readonly path: string;
   readonly identityPath: string;
+  private readonly existingOnly: boolean;
 
-  constructor(directory: string, goalId: string) {
+  constructor(directory: string, goalId: string, options: { existingOnly?: boolean } = {}) {
     this.goalId = requireAuthorityStoreId(goalId, "goal id");
     if (typeof directory !== "string" || directory.length === 0) {
       throw new AuthorityStoreProtocolError("store directory is required");
@@ -246,6 +247,7 @@ export class FileAuthorityStore implements AuthorityStore {
     const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
     this.path = join(this.directory, `authority-store-${digest}.json`);
     this.identityPath = join(this.directory, "store-identity");
+    this.existingOnly = options.existingOnly === true;
   }
 
   /** Narrow effect seam for crash-window qualification; not a semantic hook. */
@@ -253,17 +255,21 @@ export class FileAuthorityStore implements AuthorityStore {
     await durableReplace(path, payload);
   }
 
-  private async readStoreIdentity(): Promise<string> {
+  /** Filesystem-only crash seam; the archive owner must still fsync both parents. */
+  protected async archiveRenamed(): Promise<void> {}
+
+  private async readStoreIdentity(createIfMissing = !this.existingOnly): Promise<string> {
     try {
       const identity = await readFile(this.identityPath, "utf8");
       if (!STORE_IDENTITY_PATTERN.test(identity)) {
         throw new AuthorityStoreProtocolError("store identity does not match file:<32 lowercase hex>");
       }
-      await syncDirectory(this.directory);
+      if (createIfMissing) await syncDirectory(this.directory);
       return identity;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    if (!createIfMissing) throw new FileStoreUnavailableError("existing store identity is missing");
     return await withFileMutationLock(this.identityPath, async () => {
       try {
         const identity = await readFile(this.identityPath, "utf8");
@@ -364,6 +370,9 @@ export class FileAuthorityStore implements AuthorityStore {
               : "provider_read_unavailable",
             reason: error instanceof Error ? error.message : "provider read unavailable",
           };
+        }
+        if (this.existingOnly && current === null) {
+          return { status: "failed", reason_code: "existing_authority_missing", reason: "existing-only store cannot bootstrap a missing authority" };
         }
         if ((current?.provider_revision ?? null) !== normalized.expected_provider_revision) {
           return {
@@ -525,18 +534,13 @@ export class FileAuthorityStore implements AuthorityStore {
         reason: error instanceof Error ? error.message : "invalid archive request",
       };
     }
-    const archiveId = createHash("sha256")
-      .update(this.goalId, "utf8")
-      .update("\0", "utf8")
-      .update(normalizedOperationId, "utf8")
-      .digest("hex")
-      .slice(0, 24);
+    const archiveId = this.authorityArchiveId(normalizedOperationId);
     const archiveDirectory = join(this.directory, "rollback");
-    const archivePath = join(archiveDirectory, `authority-store-${archiveId}.json`);
+    const archivePath = this.authorityArchivePath(normalizedOperationId);
     let renameStarted = false;
     try {
       return await withFileMutationLock(this.path, async () => {
-        const identity = await this.readStoreIdentity();
+        const identity = await this.readStoreIdentity(false);
         let archived: FileAuthorityStoreDocument | null = null;
         try {
           archived = decodeDocument(
@@ -584,6 +588,7 @@ export class FileAuthorityStore implements AuthorityStore {
         await mkdir(archiveDirectory, { recursive: true, mode: 0o700 });
         renameStarted = true;
         await rename(this.path, archivePath);
+        await this.archiveRenamed();
         await syncDirectory(this.directory);
         await syncDirectory(archiveDirectory);
         return {
@@ -604,5 +609,16 @@ export class FileAuthorityStore implements AuthorityStore {
         reason: error instanceof Error ? error.message : "provider archive unavailable",
       };
     }
+  }
+
+  /** Stable provider-owned destination; callers cannot supply an archive path. */
+  authorityArchiveId(operationId: string): string {
+    requireAuthorityStoreId(operationId, "operation id");
+    return createHash("sha256").update(this.goalId, "utf8").update("\0", "utf8")
+      .update(operationId, "utf8").digest("hex").slice(0, 24);
+  }
+
+  authorityArchivePath(operationId: string): string {
+    return join(this.directory, "rollback", `authority-store-${this.authorityArchiveId(operationId)}.json`);
   }
 }

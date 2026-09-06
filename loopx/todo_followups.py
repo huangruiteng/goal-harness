@@ -4,7 +4,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .file_lock import exclusive_file_lock
+from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
+from .control_plane.coordination.local_authority_shadow_adapter import effective_runtime_root
+from .control_plane.coordination.runtime_shadow_writer_adapter import (
+    require_runtime_shadow_capture_prepared,
+    begin_todo_runtime_shadow_capture,
+    settle_todo_runtime_shadow_capture,
+)
+from .control_plane.todos.active_state_editing import atomic_write_state_text
 from .state_refresh import now_local
 from .control_plane.todos.contract import TODO_TASK_CLASS_ADVANCEMENT
 from .control_plane.todos.todo_summary import normalize_todo_text
@@ -85,8 +92,17 @@ def capture_followup_todos(
     )
 
     items: list[dict[str, Any]] = []
-    with exclusive_file_lock(resolved_state_file):
+    runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, None, "todo_capture_followups",
+        dry_run, runtime_root=runtime_root,
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
+        capture = begin_todo_runtime_shadow_capture(
+            registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
+            state_path=resolved_state_file, write_class="todo_capture_followups",
+            original_text=original,
+        )
         lines = original.splitlines()
         existing_texts = _existing_agent_todo_texts(lines)
         seen_texts: set[str] = set()
@@ -148,7 +164,10 @@ def capture_followup_todos(
             new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
             new_text = replace_updated_at(new_text, updated_at)
             if not dry_run:
-                resolved_state_file.write_text(new_text, encoding="utf-8")
+                capture.prepare(new_text)
+                require_runtime_shadow_capture_prepared(capture, runtime_root=runtime_root, goal_id=goal_id)
+                atomic_write_state_text(resolved_state_file, new_text)
+                capture.committed()
 
     result = {
         "ok": True,
@@ -168,14 +187,11 @@ def capture_followup_todos(
         "updated_at": updated_at if changed else None,
     }
     if changed and not dry_run:
-        from .control_plane.coordination.local_authority_shadow_adapter import (
-            effective_runtime_root,
-            observe_local_authority_commit,
-        )
+        from .control_plane.coordination.local_authority_shadow_observation import observe_local_authority_commit
 
         shadow = observe_local_authority_commit(
             registry_path=registry_path,
-            runtime_root=effective_runtime_root(registry_path, runtime_root_arg),
+            runtime_root=runtime_root,
             goal_id=goal_id,
             observation_trigger=(
                 f"todo_capture_followups:{recorded_count}:{updated_at}"
@@ -183,4 +199,8 @@ def capture_followup_todos(
         )
         if shadow is not None:
             result["authority_shadow"] = shadow
-    return result
+    return settle_todo_runtime_shadow_capture(
+        result, registry_path=registry_path, runtime_root=runtime_root,
+        goal_id=goal_id, write_class="todo_capture_followups", capture=capture,
+        observe_legacy=False, emit_disabled=False,
+    )

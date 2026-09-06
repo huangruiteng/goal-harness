@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
+from .file_lock import exclusive_cross_runtime_file_lock
+from .control_plane.coordination.runtime_shadow_writer_adapter import require_prose_state_write_allowed
+from .control_plane.todos.active_state_editing import atomic_write_state_text
+
 import json
 import re
 from datetime import datetime, timezone
@@ -390,6 +396,13 @@ def plan_active_state_update(
     return update, state_file, updated_text if changed and not dry_run else None
 
 
+class HumanRewardSummaryWriteError(RuntimeError):
+    """The reward overlay committed, but its optional summary did not settle."""
+
+    code = "active_state_summary_write_failed"
+    payload = {"appended": True, "active_state_summary_written": False}
+
+
 def append_human_reward(
     *,
     registry_path: Path,
@@ -403,7 +416,7 @@ def append_human_reward(
 ) -> dict[str, Any]:
     validate_goal_id(goal_id)
     registry = load_registry(registry_path)
-    runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    runtime_root = resolve_runtime_root(registry, runtime_root_override, registry_path=registry_path)
     index_path = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
     runs, raw_count = load_index(index_path)
     selected = select_run(runs, run_generated_at)
@@ -458,13 +471,32 @@ def append_human_reward(
     )
 
     if not dry_run:
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
-        if state_file_to_write and state_text_to_write is not None:
-            state_file_to_write.write_text(state_text_to_write, encoding="utf-8")
-            active_state_update["written"] = True
-            active_state_update["would_write"] = False
+        state_lock = (
+            exclusive_cross_runtime_file_lock(state_file_to_write, operation="reward_summary")
+            if state_file_to_write is not None else nullcontext()
+        )
+        with state_lock:
+            if state_file_to_write is not None:
+                original = state_file_to_write.read_text(encoding="utf-8")
+                planned, changed = insert_progress_ledger_entry(
+                    original, str(active_state_update["entry"]),
+                    updated_at=str(reward.get("recorded_at") or now_local()),
+                )
+                require_prose_state_write_allowed(
+                    registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
+                    state_path=state_file_to_write, original_text=original, planned_text=planned,
+                )
+                state_text_to_write = planned if changed else None
+            index_path.parent.mkdir(parents=True, exist_ok=True)
+            with index_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+            if state_file_to_write and state_text_to_write is not None:
+                try:
+                    atomic_write_state_text(state_file_to_write, state_text_to_write)
+                except OSError as error:
+                    raise HumanRewardSummaryWriteError(str(error)) from error
+                active_state_update["written"] = True
+                active_state_update["would_write"] = False
 
     return {
         "ok": True,

@@ -1,1223 +1,320 @@
-import { isAbsolute, join } from "node:path";
+import { createHash } from "node:crypto";
+import { readFile, readdir, lstat } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 
 import type { JsonObject } from "../effect_program.ts";
+import { withFileMutationLock } from "../effect_runtime_io.ts";
 import { requireJsonObject } from "../runtime_decode.ts";
-import type {
-  AuthorityStore,
-  AuthorityStoreCommittedTransaction,
-  AuthorityStoreReceiptResult,
-} from "./authority_store.ts";
-import {
-  canonicalAuthorityBytes,
-  canonicalAuthorityObject,
-  canonicalAuthoritySha256,
-  requireAuthorityStoreId,
-} from "./authority_store_codec.ts";
-import {
-  indexCoordinationProjectionTodos,
-  validateCoordinationTodoReadModel,
-} from "./coordination_projection.ts";
+import type { AuthorityStore } from "./authority_store.ts";
+import { canonicalAuthorityBytes, canonicalAuthorityObject, canonicalAuthoritySha256, requireAuthorityStoreId } from "./authority_store_codec.ts";
+import { indexCoordinationProjectionTodos, validateCoordinationTodoReadModel } from "./coordination_projection.ts";
 import { FileAuthorityStore } from "./file_authority_store.ts";
+import { legacyCoordinationTodoLockPath, legacyCoordinationLeaseLockPath, loadLegacyCoordinationWriterFence } from "./legacy_writer_fence.ts";
+import { loadValidatedShadowLineage, localAuthorityShadowHeadDigest, ShadowLineageError } from "./local_authority_shadow.ts";
+import { readOutboxCursor } from "./local_authority_shadow_outbox.ts";
 import {
-  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_COMMIT_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_COMMIT_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-} from "./coordination_state_contract.generated.ts";
+  bootstrapManagedShadow, rollbackManagedShadow, requireShadowCaptureBinding,
+  withShadowMaintenanceLock, ShadowManagementError, requireShadowPrimaryWriteAllowed,
+} from "./shadow_management.ts";
+import * as schemas from "./coordination_state_contract.generated.ts";
 
-export const COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA =
-  COORDINATION_RUNTIME_SHADOW_COMMIT_REQUEST_SCHEMA;
-export const COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA =
-  COORDINATION_RUNTIME_SHADOW_COMMIT_RESULT_SCHEMA;
+export const COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA = schemas.COORDINATION_RUNTIME_SHADOW_COMMIT_REQUEST_SCHEMA;
+export const COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA = schemas.COORDINATION_RUNTIME_SHADOW_COMMIT_RESULT_SCHEMA;
 export {
-  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA, COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA, COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA, COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA, COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA, COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
 } from "./coordination_state_contract.generated.ts";
-
-interface RuntimeShadowRequest {
-  runtime_root: string;
-  goal_id: string;
-  operation_id: string;
-  event_kind: string;
-  source_version: string;
-  projection: JsonObject;
-}
 
 interface RuntimeShadowDependencies {
   createStore?: (directory: string, goalId: string) => AuthorityStore;
   createFileStore?: (directory: string, goalId: string) => FileAuthorityStore;
 }
 
-interface RuntimeShadowInspectionRequest {
+interface ShadowRequest extends JsonObject {
   runtime_root: string;
   goal_id: string;
   projection: JsonObject;
+  source_snapshot: JsonObject;
 }
 
-interface RuntimeShadowBootstrapRequest {
-  runtime_root: string;
-  goal_id: string;
-  operation_id: string;
-  source_version: string;
-  projection: JsonObject;
-}
-
-interface RuntimeShadowRollbackRequest {
-  runtime_root: string;
-  goal_id: string;
-  operation_id: string;
-  expected_provider_revision: string;
-}
-
-interface RuntimeShadowQualificationRequest {
-  runtime_root: string;
-  goal_id: string;
-  projection: JsonObject;
-  minimum_operations: number;
-  required_event_kinds: string[];
-}
-
-interface RuntimeShadowTodoReadRequest {
-  runtime_root: string;
-  goal_id: string;
-  todo_id: string;
-  projection: JsonObject;
-}
-
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim() !== value || value.length === 0) {
-    throw new Error(`${label} must be a non-empty trimmed string`);
-  }
+function text(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value || value.trim() !== value) throw new Error(`${label} must be a non-empty trimmed string`);
   return value;
 }
-
-function requiredPositiveSafeInteger(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > 10_000) {
-    throw new Error(`${label} must be a positive safe integer no greater than 10000`);
+function exact(value: JsonObject, keys: string[], label: string): void {
+  if (Object.keys(value).some((key) => !keys.includes(key)) || keys.some((key) => !(key in value))) {
+    throw new Error(`${label} has unsupported or missing fields`);
   }
-  return Number(value);
 }
-
-function requiredUniqueStrings(value: unknown, label: string): string[] {
-  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
-  if (value.length > 32) throw new Error(`${label} must contain at most 32 entries`);
-  const normalized = value.map((entry, index) =>
-    requiredString(entry, `${label}[${index}]`)
-  );
-  if (new Set(normalized).size !== normalized.length) {
-    throw new Error(`${label} must not contain duplicates`);
-  }
-  return normalized;
+function failure(schema: string, error: unknown): JsonObject {
+  const typed = error as { reason_code?: string; code?: string };
+  return { schema_version: schema, status: "failed", reason_code: typed.reason_code ?? typed.code ?? "invalid_shadow_request",
+    reason: error instanceof Error ? error.message : "shadow operation failed", qualified: false,
+    read_candidate_qualified: false, parity_matches: false, scope: "bounded", sustained_parity_verified: false,
+    sustained_parity_verdict: "not_evaluated",
+    primary_writeback_preserved: true, decision_read_from_shadow: false };
 }
-
-function decodeRequest(value: unknown): RuntimeShadowRequest {
-  const input = requireJsonObject(value, "coordination runtime shadow request");
-  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA) {
-    throw new Error("coordination runtime shadow request schema mismatch");
+function decode(value: unknown, schema: string, extra: string[] = []): ShadowRequest {
+  const input = requireJsonObject(value, "coordination shadow request");
+  const allowed = ["schema_version", "runtime_root", "goal_id", "projection", "source_snapshot", ...extra];
+  if (Object.keys(input).some((key) => !allowed.includes(key)) || input.schema_version !== schema) {
+    throw new Error("coordination shadow request schema or fields mismatch");
   }
-  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
-  if (!isAbsolute(runtimeRoot)) {
-    throw new Error("runtime_root must be absolute");
-  }
-  return {
-    runtime_root: runtimeRoot,
-    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
-    operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
-    event_kind: requiredString(input.event_kind, "event_kind"),
-    source_version: requiredString(input.source_version, "source_version"),
+  const root = text(input.runtime_root, "runtime_root");
+  if (!isAbsolute(root)) throw new Error("runtime_root must be absolute");
+  const goal = requireAuthorityStoreId(input.goal_id, "goal id");
+  if (goal.includes("/") || goal.includes("\\") || goal === "." || goal === "..") throw new Error("goal id must be one path segment");
+  return { ...input, runtime_root: resolve(root), goal_id: goal,
     projection: canonicalAuthorityObject(input.projection, "projection"),
-  };
+    source_snapshot: canonicalAuthorityObject(input.source_snapshot, "source_snapshot") };
 }
 
-function decodeInspectionRequest(value: unknown): RuntimeShadowInspectionRequest {
-  const input = requireJsonObject(value, "coordination runtime shadow inspection request");
-  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA) {
-    throw new Error("coordination runtime shadow inspection request schema mismatch");
+/** Source preconditions are ephemeral. They never become an alternative state ledger. */
+function sourceSnapshot(request: ShadowRequest): JsonObject {
+  const snapshot = request.source_snapshot;
+  exact(snapshot, ["state_path", "registered_runtime_root", "registered_state_path", "state_bytes_sha256", "lease_inventory", "projection_sha256", "evidence_files"], "source_snapshot");
+  if (!isAbsolute(text(snapshot.state_path, "state_path")) ||
+      !isAbsolute(text(snapshot.registered_runtime_root, "registered_runtime_root")) ||
+      !isAbsolute(text(snapshot.registered_state_path, "registered_state_path")) ||
+      !/^sha256:[0-9a-f]{64}$/.test(text(snapshot.state_bytes_sha256, "state_bytes_sha256")) ||
+      !Array.isArray(snapshot.lease_inventory) || !Array.isArray(snapshot.evidence_files) ||
+      snapshot.projection_sha256 !== canonicalAuthoritySha256(request.projection)) {
+    throw new ShadowManagementError("source_snapshot_invalid");
   }
-  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
-  if (!isAbsolute(runtimeRoot)) {
-    throw new Error("runtime_root must be absolute");
+  return snapshot;
+}
+export async function withShadowSourceLocks<T>(request: ShadowRequest, operation: () => Promise<T>): Promise<T> {
+  const snapshot = request.source_snapshot;
+  if (!isAbsolute(text(snapshot.state_path, "state_path"))) throw new ShadowManagementError("source_snapshot_invalid");
+  const root = request.runtime_root;
+  const goal = request.goal_id;
+  return await withFileMutationLock(legacyCoordinationTodoLockPath(root, goal), () =>
+    withFileMutationLock(String(snapshot.state_path), () =>
+      withFileMutationLock(legacyCoordinationLeaseLockPath(root, goal), () =>
+        withFileMutationLock(join(root, "goals", goal, "task-leases", ".task-leases"), operation))));
+}
+async function withPrePromotionSourceLocks<T>(request: ShadowRequest, operation: () => Promise<T>): Promise<T> {
+  return await withShadowSourceLocks(request, async () => {
+    const fence = await loadLegacyCoordinationWriterFence(request.runtime_root, request.goal_id);
+    if (fence.status !== "missing") throw new ShadowManagementError(fence.status === "loaded" ? "legacy_authority_already_promoted" : fence.reason_code);
+    return await operation();
+  });
+}
+function bytesDigest(value: Uint8Array): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+async function optionalBytes(path: string): Promise<Buffer | null> {
+  try { return await readFile(path); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
-  return {
-    runtime_root: runtimeRoot,
-    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
-    projection: canonicalAuthorityObject(input.projection, "projection"),
-  };
+}
+export async function verifyShadowSourceSnapshot(request: ShadowRequest): Promise<void> {
+  const snapshot = sourceSnapshot(request);
+  if (resolve(String(snapshot.state_path)) !== resolve(String(snapshot.registered_state_path))) {
+    throw new ShadowManagementError("shadow_source_state_path_mismatch");
+  }
+  const registeredRoot = resolve(String(snapshot.registered_runtime_root));
+  if (registeredRoot !== request.runtime_root) {
+    await requireShadowPrimaryWriteAllowed(registeredRoot, request.goal_id);
+    const fence = await loadLegacyCoordinationWriterFence(registeredRoot, request.goal_id);
+    if (fence.status !== "missing") throw new ShadowManagementError(fence.status === "loaded" ? "legacy_authority_already_promoted" : fence.reason_code);
+    throw new ShadowManagementError("shadow_source_runtime_root_mismatch");
+  }
+  exact(request.projection, ["schema_version", "goal_id", "source_authority", "handoff_mode", "todos", "leases", "todo_read_model", "partitions"], "source projection");
+  if (request.projection.schema_version !== schemas.LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA ||
+      request.projection.goal_id !== request.goal_id || request.projection.source_authority !== "legacy_markdown_and_task_lease" ||
+      typeof request.projection.handoff_mode !== "string" ||
+      !canonicalAuthorityBytes(request.projection.partitions).equals(canonicalAuthorityBytes({ todos: null, leases: null }))) {
+    throw new ShadowManagementError("source_projection_invalid");
+  }
+  const bytes = await optionalBytes(String(snapshot.state_path));
+  if (bytes === null || bytesDigest(bytes) !== snapshot.state_bytes_sha256) throw new ShadowManagementError("source_changed_retry");
+  const directory = join(request.runtime_root, "goals", request.goal_id, "task-leases");
+  let names: string[];
+  try { names = await readdir(directory); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    names = [];
+  }
+  const inventory: JsonObject[] = [];
+  const leases: JsonObject[] = [];
+  for (const name of names.filter((name) => /^[A-Za-z0-9_.-]+\.json$/.test(name)).sort()) {
+    const data = await readFile(join(directory, name));
+    const lease = canonicalAuthorityObject(JSON.parse(data.toString("utf8")), "lease");
+    if (lease.goal_id !== request.goal_id || lease.todo_id !== name.slice(0, -5)) throw new ShadowManagementError("source_lease_identity_mismatch");
+    inventory.push({ name, bytes_sha256: bytesDigest(data) });
+    leases.push(lease);
+  }
+  if (!canonicalAuthorityBytes(inventory).equals(canonicalAuthorityBytes(snapshot.lease_inventory)) ||
+      !canonicalAuthorityBytes(leases).equals(canonicalAuthorityBytes(request.projection.leases))) {
+    throw new ShadowManagementError("source_changed_retry");
+  }
+  for (const raw of snapshot.evidence_files as JsonObject[]) {
+    const evidence = requireJsonObject(raw, "evidence source");
+    exact(evidence, ["path", "bytes_sha256"], "evidence source");
+    const path = text(evidence.path, "evidence path");
+    if (!isAbsolute(path)) throw new ShadowManagementError("source_snapshot_invalid");
+    const data = await optionalBytes(path);
+    if ((data === null ? null : bytesDigest(data)) !== evidence.bytes_sha256) throw new ShadowManagementError("source_changed_retry");
+  }
+  validateCoordinationTodoReadModel(request.projection, request.goal_id);
 }
 
-function decodeBootstrapRequest(value: unknown): RuntimeShadowBootstrapRequest {
-  const input = requireJsonObject(value, "coordination runtime shadow bootstrap request");
-  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA) {
-    throw new Error("coordination runtime shadow bootstrap request schema mismatch");
-  }
-  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
-  if (!isAbsolute(runtimeRoot)) {
-    throw new Error("runtime_root must be absolute");
-  }
-  return {
-    runtime_root: runtimeRoot,
-    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
-    operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
-    source_version: requiredString(input.source_version, "source_version"),
-    projection: canonicalAuthorityObject(input.projection, "projection"),
-  };
-}
-
-function decodeRollbackRequest(value: unknown): RuntimeShadowRollbackRequest {
-  const input = requireJsonObject(value, "coordination runtime shadow rollback request");
-  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA) {
-    throw new Error("coordination runtime shadow rollback request schema mismatch");
-  }
-  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
-  if (!isAbsolute(runtimeRoot)) {
-    throw new Error("runtime_root must be absolute");
-  }
-  return {
-    runtime_root: runtimeRoot,
-    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
-    operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
-    expected_provider_revision: requireAuthorityStoreId(
-      input.expected_provider_revision,
-      "expected provider revision",
-    ),
-  };
-}
-
-function decodeQualificationRequest(value: unknown): RuntimeShadowQualificationRequest {
-  const input = requireJsonObject(value, "coordination runtime shadow qualification request");
-  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA) {
-    throw new Error("coordination runtime shadow qualification request schema mismatch");
-  }
-  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
-  if (!isAbsolute(runtimeRoot)) throw new Error("runtime_root must be absolute");
-  return {
-    runtime_root: runtimeRoot,
-    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
-    projection: canonicalAuthorityObject(input.projection, "projection"),
-    minimum_operations: requiredPositiveSafeInteger(
-      input.minimum_operations,
-      "minimum_operations",
-    ),
-    required_event_kinds: requiredUniqueStrings(
-      input.required_event_kinds,
-      "required_event_kinds",
-    ),
-  };
-}
-
-function decodeTodoReadRequest(value: unknown): RuntimeShadowTodoReadRequest {
-  const input = requireJsonObject(value, "coordination runtime shadow Todo read request");
-  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA) {
-    throw new Error("coordination runtime shadow Todo read request schema mismatch");
-  }
-  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
-  if (!isAbsolute(runtimeRoot)) throw new Error("runtime_root must be absolute");
-  return {
-    runtime_root: runtimeRoot,
-    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
-    todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
-    projection: canonicalAuthorityObject(input.projection, "projection"),
-  };
-}
-
-function bootstrapEvent(request: RuntimeShadowBootstrapRequest): JsonObject {
-  return {
-    schema_version: "loopx_coordination_runtime_shadow_bootstrap_event_v0",
-    operation_id: request.operation_id,
-    source_version: request.source_version,
-    source_projection_sha256: canonicalAuthoritySha256(request.projection),
-    mode_declaration: "legacy_canonical_shadow",
-  };
-}
-
-async function bootstrapReadback(
-  store: AuthorityStore,
-  request: RuntimeShadowBootstrapRequest,
-): Promise<{
-  matched: boolean;
-  cursor?: string;
-  provider_revision?: string;
-  reason_code?: string;
-}> {
-  const head = await store.loadAuthority();
-  if (head.status !== "loaded") {
-    return {
-      matched: false,
-      reason_code: head.status === "missing" ? "shadow_bootstrap_missing" : head.reason_code,
-    };
-  }
-  const history = await store.scanCommitted(null, 1);
-  if (history.status !== "page" || history.transactions.length !== 1) {
-    return {
-      matched: false,
-      reason_code: history.status === "page"
-        ? "shadow_bootstrap_history_missing"
-        : history.reason_code,
-    };
-  }
-  const first = history.transactions[0]!;
-  const matches = first.cursor === "1" &&
-    first.operation_id === request.operation_id &&
-    first.receipts.length === 0 &&
-    canonicalAuthorityBytes(first.events).equals(
-      canonicalAuthorityBytes([bootstrapEvent(request)]),
-    ) &&
-    canonicalAuthorityBytes(first.projection).equals(
-      canonicalAuthorityBytes(request.projection),
-    );
-  return {
-    matched: matches,
-    cursor: head.cursor,
-    provider_revision: head.provider_revision,
-    ...(matches ? {} : { reason_code: "shadow_bootstrap_identity_mismatch" }),
-  };
-}
-
-function bootstrapResult(
-  request: RuntimeShadowBootstrapRequest,
-  status: "applied" | "replayed" | "recovered",
-  readback: Awaited<ReturnType<typeof bootstrapReadback>>,
-): JsonObject {
-  return {
-    schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-    status,
-    operation_id: request.operation_id,
-    source_version: request.source_version,
-    source_projection_sha256: canonicalAuthoritySha256(request.projection),
-    mode_declaration: "legacy_canonical_shadow",
-    cursor: readback.cursor,
-    provider_revision: readback.provider_revision,
-    bootstrap_receipts_empty: true,
-    primary_writeback_preserved: true,
-    decision_read_from_shadow: false,
-  };
-}
-
-/**
- * Install the existing legacy coordination projection as the first file-shadow
- * head. This is an administrative import seam, not an agent mutation: it only
- * succeeds against an uninitialized store and intentionally creates no
- * operation receipt. The source digest and mode declaration live in the first
- * committed event so restart can distinguish migration from missing state.
- */
-export async function bootstrapCoordinationRuntimeShadow(
-  value: unknown,
-  dependencies: RuntimeShadowDependencies = {},
-): Promise<JsonObject> {
-  let request: RuntimeShadowBootstrapRequest;
+export async function bootstrapCoordinationRuntimeShadow(value: unknown, _dependencies: RuntimeShadowDependencies = {}): Promise<JsonObject> {
+  const schema = schemas.COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA;
   try {
-    request = decodeBootstrapRequest(value);
-  } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "invalid_shadow_bootstrap_request",
-      reason: error instanceof Error ? error.message : "invalid bootstrap request",
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  }
-
-  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
-  const store = dependencies.createStore?.(directory, request.goal_id) ??
-    new FileAuthorityStore(directory, request.goal_id);
-  try {
-    const existing = await store.loadAuthority();
-    if (existing.status === "loaded") {
-      const readback = await bootstrapReadback(store, request);
-      return readback.matched
-        ? bootstrapResult(request, "replayed", readback)
-        : {
-          schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-          status: "failed",
-          reason_code: readback.reason_code ?? "shadow_already_initialized",
-          reason: "shadow store is already initialized by different content",
-          current_provider_revision: existing.provider_revision,
-          current_cursor: existing.cursor,
-          primary_writeback_preserved: true,
-          decision_read_from_shadow: false,
-        };
-    }
-    if (existing.status !== "missing") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-        status: "failed",
-        reason_code: existing.reason_code,
-        reason: existing.reason,
-        primary_writeback_preserved: true,
-        decision_read_from_shadow: false,
-      };
-    }
-
-    const result = await store.commitAuthority({
-      expected_provider_revision: null,
-      operation_id: request.operation_id,
-      events: [bootstrapEvent(request)],
-      next_projection: request.projection,
-      receipts: [],
+    const request = decode(value, schemas.COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA, ["operation_id", "source_version"]);
+    text(request.operation_id, "operation_id"); text(request.source_version, "source_version");
+    const result = await bootstrapManagedShadow(request, {
+      withPrimaryLocks: (operation) => withPrePromotionSourceLocks(request, operation),
+      verifySourceSnapshot: () => verifyShadowSourceSnapshot(request),
     });
-    if (result.status === "applied") {
-      const readback = await bootstrapReadback(store, request);
-      if (!readback.matched) {
-        return {
-          schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-          status: "failed",
-          reason_code: readback.reason_code ?? "shadow_bootstrap_readback_mismatch",
-          reason: "bootstrap commit did not produce the expected initial lineage",
-          primary_writeback_preserved: true,
-          decision_read_from_shadow: false,
-        };
-      }
-      return bootstrapResult(request, "applied", readback);
-    }
-    if (result.status === "ambiguous") {
-      const readback = await bootstrapReadback(store, request);
-      if (readback.matched) return bootstrapResult(request, "recovered", readback);
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-        status: "ambiguous",
-        operation_id: request.operation_id,
-        reason_code: result.reason_code,
-        reason: result.reason,
-        reconciliation_required: true,
-        primary_writeback_preserved: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    if (result.status === "conflict") {
-      const readback = await bootstrapReadback(store, request);
-      if (readback.matched) return bootstrapResult(request, "replayed", readback);
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-        status: "failed",
-        reason_code: "shadow_already_initialized",
-        reason: result.conflict_kind,
-        current_provider_revision: result.current_provider_revision,
-        current_cursor: result.current_cursor,
-        primary_writeback_preserved: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: result.reason_code,
-      reason: result.reason,
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "shadow_bootstrap_unavailable",
-      reason: error instanceof Error ? error.message : "bootstrap unavailable",
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  }
+    return { schema_version: schema, ...result, primary_writeback_preserved: true, decision_read_from_shadow: false };
+  } catch (error) { return failure(schema, error); }
 }
-
-/**
- * Remove one exact file-shadow lineage from the active path while retaining a
- * durable quarantine copy. Legacy Todo/task-lease state remains canonical, so
- * this pre-promotion rollback never changes a runtime decision and may be
- * followed by a fresh bootstrap from that legacy source.
- */
-export async function rollbackCoordinationRuntimeShadow(
-  value: unknown,
-  dependencies: RuntimeShadowDependencies = {},
-): Promise<JsonObject> {
-  let request: RuntimeShadowRollbackRequest;
+export async function rollbackCoordinationRuntimeShadow(value: unknown, _dependencies: RuntimeShadowDependencies = {}): Promise<JsonObject> {
+  const schema = schemas.COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA;
   try {
-    request = decodeRollbackRequest(value);
-  } catch (error) {
+    const request = decode(value, schemas.COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
+      ["operation_id", "expected_provider_revision", "expected_bootstrap_operation_id"]);
+    text(request.operation_id, "operation_id");
+    const revision = request.expected_provider_revision;
+    const bootstrap = request.expected_bootstrap_operation_id;
+    if ((typeof revision === "string") === (typeof bootstrap === "string")) throw new Error("rollback requires exactly one revision or bootstrap operation selector");
+    const result = await rollbackManagedShadow(request, { withPrimaryLocks: (operation) => withPrePromotionSourceLocks(request, operation) });
+    return { schema_version: schema, ...result, primary_writeback_preserved: true, decision_read_from_shadow: false };
+  } catch (error) { return failure(schema, error); }
+}
+
+async function pendingOutbox(root: string, goal: string,
+  binding: Awaited<ReturnType<typeof requireShadowCaptureBinding>>,
+  transactions: Awaited<ReturnType<typeof loadValidatedShadowLineage>>["transactions"]): Promise<boolean> {
+  const outbox = join(root, "authority-shadow", "outbox", goal);
+  const outboxStat = await lstat(outbox);
+  if (!outboxStat.isDirectory() || outboxStat.isSymbolicLink()) throw new ShadowLineageError("outbox_file_invalid");
+  const inventory = await readdir(outbox, { withFileTypes: true });
+  if (inventory.some((item) => !["manifest.json", "todos", "leases"].includes(item.name) || item.isSymbolicLink() ||
+      (item.name === "manifest.json" ? !item.isFile() : !item.isDirectory()))) throw new ShadowLineageError("outbox_unproved_residue");
+  const manifestBytes = await optionalBytes(join(outbox, "manifest.json"));
+  if (manifestBytes === null) throw new ShadowLineageError("outbox_manifest_unproved");
+  let manifest: unknown;
+  try { manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes)); }
+  catch { throw new ShadowLineageError("outbox_manifest_unproved"); }
+  if (!canonicalAuthorityBytes(manifest).equals(canonicalAuthorityBytes({
+    schema_version: schemas.SHADOW_OUTBOX_MANIFEST_SCHEMA, goal_id: goal, ...binding,
+  }))) throw new ShadowLineageError("outbox_manifest_unproved");
+  for (const partition of ["todos", "leases"]) {
+    const directory = join(root, "authority-shadow", "outbox", goal, partition);
+    let names: string[];
+    try { names = await readdir(directory); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (names.some((name) => name !== "drain-cursor.json")) return true;
+    if (names.includes("drain-cursor.json")) {
+      const stat = await lstat(join(directory, "drain-cursor.json"));
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new ShadowLineageError("outbox_file_invalid");
+    }
+    const cursor = await readOutboxCursor(directory, partition);
+    const settled = transactions.slice(1).filter((transaction) => transaction.receipts[0]?.partition === partition);
+    if (cursor === null) { if (settled.length) return true; continue; }
+    const anchor = settled.at(-1);
+    if (anchor === undefined || anchor.operation_id !== cursor.last_entry_id ||
+      anchor.receipts[0]?.seq !== cursor.last_seq || anchor.cursor !== cursor.last_cursor ||
+      anchor.provider_revision !== cursor.last_provider_revision) throw new ShadowLineageError("outbox_cursor_unproved");
+    const applied = settled.filter((transaction) => transaction.receipts[0]?.no_op === false).at(-1);
+    if ((applied?.receipts[0]?.partition_digest ?? null) !== cursor.last_partition_digest) throw new ShadowLineageError("outbox_cursor_unproved");
+  }
+  return false;
+}
+
+async function qualifySnapshot(request: ShadowRequest, dependencies: RuntimeShadowDependencies, minimum: number, required: string[]): Promise<JsonObject> {
+  return await withShadowMaintenanceLock(request.runtime_root, request.goal_id, () => withShadowSourceLocks(request, async () => {
+    await verifyShadowSourceSnapshot(request);
+    const store = dependencies.createStore?.(join(request.runtime_root, "authority-shadow", "file-v0"), request.goal_id) ??
+      new FileAuthorityStore(join(request.runtime_root, "authority-shadow", "file-v0"), request.goal_id, { existingOnly: true });
+    const initial = await store.loadAuthority();
+    if (initial.status === "loaded" && initial.head.capture_profile !== "file_outbox_v1") throw new ShadowLineageError("legacy_lineage_ineligible");
+    const binding = await requireShadowCaptureBinding(request.runtime_root, request.goal_id);
+    const lineage = await loadValidatedShadowLineage(store, request.runtime_root, request.goal_id, binding);
+    const pending = await pendingOutbox(request.runtime_root, request.goal_id, binding, lineage.transactions);
+    await verifyShadowSourceSnapshot(request);
+    const matched = localAuthorityShadowHeadDigest(request.projection) === localAuthorityShadowHeadDigest(lineage.head.head);
+    const missing = required.filter((kind) => !lineage.write_classes.includes(kind));
+    const operations = lineage.transactions.slice(1).filter((transaction) => transaction.receipts[0]?.no_op === false).length;
+    const qualified = matched && !pending && operations >= minimum && missing.length === 0;
     return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "invalid_shadow_rollback_request",
-      reason: error instanceof Error ? error.message : "invalid rollback request",
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
+      status: !matched ? "drifted" : pending ? "not_ready" : qualified ? "qualified" : "insufficient_evidence",
+      qualified, parity_matches: matched, reason_code: pending ? "outbox_pending" : !matched ? "shadow_projection_drift" : null,
+      scope: "bounded", sustained_parity_verified: false, sustained_parity_verdict: "not_evaluated", capture_profile: binding.capture_profile,
+      capture_lineage_id: binding.capture_lineage_id, bootstrap_provider_revision: binding.bootstrap_provider_revision,
+      provider_revision: lineage.head.provider_revision, cursor: lineage.head.cursor,
+      expected_projection_sha256: localAuthorityShadowHeadDigest(request.projection),
+      observed_projection_sha256: localAuthorityShadowHeadDigest(lineage.head.head),
+      policy: { minimum_operations: minimum, required_event_kinds: required },
+      evidence: { bootstrap_verified: true, transaction_lineage_verified: true, operation_count: operations,
+        observed_event_kinds: lineage.write_classes, missing_required_event_kinds: missing,
+        enough_operations: operations >= minimum, coverage_complete: missing.length === 0,
+        todo_consumer_semantics_verified: true, last_sequences: lineage.last_sequences,
+        last_applied_sequences: lineage.last_applied_sequences, pending_outbox: pending },
+      primary_writeback_preserved: true, decision_read_from_shadow: false,
+      head: lineage.head.head,
     };
-  }
-
-  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
-  const store = dependencies.createFileStore?.(directory, request.goal_id) ??
-    new FileAuthorityStore(directory, request.goal_id);
-  const result = await store.archiveAuthorityDocument(
-    request.expected_provider_revision,
-    request.operation_id,
-  );
-  if (result.status === "applied" || result.status === "replayed") {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
-      ...result,
-      operation_id: request.operation_id,
-      expected_provider_revision: request.expected_provider_revision,
-      active_shadow_removed: true,
-      archive_retained: true,
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  }
-  if (result.status === "ambiguous") {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
-      ...result,
-      operation_id: request.operation_id,
-      expected_provider_revision: request.expected_provider_revision,
-      reconciliation_required: true,
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  }
-  let reasonCode: string;
-  let reason: string;
-  if (result.status === "missing") {
-    reasonCode = "shadow_rollback_source_missing";
-    reason = "active shadow lineage is missing";
-  } else if (result.status === "conflict") {
-    reasonCode = result.conflict_kind;
-    reason = result.conflict_kind;
-  } else {
-    reasonCode = result.reason_code;
-    reason = result.reason;
-  }
-  return {
-    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
-    ...result,
-    status: "failed",
-    reason_code: reasonCode,
-    reason,
-    operation_id: request.operation_id,
-    expected_provider_revision: request.expected_provider_revision,
-    primary_writeback_preserved: true,
-    decision_read_from_shadow: false,
-  };
+  }));
 }
-
-function expectedReceipt(request: RuntimeShadowRequest): JsonObject {
-  return {
-    schema_version: COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA,
-    operation_id: request.operation_id,
-    event_kind: request.event_kind,
-    source_version: request.source_version,
-    projection_sha256: canonicalAuthoritySha256(request.projection),
-  };
+function policy(request: ShadowRequest): { minimum: number; required: string[] } {
+  const minimum = request.minimum_operations ?? 3;
+  const required = request.required_event_kinds ?? [];
+  if (!Number.isSafeInteger(minimum) || Number(minimum) < 1 || Number(minimum) > 10000 ||
+      !Array.isArray(required) || required.length > 32 || required.some((kind) => typeof kind !== "string" || !kind.trim()) ||
+      new Set(required).size !== required.length) throw new Error("invalid bounded qualification policy");
+  return { minimum: Number(minimum), required: required as string[] };
 }
-
-function failed(
-  reasonCode: string,
-  reason: string,
-  extra: JsonObject = {},
-): JsonObject {
-  return {
-    schema_version: COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA,
-    status: "failed",
-    reason_code: reasonCode,
-    reason,
-    primary_writeback_preserved: true,
-    decision_read_from_shadow: false,
-    ...extra,
-  };
-}
-
-function receiptMatches(
-  readback: AuthorityStoreReceiptResult,
-  receipt: JsonObject,
-): boolean {
-  if (readback.status !== "found") return false;
-  const expected = canonicalAuthorityBytes(receipt);
-  return readback.receipts.some((candidate) =>
-    canonicalAuthorityBytes(candidate).equals(expected)
-  );
-}
-
-function receiptResult(
-  request: RuntimeShadowRequest,
-  readback: AuthorityStoreReceiptResult,
-  receipt: JsonObject,
-  status: "replayed" | "recovered",
-): JsonObject {
-  if (readback.status !== "found") {
-    return failed(
-      "shadow_receipt_missing",
-      "shadow operation has no durable receipt",
-      { operation_id: request.operation_id },
-    );
-  }
-  if (!receiptMatches(readback, receipt)) {
-    return failed(
-      "shadow_operation_identity_mismatch",
-      "shadow operation id is already bound to different committed content",
-      {
-        operation_id: request.operation_id,
-        cursor: readback.cursor,
-        provider_revision: readback.provider_revision,
-      },
-    );
-  }
-  return {
-    schema_version: COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA,
-    status,
-    operation_id: request.operation_id,
-    cursor: readback.cursor,
-    provider_revision: readback.provider_revision,
-    parity: {
-      schema_version: "loopx_coordination_runtime_shadow_parity_v0",
-      receipt_matches: true,
-      projection_sha256: receipt.projection_sha256,
-    },
-    primary_writeback_preserved: true,
-    decision_read_from_shadow: false,
-  };
-}
-
-async function verifyAppliedProjection(
-  store: AuthorityStore,
-  request: RuntimeShadowRequest,
-  providerRevision: string,
-): Promise<JsonObject> {
-  const head = await store.loadAuthority();
-  if (head.status !== "loaded") {
-    return {
-      verified: false,
-      status: head.status,
-      projection_matches: false,
-    };
-  }
-  if (head.provider_revision !== providerRevision) {
-    return {
-      verified: false,
-      status: "superseded_before_readback",
-      projection_matches: null,
-      current_provider_revision: head.provider_revision,
-    };
-  }
-  const projectionMatches = canonicalAuthoritySha256(head.head) ===
-    canonicalAuthoritySha256(request.projection);
-  return {
-    verified: projectionMatches,
-    status: projectionMatches ? "matched_current_head" : "projection_mismatch",
-    projection_matches: projectionMatches,
-    provider_revision: head.provider_revision,
-  };
-}
-
-/**
- * Compare the current legacy coordination projection with the file shadow.
- * This is an evidence-only read for Stage 2C migration/parity qualification;
- * callers must never use it to make a runtime coordination decision.
- */
-export async function inspectCoordinationRuntimeShadow(
-  value: unknown,
-  dependencies: RuntimeShadowDependencies = {},
-): Promise<JsonObject> {
-  let request: RuntimeShadowInspectionRequest;
+export async function qualifyCoordinationRuntimeShadow(value: unknown, dependencies: RuntimeShadowDependencies = {}): Promise<JsonObject> {
+  const schema = schemas.COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA;
   try {
-    request = decodeInspectionRequest(value);
-  } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "invalid_shadow_inspection_request",
-      reason: error instanceof Error ? error.message : "invalid shadow inspection request",
-      parity_matches: false,
-      bootstrap_required: false,
-      decision_read_from_shadow: false,
-    };
-  }
-
-  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
-  const store = dependencies.createStore?.(directory, request.goal_id) ??
-    new FileAuthorityStore(directory, request.goal_id);
-  const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
+    const request = decode(value, schemas.COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA, ["minimum_operations", "required_event_kinds"]);
+    const selected = policy(request);
+    const result = await qualifySnapshot(request, dependencies, selected.minimum, selected.required);
+    delete result.head;
+    return { schema_version: schema, ...result };
+  } catch (error) { return failure(schema, error); }
+}
+export async function inspectCoordinationRuntimeShadow(value: unknown, dependencies: RuntimeShadowDependencies = {}): Promise<JsonObject> {
+  const schema = schemas.COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA;
   try {
-    const head = await store.loadAuthority();
-    if (head.status === "missing") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
-        status: "missing",
-        expected_projection_sha256: expectedProjectionSha256,
-        parity_matches: false,
-        bootstrap_required: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    if (head.status !== "loaded") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
-        status: "failed",
-        reason_code: head.reason_code,
-        reason: head.reason,
-        expected_projection_sha256: expectedProjectionSha256,
-        parity_matches: false,
-        bootstrap_required: false,
-        decision_read_from_shadow: false,
-      };
-    }
-    const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
-    const parityMatches = observedProjectionSha256 === expectedProjectionSha256;
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
-      status: parityMatches ? "matched" : "drifted",
-      expected_projection_sha256: expectedProjectionSha256,
-      observed_projection_sha256: observedProjectionSha256,
-      provider_revision: head.provider_revision,
-      cursor: head.cursor,
-      parity_matches: parityMatches,
-      bootstrap_required: false,
-      decision_read_from_shadow: false,
-    };
+    const request = decode(value, schemas.COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA);
+    const result = await qualifySnapshot(request, dependencies, 0, []);
+    delete result.head;
+    return { schema_version: schema, ...result, status: result.qualified ? "matched" : result.status,
+      bootstrap_required: false };
   } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "shadow_read_unavailable",
-      reason: error instanceof Error ? error.message : "shadow read unavailable",
-      expected_projection_sha256: expectedProjectionSha256,
-      parity_matches: false,
-      bootstrap_required: false,
-      decision_read_from_shadow: false,
-    };
+    const result = failure(schema, error);
+    if (result.reason_code === "bootstrap_required") return { ...result, status: "missing", bootstrap_required: true };
+    return result;
   }
 }
-
-/**
- * Exercise the first provider-read seam without promoting it to decision
- * authority. The file head is eligible as a read candidate only when it
- * matches the current legacy projection byte-for-byte; missing, drifted, or
- * malformed provider state fails closed and never falls back silently.
- */
-export async function readCoordinationRuntimeShadowTodoCandidate(
-  value: unknown,
-  dependencies: RuntimeShadowDependencies = {},
-): Promise<JsonObject> {
-  let request: RuntimeShadowTodoReadRequest;
+export async function readCoordinationRuntimeShadowTodoCandidate(value: unknown, dependencies: RuntimeShadowDependencies = {}): Promise<JsonObject> {
+  const schema = schemas.COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA;
   try {
-    request = decodeTodoReadRequest(value);
-  } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "invalid_shadow_todo_read_request",
-      reason: error instanceof Error ? error.message : "invalid Todo read request",
-      read_candidate_qualified: false,
-      decision_read_from_shadow: false,
-    };
-  }
-
-  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
-  const store = dependencies.createStore?.(directory, request.goal_id) ??
-    new FileAuthorityStore(directory, request.goal_id);
-  const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
-  try {
-    const head = await store.loadAuthority();
-    if (head.status === "missing") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-        status: "missing",
-        reason_code: "shadow_todo_read_store_missing",
-        expected_projection_sha256: expectedProjectionSha256,
-        read_candidate_qualified: false,
-        bootstrap_required: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    if (head.status !== "loaded") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-        status: "failed",
-        reason_code: head.reason_code,
-        reason: head.reason,
-        expected_projection_sha256: expectedProjectionSha256,
-        read_candidate_qualified: false,
-        decision_read_from_shadow: false,
-      };
-    }
-    const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
-    if (observedProjectionSha256 !== expectedProjectionSha256) {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-        status: "drifted",
-        reason_code: "shadow_todo_read_projection_drift",
-        expected_projection_sha256: expectedProjectionSha256,
-        observed_projection_sha256: observedProjectionSha256,
-        provider_revision: head.provider_revision,
-        cursor: head.cursor,
-        parity_matches: false,
-        read_candidate_qualified: false,
-        decision_read_from_shadow: false,
-      };
-    }
-    const projection = indexCoordinationProjectionTodos(head.head, request.goal_id);
-    const todo = projection.todos.get(request.todo_id);
-    if (todo === undefined) {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-        status: "todo_missing",
-        reason_code: "shadow_todo_read_todo_missing",
-        todo_id: request.todo_id,
-        todo_ids: projection.todo_ids,
-        expected_projection_sha256: expectedProjectionSha256,
-        observed_projection_sha256: observedProjectionSha256,
-        provider_revision: head.provider_revision,
-        cursor: head.cursor,
-        parity_matches: true,
-        read_candidate_qualified: false,
-        decision_read_from_shadow: false,
-      };
-    }
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-      status: "matched",
-      todo_id: request.todo_id,
-      todo,
-      todo_ids: projection.todo_ids,
-      expected_projection_sha256: expectedProjectionSha256,
-      observed_projection_sha256: observedProjectionSha256,
-      provider_revision: head.provider_revision,
-      cursor: head.cursor,
-      parity_matches: true,
-      read_candidate_qualified: true,
-      source: "file_v0",
-      decision_read_from_shadow: false,
-    };
-  } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "shadow_todo_read_unavailable",
-      reason: error instanceof Error ? error.message : "Todo read unavailable",
-      expected_projection_sha256: expectedProjectionSha256,
-      read_candidate_qualified: false,
-      decision_read_from_shadow: false,
-    };
-  }
+    const request = decode(value, schemas.COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA, ["todo_id"]);
+    const todoId = text(request.todo_id, "todo_id");
+    const result = await qualifySnapshot(request, dependencies, 3, []);
+    const head = result.head as JsonObject;
+    delete result.head;
+    if (!result.qualified) return { schema_version: schema, ...result, read_candidate_qualified: false };
+    const index = indexCoordinationProjectionTodos(head, request.goal_id);
+    const todo = index.todos.get(todoId);
+    return { schema_version: schema, ...result, status: todo === undefined ? "todo_missing" : "matched",
+      todo_id: todoId, todo: todo ?? null, todo_ids: index.todo_ids, read_candidate_qualified: todo !== undefined };
+  } catch (error) { return failure(schema, error); }
 }
-
-function validateBootstrapTransaction(
-  transaction: AuthorityStoreCommittedTransaction,
-): string | null {
-  if (transaction.cursor !== "1" || transaction.events.length !== 1) {
-    return "shadow_qualification_bootstrap_shape_invalid";
-  }
-  const event = transaction.events[0]!;
-  if (
-    event.schema_version !== "loopx_coordination_runtime_shadow_bootstrap_event_v0" ||
-    event.operation_id !== transaction.operation_id ||
-    event.mode_declaration !== "legacy_canonical_shadow" ||
-    event.source_projection_sha256 !== canonicalAuthoritySha256(transaction.projection) ||
-    transaction.receipts.length !== 0
-  ) {
-    return "shadow_qualification_bootstrap_identity_invalid";
-  }
-  return null;
-}
-
-function validateMirroredTransaction(
-  transaction: AuthorityStoreCommittedTransaction,
-): { reason_code: string | null; event_kind: string | null } {
-  if (transaction.events.length !== 1 || transaction.receipts.length !== 1) {
-    return {
-      reason_code: "shadow_qualification_transaction_shape_invalid",
-      event_kind: null,
-    };
-  }
-  const event = transaction.events[0]!;
-  const receipt = transaction.receipts[0]!;
-  const eventKind = typeof event.event_kind === "string" ? event.event_kind : null;
-  if (
-    event.schema_version !== "loopx_coordination_runtime_shadow_event_v0" ||
-    receipt.schema_version !== COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA ||
-    event.operation_id !== transaction.operation_id ||
-    receipt.operation_id !== transaction.operation_id ||
-    eventKind === null ||
-    receipt.event_kind !== eventKind ||
-    typeof event.source_version !== "string" ||
-    receipt.source_version !== event.source_version ||
-    typeof event.projection_sha256 !== "string" ||
-    receipt.projection_sha256 !== event.projection_sha256 ||
-    event.projection_sha256 !== canonicalAuthoritySha256(transaction.projection)
-  ) {
-    return {
-      reason_code: "shadow_qualification_transaction_identity_invalid",
-      event_kind: eventKind,
-    };
-  }
-  return { reason_code: null, event_kind: eventKind };
-}
-
-async function scanShadowLineage(
-  store: AuthorityStore,
-): Promise<
-  | { status: "loaded"; transactions: AuthorityStoreCommittedTransaction[] }
-  | { status: "failed"; reason_code: string; reason: string }
-> {
-  const transactions: AuthorityStoreCommittedTransaction[] = [];
-  let cursor: string | null = null;
-  for (;;) {
-    const page = await store.scanCommitted(cursor, 256);
-    if (page.status !== "page") {
-      return {
-        status: "failed",
-        reason_code: page.reason_code,
-        reason: page.reason,
-      };
-    }
-    transactions.push(...page.transactions.map((entry) => structuredClone(entry)));
-    if (transactions.length > 10_000) {
-      return {
-        status: "failed",
-        reason_code: "shadow_qualification_history_too_large",
-        reason: "shadow qualification history exceeds the bounded 10000 transaction limit",
-      };
-    }
-    if (!page.has_more) return { status: "loaded", transactions };
-    if (page.next_cursor === null || page.next_cursor === cursor) {
-      return {
-        status: "failed",
-        reason_code: "shadow_qualification_cursor_stalled",
-        reason: "shadow qualification scan did not advance its cursor",
-      };
-    }
-    cursor = page.next_cursor;
-  }
-}
-
-/**
- * Produce promotion evidence across a lineage of distinct mirrored operations.
- * The policy is coverage-based rather than time-based: the caller selects a
- * minimum operation count and the mutation kinds that must have been observed.
- * This remains an evidence-only read and cannot promote or serve the shadow.
- */
-export async function qualifyCoordinationRuntimeShadow(
-  value: unknown,
-  dependencies: RuntimeShadowDependencies = {},
-): Promise<JsonObject> {
-  let request: RuntimeShadowQualificationRequest;
-  try {
-    request = decodeQualificationRequest(value);
-  } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "invalid_shadow_qualification_request",
-      reason: error instanceof Error ? error.message : "invalid qualification request",
-      qualified: false,
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  }
-
-  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
-  const store = dependencies.createStore?.(directory, request.goal_id) ??
-    new FileAuthorityStore(directory, request.goal_id);
-  const policy = {
-    schema_version: "loopx_coordination_runtime_shadow_parity_policy_v0",
-    minimum_operations: request.minimum_operations,
-    required_event_kinds: request.required_event_kinds,
-  };
-  try {
-    const head = await store.loadAuthority();
-    if (head.status === "missing") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-        status: "missing",
-        policy,
-        qualified: false,
-        bootstrap_required: true,
-        primary_writeback_preserved: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    if (head.status !== "loaded") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-        status: "failed",
-        reason_code: head.reason_code,
-        reason: head.reason,
-        policy,
-        qualified: false,
-        primary_writeback_preserved: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
-    const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
-    let todoReadModel: JsonObject;
-    try {
-      validateCoordinationTodoReadModel(request.projection, request.goal_id);
-      todoReadModel = validateCoordinationTodoReadModel(head.head, request.goal_id);
-    } catch (error) {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-        status: "drifted",
-        reason_code: "shadow_todo_consumer_semantics_invalid",
-        reason: error instanceof Error ? error.message : "Todo read-model validation failed",
-        policy,
-        qualified: false,
-        parity_matches: false,
-        expected_projection_sha256: expectedProjectionSha256,
-        observed_projection_sha256: observedProjectionSha256,
-        provider_revision: head.provider_revision,
-        cursor: head.cursor,
-        primary_writeback_preserved: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    const lineage = await scanShadowLineage(store);
-    if (lineage.status === "failed") {
-      return {
-        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-        status: "failed",
-        reason_code: lineage.reason_code,
-        reason: lineage.reason,
-        policy,
-        qualified: false,
-        primary_writeback_preserved: true,
-        decision_read_from_shadow: false,
-      };
-    }
-    const bootstrap = lineage.transactions[0];
-    const bootstrapFailure = bootstrap === undefined
-      ? "shadow_qualification_bootstrap_missing"
-      : validateBootstrapTransaction(bootstrap);
-    const eventKinds = new Set<string>();
-    let transactionFailure: string | null = bootstrapFailure;
-    for (const transaction of lineage.transactions.slice(1)) {
-      const validation = validateMirroredTransaction(transaction);
-      if (validation.event_kind !== null) eventKinds.add(validation.event_kind);
-      transactionFailure ??= validation.reason_code;
-    }
-    const observedEventKinds = [...eventKinds].sort();
-    const missingRequiredEventKinds = request.required_event_kinds.filter(
-      (eventKind) => !eventKinds.has(eventKind),
-    );
-    const operationCount = Math.max(0, lineage.transactions.length - 1);
-    const currentHeadMatches = expectedProjectionSha256 === observedProjectionSha256;
-    const enoughOperations = operationCount >= request.minimum_operations;
-    const coverageComplete = missingRequiredEventKinds.length === 0;
-    const qualified = currentHeadMatches && transactionFailure === null &&
-      enoughOperations && coverageComplete;
-    let status: "qualified" | "insufficient_evidence" | "drifted";
-    if (!currentHeadMatches || transactionFailure !== null) status = "drifted";
-    else status = qualified ? "qualified" : "insufficient_evidence";
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-      status,
-      policy,
-      qualified,
-      parity_matches: currentHeadMatches,
-      expected_projection_sha256: expectedProjectionSha256,
-      observed_projection_sha256: observedProjectionSha256,
-      provider_revision: head.provider_revision,
-      cursor: head.cursor,
-      evidence: {
-        schema_version: "loopx_coordination_runtime_shadow_parity_evidence_v0",
-        bootstrap_verified: bootstrapFailure === null,
-        transaction_lineage_verified: transactionFailure === null,
-        operation_count: operationCount,
-        observed_event_kinds: observedEventKinds,
-        missing_required_event_kinds: missingRequiredEventKinds,
-        enough_operations: enoughOperations,
-        coverage_complete: coverageComplete,
-        todo_consumer_semantics_verified: true,
-        todo_read_model: todoReadModel,
-        ...(transactionFailure === null ? {} : { reason_code: transactionFailure }),
-      },
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  } catch (error) {
-    return {
-      schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
-      status: "failed",
-      reason_code: "shadow_qualification_unavailable",
-      reason: error instanceof Error ? error.message : "qualification unavailable",
-      policy,
-      qualified: false,
-      primary_writeback_preserved: true,
-      decision_read_from_shadow: false,
-    };
-  }
-}
-
-/**
- * Mirror one already-committed legacy coordination mutation into the Stage 2C
- * file shadow. The result is evidence only: it never authorizes, rejects, or
- * rolls back the primary mutation and no runtime decision reads this store.
- */
-export async function commitCoordinationRuntimeShadow(
-  value: unknown,
-  dependencies: RuntimeShadowDependencies = {},
-): Promise<JsonObject> {
-  let request: RuntimeShadowRequest;
-  try {
-    request = decodeRequest(value);
-  } catch (error) {
-    return failed(
-      "invalid_shadow_request",
-      error instanceof Error ? error.message : "invalid shadow request",
-    );
-  }
-
-  const directory = join(
-    request.runtime_root,
-    "authority-shadow",
-    "file-v0",
-  );
-  const store = dependencies.createStore?.(directory, request.goal_id) ??
-    new FileAuthorityStore(directory, request.goal_id);
-  const receipt = expectedReceipt(request);
-
-  try {
-    const existing = await store.readReceipt(request.operation_id);
-    if (existing.status === "found") {
-      return receiptResult(request, existing, receipt, "replayed");
-    }
-    if (existing.status !== "missing") {
-      return failed(existing.reason_code, existing.reason, {
-        operation_id: request.operation_id,
-      });
-    }
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const head = await store.loadAuthority();
-      if (head.status !== "loaded" && head.status !== "missing") {
-        return failed(head.reason_code, head.reason, {
-          operation_id: request.operation_id,
-        });
-      }
-      const result = await store.commitAuthority({
-        expected_provider_revision: head.status === "loaded"
-          ? head.provider_revision
-          : null,
-        operation_id: request.operation_id,
-        events: [{
-          schema_version: "loopx_coordination_runtime_shadow_event_v0",
-          operation_id: request.operation_id,
-          event_kind: request.event_kind,
-          source_version: request.source_version,
-          projection_sha256: receipt.projection_sha256,
-        }],
-        next_projection: request.projection,
-        receipts: [receipt],
-      });
-      if (result.status === "applied") {
-        const readback = await store.readReceipt(request.operation_id);
-        if (!receiptMatches(readback, receipt) || readback.status !== "found") {
-          return failed(
-            "shadow_commit_readback_mismatch",
-            "shadow commit did not produce its exact durable receipt",
-            { operation_id: request.operation_id },
-          );
-        }
-        const projectionReadback = await verifyAppliedProjection(
-          store,
-          request,
-          readback.provider_revision,
-        );
-        if (projectionReadback.status === "projection_mismatch") {
-          return failed(
-            "shadow_commit_projection_mismatch",
-            "shadow commit receipt exists but current projection differs",
-            {
-              operation_id: request.operation_id,
-              provider_revision: readback.provider_revision,
-            },
-          );
-        }
-        return {
-          schema_version: COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA,
-          status: "applied",
-          operation_id: request.operation_id,
-          cursor: readback.cursor,
-          provider_revision: readback.provider_revision,
-          parity: {
-            schema_version: "loopx_coordination_runtime_shadow_parity_v0",
-            receipt_matches: true,
-            projection_sha256: receipt.projection_sha256,
-            projection_readback: projectionReadback,
-          },
-          primary_writeback_preserved: true,
-          decision_read_from_shadow: false,
-        };
-      }
-      if (result.status === "ambiguous") {
-        const readback = await store.readReceipt(request.operation_id);
-        if (readback.status === "found") {
-          return receiptResult(request, readback, receipt, "recovered");
-        }
-        return {
-          schema_version: COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA,
-          status: "ambiguous",
-          operation_id: request.operation_id,
-          reason_code: result.reason_code,
-          reason: result.reason,
-          reconciliation_required: true,
-          primary_writeback_preserved: true,
-          decision_read_from_shadow: false,
-        };
-      }
-      if (
-        result.status === "conflict" &&
-        result.conflict_kind === "operation_id_exists"
-      ) {
-        return receiptResult(
-          request,
-          await store.readReceipt(request.operation_id),
-          receipt,
-          "replayed",
-        );
-      }
-      if (
-        result.status === "conflict" &&
-        result.conflict_kind === "provider_revision_mismatch" &&
-        attempt === 0
-      ) {
-        continue;
-      }
-      if (result.status === "conflict") {
-        return failed("shadow_provider_conflict", result.conflict_kind, {
-          operation_id: request.operation_id,
-          current_provider_revision: result.current_provider_revision,
-          current_cursor: result.current_cursor,
-        });
-      }
-      return failed(result.reason_code, result.reason, {
-        operation_id: request.operation_id,
-      });
-    }
-    return failed(
-      "shadow_provider_conflict",
-      "shadow provider revision changed during bounded retry",
-      { operation_id: request.operation_id },
-    );
-  } catch (error) {
-    return failed(
-      "shadow_write_unavailable",
-      error instanceof Error ? error.message : "shadow write unavailable",
-      { operation_id: request.operation_id },
-    );
-  }
+/** Retired observation writes must never mix into a transaction-bound lineage. */
+export async function commitCoordinationRuntimeShadow(_value: unknown, _dependencies: RuntimeShadowDependencies = {}): Promise<JsonObject> {
+  return { schema_version: COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA, status: "failed",
+    reason_code: "legacy_lineage_read_only", primary_writeback_preserved: true, decision_read_from_shadow: false };
 }

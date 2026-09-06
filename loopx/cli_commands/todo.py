@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import os
-import stat
-import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from ..control_plane.todos.active_state_editing import atomic_write_state_text as _atomic_write_text
 from ..control_plane.todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     normalize_todo_continuation_policy,
@@ -14,12 +12,6 @@ from ..control_plane.todos.contract import (
     replan_successor_semantic_binding,
 )
 from ..control_plane.capability_hooks import PostWritebackHookRegistration
-from ..control_plane.coordination.runtime_shadow import (
-    build_todo_runtime_shadow_projection,
-    dispatch_coordination_runtime_shadow,
-    load_task_lease_runtime_shadow_records,
-    resolve_coordination_runtime_shadow_config,
-)
 from ..control_plane.coordination.local_authority import (
     read_canonical_todos_if_promoted,
 )
@@ -32,10 +24,12 @@ from ..control_plane.todos.markdown import render_todo_markdown
 from ..control_plane.todos.machine_section_projection import (
     render_canonical_todo_sections,
 )
-from ..file_lock import exclusive_file_lock
+from ..file_lock import exclusive_cross_runtime_file_lock as exclusive_file_lock
+from ..control_plane.coordination.shadow_management import require_shadow_primary_write_allowed
+from ..control_plane.coordination.legacy_writer_fence import require_registry_source_write_allowed
 from ..history import load_index, load_registry
 from ..paths import resolve_runtime_root
-from ..registry import find_registry_goal, registry_goals
+from ..registry import registry_goals
 from ..control_plane.work_items.semantic_replan_writeback import (
     qualify_replan_writeback,
 )
@@ -70,7 +64,6 @@ from .todo_argument_validation import (
 )
 from .todo_event import (
     RolloutEventAppender,
-    TODO_EVENT_KINDS,
     append_todo_rollout_event,
     todo_error_payload,
 )
@@ -86,36 +79,6 @@ from ..control_plane.turn_driver.journal_store import (
 )
 
 
-def _fsync_parent_directory(path: Path) -> None:
-    if os.name != "posix":  # pragma: no cover - Windows has no directory fsync
-        return
-    descriptor = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Durably replace a projection without changing the state-file mode."""
-
-    original_mode = stat.S_IMODE(path.stat().st_mode)
-    descriptor, temporary = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
-    )
-    temporary_path = Path(temporary)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
-            os.chmod(temporary_path, original_mode)
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-        _fsync_parent_directory(path)
-    finally:
-        temporary_path.unlink(missing_ok=True)
-
-
 def _read_text_exact(path: Path) -> str:
     """Decode UTF-8 while preserving every source newline sequence."""
 
@@ -127,87 +90,6 @@ PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
 ]
-
-
-def _mirror_committed_todo_runtime_shadow(
-    payload: dict[str, object],
-    *,
-    args: argparse.Namespace,
-    registry_path: Path,
-    runtime_root_arg: str | None,
-) -> dict[str, object] | None:
-    """Mirror an actual Todo write only after the legacy write has committed."""
-
-    if not payload.get("ok") or payload.get("dry_run"):
-        return None
-    changed = bool(payload.get("changed")) or any(
-        bool(payload.get(field))
-        for field in ("added", "metadata_updated", "status_changed")
-    )
-    if not changed:
-        return None
-
-    try:
-        registry = load_registry(registry_path)
-        goal = find_registry_goal(registry, args.goal_id)
-        shadow_enabled = resolve_coordination_runtime_shadow_config(goal).enabled
-    except Exception:
-        # The optional observer cannot turn a committed canonical mutation into
-        # a failed command while the feature remains absent or unreadable.
-        return None
-    if not shadow_enabled:
-        return None
-
-    rollout_event = payload.get("rollout_event")
-    event_id = (
-        str(rollout_event.get("event_id") or "").strip()
-        if isinstance(rollout_event, dict)
-        else ""
-    )
-    source_version = str(payload.get("updated_at") or "").strip()
-    if not event_id or not source_version:
-        return {
-            "schema_version": "loopx_coordination_runtime_shadow_dispatch_v0",
-            "status": "failed",
-            "reason_code": "canonical_mutation_identity_missing",
-            "primary_writeback_preserved": True,
-            "decision_read_from_shadow": False,
-        }
-
-    runtime_root = resolve_runtime_root(registry, runtime_root_arg)
-    try:
-        todo_projection = list_goal_todos(
-            registry_path=registry_path,
-            goal_id=args.goal_id,
-            **_todo_path_args(args),
-            runtime_root_arg=runtime_root_arg,
-        )
-        projection = build_todo_runtime_shadow_projection(
-            goal_id=args.goal_id,
-            todos=todo_projection.get("todos"),
-            leases=load_task_lease_runtime_shadow_records(
-                runtime_root=runtime_root,
-                goal_id=args.goal_id,
-            ),
-        )
-    except Exception as exc:
-        return {
-            "schema_version": "loopx_coordination_runtime_shadow_dispatch_v0",
-            "status": "failed",
-            "reason_code": "shadow_projection_unavailable",
-            "reason": str(exc),
-            "primary_writeback_preserved": True,
-            "decision_read_from_shadow": False,
-        }
-    return dispatch_coordination_runtime_shadow(
-        goal=goal,
-        runtime_root=runtime_root,
-        goal_id=args.goal_id,
-        operation_id=f"todo-shadow:{event_id}",
-        event_kind=TODO_EVENT_KINDS.get(args.todo_command, "todo_update"),
-        source_version=source_version,
-        projection=projection,
-    )
 
 
 def _completion_settlement_requirement(
@@ -380,7 +262,7 @@ def handle_todo_command(
             validate_todo_project_markdown_options(args)
             registry = load_registry(registry_path)
             authority_read = read_canonical_todos_if_promoted(
-                runtime_root=resolve_runtime_root(registry, runtime_root_arg),
+                runtime_root=resolve_runtime_root(registry, runtime_root_arg, registry_path=registry_path),
                 goal_id=args.goal_id,
             )
             if not isinstance(authority_read, dict):
@@ -409,6 +291,15 @@ def handle_todo_command(
                     provider_revision=args.provider_revision,
                 )
                 if args.execute and projection.changed:
+                    require_registry_source_write_allowed(
+                        registry_path=registry_path,
+                        runtime_root=resolve_runtime_root(registry, runtime_root_arg, registry_path=registry_path),
+                        goal_id=args.goal_id,
+                        state_file=state_path,
+                    )
+                    require_shadow_primary_write_allowed(
+                        resolve_runtime_root(registry, runtime_root_arg, registry_path=registry_path), args.goal_id,
+                    )
                     _atomic_write_text(state_path, projection.markdown)
                     if _read_text_exact(state_path) != projection.markdown:
                         raise RuntimeError("Todo Markdown projection readback mismatch")
@@ -775,14 +666,7 @@ def handle_todo_command(
         runtime_root_arg=runtime_root_arg,
         append_cli_rollout_event=append_cli_rollout_event,
     )
-    runtime_shadow = _mirror_committed_todo_runtime_shadow(
-        payload,
-        args=args,
-        registry_path=registry_path,
-        runtime_root_arg=runtime_root_arg,
-    )
-    if runtime_shadow is not None:
-        payload["coordination_runtime_shadow"] = runtime_shadow
+
     if (
         args.todo_command == "complete"
         and getattr(args, "turn_instance_id", None)

@@ -119,6 +119,7 @@ from .control_plane.todos.write_policy import (
     resolve_user_gate_global_gate_update,
 )
 from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
+from .control_plane.todos.active_state_editing import atomic_write_state_text
 from .control_plane.coordination.local_authority import (
     canonical_todo_summary_fields,
     claim_canonical_todo_if_promoted,
@@ -134,6 +135,7 @@ from .control_plane.todos.handoff_mode import (
 )
 from .control_plane.coordination.local_authority_shadow_adapter import effective_runtime_root
 from .control_plane.coordination.runtime_shadow_writer_adapter import (
+    require_runtime_shadow_capture_prepared,
     begin_todo_runtime_shadow_capture,
     settle_todo_runtime_shadow_capture,
 )
@@ -969,7 +971,8 @@ def add_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
+            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
+            atomic_write_state_text(resolved_state_file, new_text)
             shadow_capture.committed()
 
     payload = {
@@ -1538,7 +1541,8 @@ def update_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
+            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
+            atomic_write_state_text(resolved_state_file, new_text)
             shadow_capture.committed()
     write_class = "todo_claim" if claim_only else "todo_update"
     payload = {
@@ -1778,6 +1782,8 @@ def complete_goal_todo(
                 event_result = complete_event_projected_goal_todo(
                     goal_id=goal_id,
                     context=event_context,
+                    runtime_root=shadow_runtime_root,
+                    primary_lock_held=True,
                     evidence=evidence,
                     completion_turn_key=completion_turn_key,
                     completion_identity_source=completion_identity_source,
@@ -1953,7 +1959,8 @@ def complete_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
+            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
+            atomic_write_state_text(resolved_state_file, new_text)
             shadow_capture.committed()
         release_verified_task_lease_fence(
             task_lease_fence,
@@ -2188,7 +2195,8 @@ def supersede_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
+            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
+            atomic_write_state_text(resolved_state_file, new_text)
             shadow_capture.committed()
         release_verified_task_lease_fence(task_lease_fence, committed=changed and not dry_run)
     result = {
@@ -2259,7 +2267,8 @@ def archive_completed_todos(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
+            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
+            atomic_write_state_text(resolved_state_file, new_text)
             shadow_capture.committed()
 
     result = {

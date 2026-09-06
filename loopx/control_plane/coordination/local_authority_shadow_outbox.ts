@@ -5,6 +5,9 @@ import { join, resolve } from "node:path";
 import type { JsonObject } from "../effect_program.ts";
 import { durableWriteJson } from "../effect_runtime_io.ts";
 import { authorityUnicodeCompare, canonicalAuthorityBytes } from "./authority_store_codec.ts";
+import { requireShadowCaptureBinding, ShadowManagementError } from "./shadow_management.ts";
+import { outboxEntryIdentity, OUTBOX_ENTRY_FILE_PATTERN } from "./local_authority_shadow_identity.ts";
+import { readProvenShadowSequence } from "./local_authority_shadow.ts";
 import {
   LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
   LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA,
@@ -17,19 +20,19 @@ import {
  *
  * The task-lease writers already hold the goal's lease lock when they persist
  * a record; this module lets them append a two-phase outbox entry for exactly
- * that partition inside the same lock. It never touches the candidate store,
- * never blocks, and never throws into the lease write: every failure is
- * returned on the capture object so the writer can attach typed evidence.
+ * that partition inside the same lock. Missing cursor recovery reads validated
+ * candidate history without taking M. Preparation failures are returned to the
+ * primary owner, which enforces the active capture obligation before writing.
  */
 
 export {
+  outboxEntryIdentity,
   LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
   LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA,
   LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA,
   LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA,
 };
 export const LEASE_PARTITION = "leases";
-const ENTRY_FILE = /^(\d{10})-(local-shadow-tx-[0-9a-f]{64})\.(prepared|committed)\.json$/u;
 const LEASE_FILE = /^[A-Za-z0-9_.-]+\.json$/u;
 const LEASE_SOURCE_FIELDS = ["todo_id", "version", "lease_epoch", "status", "updated_at"] as const;
 
@@ -66,24 +69,6 @@ export function leaseRecordDigest(record: JsonObject): string {
   return sha256Digest(`${JSON.stringify(record, null, 2)}\n`);
 }
 
-/** Must stay byte-compatible with the Python `entry_identity` derivation. */
-export function outboxEntryIdentity(
-  goalId: string,
-  partition: string,
-  seq: number,
-  sourceRef: string,
-): string {
-  const digest = createHash("sha256")
-    .update(canonicalAuthorityBytes({
-      goal_id: goalId,
-      partition,
-      seq,
-      source_ref: sourceRef,
-    }))
-    .digest("hex");
-  return `local-shadow-tx-${digest}`;
-}
-
 export function outboxPartitionDirectory(
   runtimeRoot: string,
   goalId: string,
@@ -100,34 +85,85 @@ function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
 }
 
-async function nextSeq(directory: string): Promise<number> {
+const CURSOR_FIELDS = [
+  "schema_version", "partition", "last_seq", "last_entry_id", "last_partition_digest",
+  "last_cursor", "last_provider_revision", "updated_at",
+] as const;
+export const MAX_OUTBOX_SEQUENCE = 9_999_999_999;
+
+export class OutboxCursorError extends Error {
+  readonly code: "outbox_file_invalid" | "outbox_file_unavailable";
+  constructor(code: "outbox_file_invalid" | "outbox_file_unavailable") {
+    super(code === "outbox_file_invalid" ? "drain cursor binding is invalid" : "drain cursor cannot be read");
+    this.code = code;
+  }
+}
+
+export async function readOutboxCursor(directory: string, partition: string): Promise<JsonObject | null> {
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFile(join(directory, "drain-cursor.json"));
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw new OutboxCursorError("outbox_file_unavailable");
+  }
+  try {
+    return decodeOutboxCursor(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), partition);
+  } catch {
+    throw new OutboxCursorError("outbox_file_invalid");
+  }
+}
+
+/** Shared wire validation; even a valid cursor still needs an exact receipt. */
+export function decodeOutboxCursor(value: unknown, partition: string): JsonObject {
+  const invalid = (): Error => new OutboxCursorError("outbox_file_invalid");
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw invalid();
+  const record = value as JsonObject;
+  if (Object.keys(record).length !== CURSOR_FIELDS.length ||
+      CURSOR_FIELDS.some((key) => !Object.hasOwn(record, key))) throw invalid();
+  if (record.schema_version !== LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA ||
+      !["todos", "leases"].includes(partition) || record.partition !== partition ||
+      typeof record.last_seq !== "number" || !Number.isInteger(record.last_seq) ||
+      record.last_seq < 1 || record.last_seq > MAX_OUTBOX_SEQUENCE ||
+      typeof record.last_entry_id !== "string" ||
+      !/^local-shadow-tx-[0-9a-f]{64}$/u.test(record.last_entry_id) ||
+      (record.last_partition_digest !== null &&
+       (typeof record.last_partition_digest !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(record.last_partition_digest))) ||
+      [record.last_cursor, record.last_provider_revision].some((part) => typeof part !== "string" || part.trim().length === 0)) {
+    throw invalid();
+  }
+  const timestamp = record.updated_at;
+  if (typeof timestamp !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$/u.test(timestamp)) throw invalid();
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime()) || parsed.getUTCFullYear() < 1 ||
+      parsed.toISOString().slice(0, 19) !== timestamp.slice(0, 19)) throw invalid();
+  return record;
+}
+
+async function nextSeq(directory: string, runtimeRoot: string, goalId: string, lineageId: string): Promise<number> {
   let highest = 0;
   try {
     for (const name of await readdir(directory)) {
-      const match = ENTRY_FILE.exec(name);
+      const match = OUTBOX_ENTRY_FILE_PATTERN.exec(name);
       if (match !== null) highest = Math.max(highest, Number(match[1]));
     }
   } catch (error) {
     if (!isMissing(error)) throw error;
   }
-  try {
-    const raw: unknown = JSON.parse(await readFile(join(directory, "drain-cursor.json"), "utf8"));
-    if (raw !== null && typeof raw === "object") {
-      const lastSeq = (raw as Record<string, unknown>).last_seq;
-      if (typeof lastSeq === "number" && Number.isSafeInteger(lastSeq)) {
-        highest = Math.max(highest, lastSeq);
-      }
-    }
-  } catch (error) {
-    if (!isMissing(error)) throw error;
-  }
+  const cursor = await readOutboxCursor(directory, LEASE_PARTITION);
+  const proved = cursor === null
+    ? await readProvenShadowSequence(runtimeRoot, goalId, LEASE_PARTITION, lineageId)
+    : cursor.last_seq as number;
+  highest = Math.max(highest, proved);
+  if (highest >= MAX_OUTBOX_SEQUENCE) throw new Error("outbox sequence exhausted");
   return highest + 1;
 }
 
 async function readLeasePartition(
   leaseDirectory: string,
   plannedStem: string,
-  plannedLease: JsonObject,
+  plannedLease: JsonObject | null,
 ): Promise<JsonObject[]> {
   const records = new Map<string, JsonObject>();
   let names: string[] = [];
@@ -145,7 +181,7 @@ async function readLeasePartition(
       records.set(stem, raw as JsonObject);
     }
   }
-  records.set(plannedStem, plannedLease);
+  if (plannedLease !== null) records.set(plannedStem, plannedLease);
   const stems = [...records.keys()];
   stems.sort(authorityUnicodeCompare);
   return stems.map((stem) => ({ file_stem: stem, record: records.get(stem) as JsonObject }));
@@ -179,6 +215,7 @@ export interface LeaseOutboxCapture {
   seq: number | null;
   source_bytes_digest: string | null;
   failure: { reason_code: string; error_class: string } | null;
+  skipped_reason?: string;
   /** Write the committed marker after the lease record landed. Never throws. */
   commit(): Promise<void>;
 }
@@ -194,8 +231,8 @@ function failureOf(reasonCode: string, error: unknown): { reason_code: string; e
  * Record a prepared lease-partition entry for the record about to be written.
  *
  * Call inside the lease lock, right before `atomicWriteJson(leasePath, planned)`;
- * call `commit()` right after it returns. A returned failure never blocks the
- * primary write.
+ * call `commit()` right after it returns. The primary owner must reject an
+ * active mutation when preparation returns a failure.
  */
 export async function beginLeaseOutboxEntry(
   input: LeaseOutboxCaptureInput,
@@ -215,16 +252,34 @@ export async function beginLeaseOutboxEntry(
   }
   const directory = outboxPartitionDirectory(input.runtime_root, input.goal_id, LEASE_PARTITION);
   try {
+    const binding = await requireShadowCaptureBinding(input.runtime_root, input.goal_id);
+    if (input.previous_lease !== null &&
+        canonicalAuthorityBytes(input.previous_lease).equals(canonicalAuthorityBytes(input.planned_lease))) {
+      return { ...inert, skipped_reason: "partition_unchanged" };
+    }
     const projection = { leases: await readLeasePartition(input.lease_directory, plannedStem, input.planned_lease) };
+    const previousRecords = await readLeasePartition(input.lease_directory, plannedStem, input.previous_lease);
+    for (const item of [...previousRecords, ...projection.leases]) {
+      const record = item.record as JsonObject;
+      if (record.goal_id !== input.goal_id || record.todo_id !== item.file_stem) {
+        throw new Error("lease source identity does not match its partition");
+      }
+    }
+    const previousPartitionDigest = sha256Digest(canonicalAuthorityBytes({
+      leases: previousRecords.map((item) => item.record),
+    }));
     const bytesDigest = leaseRecordDigest(input.planned_lease);
-    const seq = await nextSeq(directory);
-    const entryId = outboxEntryIdentity(input.goal_id, LEASE_PARTITION, seq, bytesDigest);
+    const seq = await nextSeq(directory, input.runtime_root, input.goal_id, binding.capture_lineage_id);
+    const sourceRootDigest = sha256Digest(resolve(input.runtime_root));
+    const entryId = outboxEntryIdentity(input.goal_id, LEASE_PARTITION, seq, bytesDigest,
+      binding.capture_lineage_id, sourceRootDigest);
     const entry: JsonObject = {
       schema_version: LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA,
       goal_id: input.goal_id,
       partition: LEASE_PARTITION,
       seq,
       entry_id: entryId,
+      capture_lineage_id: binding.capture_lineage_id,
       writer: {
         runtime: "typescript",
         write_class: input.write_class,
@@ -232,6 +287,7 @@ export async function beginLeaseOutboxEntry(
       },
       source: {
         kind: "task_lease_record",
+        previous_partition_digest: previousPartitionDigest,
         previous_bytes_digest: input.previous_lease === null
           ? null
           : leaseRecordDigest(input.previous_lease),
@@ -240,7 +296,7 @@ export async function beginLeaseOutboxEntry(
         previous_lease: leaseSourceFacts(input.previous_lease),
         event_id: null,
       },
-      source_root_digest: sha256Digest(resolve(input.runtime_root)),
+      source_root_digest: sourceRootDigest,
       projection,
       partition_digest: null,
       prepared_at: new Date().toISOString(),
@@ -261,6 +317,7 @@ export async function beginLeaseOutboxEntry(
             {
               schema_version: LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA,
               entry_id: entryId,
+              capture_lineage_id: binding.capture_lineage_id,
               committed_at: new Date().toISOString(),
             },
           );
@@ -271,6 +328,9 @@ export async function beginLeaseOutboxEntry(
     };
     return capture;
   } catch (error) {
+    if (error instanceof ShadowManagementError && error.code === "bootstrap_required") {
+      return { ...inert, skipped_reason: "bootstrap_required" };
+    }
     return { ...inert, failure: failureOf("outbox_prepare_failed", error) };
   }
 }

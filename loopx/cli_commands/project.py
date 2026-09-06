@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from ..control_plane.coordination.legacy_writer_fence import LegacyCoordinationWriterFenced
+from ..control_plane.coordination.shadow_management import ShadowManagementError
+
 import argparse
 from collections.abc import Callable
 from pathlib import Path
@@ -138,12 +141,13 @@ def handle_project_command(
                 repository=args.repository,
                 external_locator=args.external_locator,
             )
-    except (OSError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError, LegacyCoordinationWriterFenced, ShadowManagementError) as exc:
         payload = {
             "ok": False,
             "changed": False,
             "registry": str(registry_path),
             "error": str(exc),
+            **({"error_code": exc.code, **exc.payload} if isinstance(exc, (LegacyCoordinationWriterFenced, ShadowManagementError)) else {}),
         }
     payload.setdefault("registry", str(registry_path))
     print_payload(payload, output_format(args), render_project_command_markdown)

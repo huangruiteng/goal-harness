@@ -211,6 +211,7 @@ def handle_registry_lifecycle_command(
                 "dry_run": not bool(args.execute),
                 "archived": False,
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
         print_payload(payload, args.format, render_archive_runtime_markdown)
         return 0 if payload.get("ok") else 1
@@ -233,6 +234,7 @@ def handle_registry_lifecycle_command(
                 "wrote": False,
                 "backup_written": False,
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
         print_payload(payload, args.format, render_global_goal_retirement_markdown)
         return 0 if payload.get("ok") else 1
@@ -258,6 +260,7 @@ def handle_registry_lifecycle_command(
                 "wrote_local_registry": False,
                 "wrote_global_registry": False,
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
         print_payload(payload, args.format, render_project_uninstall_markdown)
         return 0 if payload.get("ok") else 1
@@ -281,6 +284,7 @@ def handle_registry_lifecycle_command(
                 "global_registry": str(global_registry_path(runtime_root)),
                 "dry_run": bool(args.dry_run),
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
         print_payload(payload, args.format, render_global_sync_markdown)
         return 0 if payload.get("ok") else 1
@@ -343,6 +347,7 @@ def handle_registry_lifecycle_command(
                 "target_runtime_root": args.target_runtime_root or args.runtime_root or str(DEFAULT_RUNTIME_ROOT),
                 "selected_goal_ids": args.goal_id or ([] if not getattr(args, "all_goals", False) else ["<all-goals>"]),
                 "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             }
         print_payload(payload, args.format, render_state_migration_markdown)
         return 0 if payload.get("ok") else 1

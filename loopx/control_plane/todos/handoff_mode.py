@@ -421,6 +421,13 @@ def set_goal_handoff_mode(
         runtime_root_from_registry,
         task_lease_lock_path,
     )
+    from ..coordination.legacy_writer_fence import legacy_todo_write_transaction
+    from ..coordination.runtime_shadow_writer_adapter import (
+        require_runtime_shadow_capture_prepared,
+    begin_todo_runtime_shadow_capture,
+        settle_todo_runtime_shadow_capture,
+    )
+    from .active_state_editing import atomic_write_state_text
 
     requested = normalize_handoff_mode(mode)
     if not str(mode or "").strip():
@@ -437,7 +444,10 @@ def set_goal_handoff_mode(
     # One effective runtime root for the lease lock, the quiescence scan, and
     # the post-commit observation of this call.
     runtime_root = runtime_root_from_registry(registry_path, runtime_root_arg)
-    with exclusive_file_lock(resolved_state_file, operation="handoff_mode_set"):
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, None, "handoff_mode_set",
+        False, runtime_root=runtime_root,
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
         previous, previous_mode_fields = _previous_handoff_mode_fields(
             parse_state_frontmatter(original).get(HANDOFF_MODE_FRONTMATTER_KEY)
@@ -454,6 +464,11 @@ def set_goal_handoff_mode(
         if previous == requested:
             payload["changed"] = False
             return payload
+        capture = begin_todo_runtime_shadow_capture(
+            registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
+            state_path=resolved_state_file, write_class="handoff_mode_set",
+            original_text=original,
+        )
         lease_lock = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
         with exclusive_file_lock(lease_lock, operation="handoff_mode_set"):
             claimed, leases = _quiescence_offenders(
@@ -518,11 +533,12 @@ def set_goal_handoff_mode(
             lines = original.splitlines()
             _write_handoff_mode_frontmatter(lines, requested)
             new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-            resolved_state_file.write_text(new_text, encoding="utf-8")
+            capture.prepare(new_text)
+            require_runtime_shadow_capture_prepared(capture, runtime_root=runtime_root, goal_id=goal_id)
+            atomic_write_state_text(resolved_state_file, new_text)
+            capture.committed()
     payload["changed"] = True
-    from ..coordination.local_authority_shadow_adapter import (
-        observe_local_authority_commit,
-    )
+    from ..coordination.local_authority_shadow_observation import observe_local_authority_commit
 
     evidence = observe_local_authority_commit(
         registry_path=registry_path,
@@ -532,4 +548,8 @@ def set_goal_handoff_mode(
     )
     if evidence is not None:
         payload["authority_shadow"] = evidence
-    return payload
+    return settle_todo_runtime_shadow_capture(
+        payload, registry_path=registry_path, runtime_root=runtime_root,
+        goal_id=goal_id, write_class="handoff_mode_set", capture=capture,
+        observe_legacy=False, emit_disabled=False,
+    )

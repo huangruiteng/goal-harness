@@ -54,9 +54,7 @@ def _attach_local_authority_shadow(
             str(lease.get("updated_at") or lease.get("released_at") or "unknown"),
         )
     )
-    from ..coordination.local_authority_shadow_adapter import (
-        observe_local_authority_commit,
-    )
+    from ..coordination.local_authority_shadow_observation import observe_local_authority_commit
 
     evidence = observe_local_authority_commit(
         registry_path=registry_path,

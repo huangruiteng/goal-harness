@@ -972,6 +972,7 @@ def handle_turn_command(
             ),
             "mode": "run_once" if args.turn_command == "run-once" else "plan",
             "error": str(exc),
+            **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
             "effects": {
                 "host_invoked": False,
                 "state_written": False,

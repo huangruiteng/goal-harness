@@ -67,7 +67,9 @@ from .control_plane.runtime.runtime_projection_route import (
     resolve_runtime_projection_route,
 )
 from .feedback import validate_local_control_text, validate_public_safe_text
-from .file_lock import exclusive_file_lock
+from .file_lock import exclusive_file_lock, exclusive_cross_runtime_file_lock
+from .control_plane.coordination.runtime_shadow_writer_adapter import require_prose_state_write_allowed
+from .control_plane.todos.active_state_editing import atomic_write_state_text
 from .global_registry import sync_project_registry_to_global
 from .history import (
     load_index,
@@ -862,7 +864,7 @@ def refresh_state_run(
             "blocked outcome_gap settlement"
         )
     registry = load_registry(registry_path)
-    runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    runtime_root = resolve_runtime_root(registry, runtime_root_override, registry_path=registry_path)
     settlement_identity = None
     settlement_result = None
     delivery_workspace_causality = None
@@ -1053,7 +1055,7 @@ def refresh_state_run(
     generated_at = now_local()
     active_state_next_action_update: dict[str, Any] | None = None
     if normalized_next_action:
-        with exclusive_file_lock(resolved_state_file):
+        with exclusive_cross_runtime_file_lock(resolved_state_file):
             locked_state_text = resolved_state_file.read_text(encoding="utf-8")
             expected_write_state_text = locked_state_text
             updated_state_text, state_updated = replace_next_action_section(
@@ -1218,14 +1220,19 @@ def refresh_state_run(
         and active_state_next_action_update.get("would_update")
         and not dry_run
     ):
-        with exclusive_file_lock(resolved_state_file):
+        with exclusive_cross_runtime_file_lock(resolved_state_file):
             current_state_text = resolved_state_file.read_text(encoding="utf-8")
             if current_state_text != expected_write_state_text:
                 raise ValueError(
                     "active goal state changed while refresh-state was qualifying "
                     "its semantic writeback; retry from the current state"
                 )
-            resolved_state_file.write_text(state_text, encoding="utf-8")
+            require_prose_state_write_allowed(
+                registry_path=registry_path, runtime_root=runtime_root,
+                goal_id=safe_goal_id, state_path=resolved_state_file,
+                original_text=current_state_text, planned_text=state_text,
+            )
+            atomic_write_state_text(resolved_state_file, state_text)
     record = build_state_refresh_record(
         goal_id=safe_goal_id,
         state_file=resolved_state_file,
