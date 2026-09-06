@@ -1421,6 +1421,19 @@ projection-plus-receipt commit, CAS contention, historical receipt replay,
 operation fencing, ordered cursor scans, isolation of returned values, and
 pre-write rejection of malformed JSON.
 
+Promoted `hard_lease` authority also supports one optional ownership
+transaction through the existing Todo-claim caller contract. When the caller
+supplies a task-lease idempotency key and optional expected version, the
+TypeScript owner reads the canonical Todo and its required write scopes,
+reuses the typed lease-acquire decision, and commits the lease, claim, and
+receipt under one provider CAS. Omitting those fields preserves the existing
+claim behavior, and an unpromoted goal rejects the atomic-only options rather
+than attempting a legacy write. File, NoKV, and real PostgreSQL conformance
+includes competing-owner coverage: exactly one complete claim-plus-lease
+tuple wins, the loser receives no receipt, and the winner replays by its exact
+operation identity. This is a cohesive promotion of the existing contract,
+not a second `claim_work` abstraction.
+
 The PostgreSQL adapter also applies one provider-local resource guard before it
 opens a connection: a commit whose canonical envelope exceeds the configured
 `max_commit_bytes` is rejected as typed `store_capacity_exhausted`. The default
@@ -1917,6 +1930,25 @@ it does not promote any provider or complete the Stage 2C promotion.
 - distributed quota reservation/accounting;
 - provider promotion, authentication, service recovery, HA, and multi-tenancy;
 - receipt retention or segmentation beyond `retain_all_v0`.
+
+#### TypeScript-first burden-reduction order
+
+Prefer preparatory TypeScript work when it removes authority that the next
+shared-authority stage would otherwise have to migrate under provider pressure.
+The order is deliberately narrow:
+
+1. characterize the caller-observable Python behavior and illegal transitions;
+2. move one already-shipped ownership transaction at a time into the existing
+   TypeScript boundary, starting with atomic claim-plus-lease, followed by
+   completion-plus-successor and the remaining lease lifecycle decisions;
+3. qualify that exact transaction against file, NoKV, and a real isolated
+   PostgreSQL server before changing provider selection;
+4. only then advance binding, migration, canary, and production promotion.
+
+This is not permission for a broad framework rewrite. A preparatory refactor
+belongs in this sequence only when the next RFC stage consumes it directly, it
+removes duplicate decision authority, and caller-visible parity plus rollback
+remain reviewable in the same bounded slice.
 
 ## 12. What the Owner Still Needs to Decide
 

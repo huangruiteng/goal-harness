@@ -39,6 +39,7 @@ function todoClaimProjection(goalId: string, native: boolean): Record<string, un
     archive_state: "active",
     source_section: "Agent Todo",
     note: "preserve complete canonical record",
+    required_write_scopes: ["loopx/control_plane/**"],
   }];
   if (native) {
     todos[0]!.schema_version = TODO_DOMAIN_ITEM_SCHEMA;
@@ -435,6 +436,132 @@ export function registerAuthorityStoreConformance(
         assert.equal((await editCoordinationTodo(store, {...request, ...invalid})).status, "failed");
       }
       assert.deepEqual(await store.loadAuthority(), afterRace);
+    });
+    test(`${providerName} conformance: Todo claim atomically acquires canonical ownership (${native ? "native" : "v0"})`, async (t) => {
+      const {store} = await factory(t);
+      const goalId = "goal-atomic-ownership";
+      const projection = {
+        ...todoClaimProjection(goalId, native),
+        handoff_mode: "hard_lease",
+      };
+      assert.equal((await store.commitAuthority({
+        expected_provider_revision: null,
+        operation_id: "seed-atomic-ownership",
+        events: [],
+        receipts: [],
+        next_projection: projection,
+      })).status, "applied");
+      const request = {
+        goal_id: goalId,
+        todo_id: "todo-claim",
+        claimed_by: "agent-a",
+        actor_agent_id: "agent-a",
+        expected_role: "agent",
+        registered_agents: ["agent-a", "agent-b"],
+        operation_id: "claim-and-acquire",
+        lease_request: {
+          idempotency_key: "turn:atomic-ownership",
+          expected_version: 0,
+          ttl_seconds: 2_700,
+        },
+        dry_run: false,
+        now: new Date("2026-09-05T04:30:00Z"),
+      };
+      const preview = await executeCoordinationTodoClaim(store, {...request, dry_run: true});
+      assert.equal(preview.status, "planned");
+      assert.equal(preview.todo_changed, true);
+      assert.equal(preview.lease_changed, true);
+      assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+
+      const applied = await executeCoordinationTodoClaim(store, request);
+      assert.equal(applied.status, "applied", JSON.stringify(applied));
+      assert.equal(applied.todo_changed, true);
+      assert.equal(applied.lease_changed, true);
+      const loaded = await store.loadAuthority();
+      assert.equal(loaded.status, "loaded");
+      if (loaded.status !== "loaded") return;
+      const claimedTodo = (loaded.head.todos as Record<string, unknown>[])[0]!;
+      const lease = (loaded.head.leases as Record<string, unknown>[])[0]!;
+      assert.equal(claimedTodo.claimed_by, "agent-a");
+      assert.equal(lease.owner, "agent-a");
+      assert.equal(lease.idempotency_key, "turn:atomic-ownership");
+      assert.deepEqual(lease.write_scopes, ["loopx/control_plane/**"]);
+      assert.equal((await executeCoordinationTodoClaim(store, request)).status, "replayed");
+
+      const idempotent = await executeCoordinationTodoClaim(store, {
+        ...request,
+        operation_id: "claim-and-acquire-idempotent",
+        lease_request: {...request.lease_request, expected_version: 1},
+      });
+      assert.equal(idempotent.status, "no_change", JSON.stringify(idempotent));
+      assert.equal(idempotent.todo_changed, false);
+      assert.equal(idempotent.lease_changed, false);
+      assert.equal(idempotent.lease_idempotent, true);
+      const afterIdempotent = await store.loadAuthority();
+      assert.equal(afterIdempotent.status, "loaded");
+      if (afterIdempotent.status !== "loaded") return;
+      assert.deepEqual(afterIdempotent.head, loaded.head);
+      assert.equal((await store.readReceipt("claim-and-acquire-idempotent")).status, "found");
+    });
+    test(`${providerName} conformance: competing ownership transactions cannot split claim and lease (${native ? "native" : "v0"})`, async (t) => {
+      const {store, contender} = await factory(t);
+      const goalId = "goal-competing-ownership";
+      const projection = {
+        ...todoClaimProjection(goalId, native),
+        handoff_mode: "hard_lease",
+      };
+      assert.equal((await store.commitAuthority({
+        expected_provider_revision: null,
+        operation_id: "seed-competing-ownership",
+        events: [],
+        receipts: [],
+        next_projection: projection,
+      })).status, "applied");
+      const request = (owner: "agent-a" | "agent-b") => ({
+        goal_id: goalId,
+        todo_id: "todo-claim",
+        claimed_by: owner,
+        actor_agent_id: owner,
+        expected_role: "agent",
+        registered_agents: ["agent-a", "agent-b"],
+        operation_id: `claim-and-acquire:${owner}`,
+        lease_request: {
+          idempotency_key: `turn:competing-ownership:${owner}`,
+          expected_version: 0,
+          ttl_seconds: 2_700,
+        },
+        dry_run: false,
+        now: new Date("2026-09-05T04:30:00Z"),
+      });
+
+      const results = await Promise.all([
+        executeCoordinationTodoClaim(store, request("agent-a")),
+        executeCoordinationTodoClaim(contender, request("agent-b")),
+      ]);
+      assert.deepEqual(
+        results.map((result) => result.status).sort(),
+        ["applied", "conflict"],
+      );
+      const winnerIndex = results.findIndex((result) => result.status === "applied");
+      assert.notEqual(winnerIndex, -1);
+      const winner = winnerIndex === 0 ? "agent-a" : "agent-b";
+      const loser = winner === "agent-a" ? "agent-b" : "agent-a";
+      const loaded = await store.loadAuthority();
+      assert.equal(loaded.status, "loaded");
+      if (loaded.status !== "loaded") return;
+      const claimedTodo = (loaded.head.todos as Record<string, unknown>[])[0]!;
+      const leases = loaded.head.leases as Record<string, unknown>[];
+      assert.equal(claimedTodo.claimed_by, winner);
+      assert.equal(leases.length, 1);
+      assert.equal(leases[0]!.owner, winner);
+      assert.equal(leases[0]!.idempotency_key, `turn:competing-ownership:${winner}`);
+      assert.equal((await store.readReceipt(`claim-and-acquire:${winner}`)).status, "found");
+      assert.equal((await store.readReceipt(`claim-and-acquire:${loser}`)).status, "missing");
+      assert.equal((await executeCoordinationTodoClaim(store, request(winner))).status, "replayed");
+      const rejected = await executeCoordinationTodoClaim(store, request(loser));
+      assert.equal(rejected.status, "failed");
+      assert.equal(rejected.reason_code, "claim_owner_mismatch");
+      assert.deepEqual(await store.loadAuthority(), loaded);
     });
     for (const fault of ["lease_replaced", "lost_response"] as const) {
       test(`${providerName} conformance: hard-lease claim ${fault} (${native ? "native" : "v0"})`, async (t) => {

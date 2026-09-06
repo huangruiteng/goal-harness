@@ -72,6 +72,8 @@ def claim_canonical_todo_if_promoted(
     actor_agent_id: str | None,
     dry_run: bool,
     operation_id: str | None = None,
+    task_lease_idempotency_key: str | None = None,
+    task_lease_expected_version: int | None = None,
 ) -> dict[str, Any] | None:
     """Route a post-cutover claim to the TypeScript transaction owner."""
 
@@ -91,6 +93,15 @@ def claim_canonical_todo_if_promoted(
                 registry_path, goal_id
             ),
             "operation_id": operation_id if operation_id is not None else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}",
+            "lease_request": (
+                {
+                    "idempotency_key": task_lease_idempotency_key,
+                    "expected_version": task_lease_expected_version,
+                    "ttl_seconds": None,
+                }
+                if task_lease_idempotency_key is not None
+                else None
+            ),
             "observed_at": now_local(),
             "dry_run": dry_run,
         },

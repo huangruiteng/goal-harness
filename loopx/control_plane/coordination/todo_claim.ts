@@ -11,7 +11,23 @@ import {
   prepareCoordinationProjectionCommit,
   indexCoordinationProjection,
   validateCoordinationTodoReadModel,
+  type CoordinationProjectionMutation,
 } from "./coordination_projection.ts";
+import {
+  evaluateTaskLeaseAcquireDecision,
+  leaseEpoch,
+  leaseInteger,
+  leaseIsActive,
+  normalizeAgent,
+  normalizeIdempotencyKey,
+  normalizeTtl,
+  normalizeWriteScopes,
+  ownerRejection,
+  TASK_LEASE_SCHEMA_VERSION,
+  utcIsoformat,
+  type LeaseRecord,
+  type TodoFact,
+} from "../work_items/task_lease_acquire.ts";
 
 export const COORDINATION_TODO_CLAIM_RESULT_SCHEMA =
   "loopx_coordination_todo_claim_result_v0";
@@ -28,8 +44,15 @@ export interface CoordinationTodoClaimInput {
   readonly expected_role: string | null;
   readonly registered_agents: readonly string[];
   readonly operation_id: string;
+  readonly lease_request?: CoordinationTodoClaimLeaseRequest | null;
   readonly dry_run: boolean;
   readonly now: Date;
+}
+
+export interface CoordinationTodoClaimLeaseRequest {
+  readonly idempotency_key: string;
+  readonly expected_version: number | null;
+  readonly ttl_seconds: number;
 }
 
 export type CoordinationTodoClaimResult = JsonObject & {
@@ -210,7 +233,61 @@ export function evaluateCoordinationTodoClaimDecision(
   };
 }
 
-function leaseIsActiveForOwner(lease: JsonObject | undefined, owner: string, now: Date): boolean {
+function normalizeLeaseRequest(value: unknown): CoordinationTodoClaimLeaseRequest | null {
+  if (value === undefined || value === null) return null;
+  const request = canonicalAuthorityObject(value, "lease_request");
+  const expectedVersion = request.expected_version;
+  if (expectedVersion !== null && expectedVersion !== undefined &&
+      (!Number.isSafeInteger(expectedVersion) || Number(expectedVersion) < 0)) {
+    throw new AuthorityStoreProtocolError(
+      "lease_request.expected_version must be a non-negative safe integer or null",
+    );
+  }
+  return {
+    idempotency_key: normalizeIdempotencyKey(request.idempotency_key),
+    expected_version: expectedVersion === undefined ? null : expectedVersion as number | null,
+    ttl_seconds: normalizeTtl(request.ttl_seconds),
+  };
+}
+
+function todoLeaseFact(todo: JsonObject): TodoFact {
+  const requiredWriteScopes = todo.required_write_scopes ?? [];
+  if (!Array.isArray(requiredWriteScopes) ||
+      requiredWriteScopes.some((scope) => typeof scope !== "string")) {
+    throw new AuthorityStoreProtocolError(
+      "todo.required_write_scopes must be an array of strings",
+    );
+  }
+  const writeScopes = normalizeWriteScopes(requiredWriteScopes);
+  if (writeScopes.length !== requiredWriteScopes.length) {
+    throw new AuthorityStoreProtocolError(
+      "todo.required_write_scopes contains an invalid or duplicate scope",
+    );
+  }
+  return {
+    todo_id: String(todo.todo_id),
+    status: typeof todo.status === "string" ? todo.status : "",
+    claimed_by: normalizeAgent(todo.claimed_by),
+    excluded_agents: normalizeExcludedAgents(todo.excluded_agents),
+    role: typeof todo.role === "string" ? todo.role : undefined,
+    task_class: typeof todo.task_class === "string" ? todo.task_class : null,
+    bound_agent: normalizeAgent(todo.bound_agent),
+    blocks_agent: normalizeAgent(todo.blocks_agent),
+  };
+}
+
+function leaseDecisionInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new AuthorityStoreProtocolError(`${label} must be a non-negative safe integer`);
+  }
+  return Number(value);
+}
+
+function activeLeaseForOwner(
+  lease: JsonObject | undefined,
+  owner: string,
+  now: Date,
+): boolean {
   if (lease === undefined || lease.status !== "active" ||
       typeof lease.owner !== "string" || typeof lease.expires_at !== "string") return false;
   let leaseOwner: string;
@@ -246,6 +323,7 @@ export async function executeCoordinationTodoClaim(
       actor_agent_id: rawInput.actor_agent_id === null
         ? null : normalizeTodoAgent(rawInput.actor_agent_id, "actor_agent_id"),
       registered_agents: normalizeRegisteredTodoAgents(rawInput.registered_agents),
+      lease_request: normalizeLeaseRequest(rawInput.lease_request),
     };
     if (typeof input.dry_run !== "boolean") {
       throw new AuthorityStoreProtocolError("dry_run must be a boolean");
@@ -259,6 +337,7 @@ export async function executeCoordinationTodoClaim(
       error instanceof Error ? error.message : "invalid Todo claim",
     );
   }
+  const leaseRequest = input.lease_request ?? null;
 
   // Intent identity excludes observation time and current authorization facts.
   // A receipt proves historical acceptance, never a renewed/current lease.
@@ -269,6 +348,7 @@ export async function executeCoordinationTodoClaim(
     actor_agent_id: input.actor_agent_id,
     expected_role: input.expected_role,
     dry_run: input.dry_run,
+    ...(leaseRequest === null ? {} : {lease_request: leaseRequest}),
   });
   const replay = (
     receipt: AuthorityStoreReceiptResult,
@@ -295,6 +375,13 @@ export async function executeCoordinationTodoClaim(
           typeof result.handoff_mode !== "string" ||
           result.mutation_authority === null || typeof result.mutation_authority !== "object") {
         throw new AuthorityStoreProtocolError("original claim result is invalid");
+      }
+      if (leaseRequest !== null) {
+        const lease = canonicalAuthorityObject(result.lease, "original claim lease");
+        if (lease.todo_id !== input.todo_id || lease.owner !== input.claimed_by ||
+            lease.idempotency_key !== leaseRequest.idempotency_key) {
+          throw new AuthorityStoreProtocolError("original claim lease identity is invalid");
+        }
       }
     } catch (error) {
       return failure("invalid_coordination_todo_claim_receipt",
@@ -361,12 +448,128 @@ export async function executeCoordinationTodoClaim(
   if (!["legacy", "soft_claim", "hard_lease"].includes(handoffMode)) {
     return failure("invalid_handoff_mode", "canonical projection has an invalid handoff mode");
   }
-  if (handoffMode === "hard_lease" &&
-      !leaseIsActiveForOwner(projection.leases.get(input.todo_id), authority.owner, input.now)) {
+  if (leaseRequest !== null && handoffMode !== "hard_lease") {
     return failure(
-      "handoff_mode_requires_lease",
-      "hard_lease Todo claim requires an active canonical lease held by the claiming agent",
-      { todo_id: input.todo_id, actor_agent_id: authority.owner },
+      "claim_lease_requires_hard_lease",
+      "atomic Todo claim and lease acquire requires handoff_mode=hard_lease",
+      { todo_id: input.todo_id, handoff_mode: handoffMode },
+    );
+  }
+
+  let lease: JsonObject | null = null;
+  let leaseChanged = false;
+  let leaseIdempotent = false;
+  try {
+    const currentLease = projection.leases.get(input.todo_id);
+    if (handoffMode === "hard_lease" && leaseRequest !== null) {
+      const todoFact = todoLeaseFact(todo);
+      const currentActive = currentLease !== undefined && leaseIsActive(currentLease, input.now);
+      const currentEffective = currentLease !== undefined && currentActive && ownerRejection(
+        todoFact,
+        normalizeAgent(currentLease.owner),
+        input.registered_agents,
+      ) === null;
+      const otherLeases = projection.lease_todo_ids.flatMap((todoId) => {
+        if (todoId === input.todo_id) return [];
+        const candidate = projection.leases.get(todoId)!;
+        const active = leaseIsActive(candidate, input.now);
+        const otherTodo = projection.todos.get(todoId);
+        return [{
+          todo_id: todoId,
+          active,
+          effective: active && otherTodo !== undefined && ownerRejection(
+            todoLeaseFact(otherTodo),
+            normalizeAgent(candidate.owner),
+            input.registered_agents,
+          ) === null,
+          write_scopes: normalizeWriteScopes(candidate.write_scopes),
+        }];
+      });
+      const writeScopes = normalizeWriteScopes(todo.required_write_scopes ?? []);
+      const decision = evaluateTaskLeaseAcquireDecision({
+        handoff_mode: handoffMode,
+        registered_agents: [...input.registered_agents],
+        todo: todoFact,
+        lease: currentLease === undefined ? null : {
+          present: true,
+          active: currentActive,
+          effective: currentEffective,
+          status: typeof currentLease.status === "string" ? currentLease.status : null,
+          owner: normalizeAgent(currentLease.owner),
+          idempotency_key: typeof currentLease.idempotency_key === "string"
+            ? currentLease.idempotency_key : null,
+          version: leaseInteger(currentLease, "version") ?? 0,
+          lease_epoch: leaseEpoch(currentLease),
+          write_scopes: normalizeWriteScopes(currentLease.write_scopes),
+          acquire_ttl_seconds: leaseInteger(currentLease, "acquire_ttl_seconds"),
+        },
+        other_leases: otherLeases,
+        command: {
+          owner: authority.owner,
+          idempotency_key: leaseRequest.idempotency_key,
+          ttl_seconds: leaseRequest.ttl_seconds,
+          write_scopes: writeScopes,
+          expected_version: leaseRequest.expected_version,
+        },
+      });
+      if (decision.outcome === "no_change") {
+        if (currentLease === undefined) {
+          throw new AuthorityStoreProtocolError(
+            "lease acquire replay is missing its canonical lease",
+          );
+        }
+        lease = currentLease;
+        leaseIdempotent = true;
+      } else if (decision.outcome === "apply") {
+        if (decision.next_lease === null) {
+          throw new AuthorityStoreProtocolError("lease acquire apply is missing next_lease");
+        }
+        const acquiredAt = utcIsoformat(input.now);
+        lease = {
+          schema_version: TASK_LEASE_SCHEMA_VERSION,
+          goal_id: input.goal_id,
+          todo_id: input.todo_id,
+          owner: authority.owner,
+          idempotency_key: leaseRequest.idempotency_key,
+          write_scopes: writeScopes,
+          acquire_ttl_seconds: leaseRequest.ttl_seconds,
+          version: leaseDecisionInteger(decision.next_lease.version, "next_lease.version"),
+          lease_epoch: leaseDecisionInteger(
+            decision.next_lease.lease_epoch,
+            "next_lease.lease_epoch",
+          ),
+          acquired_at: acquiredAt,
+          updated_at: acquiredAt,
+          expires_at: utcIsoformat(
+            new Date(input.now.valueOf() + leaseRequest.ttl_seconds * 1_000),
+          ),
+          status: "active",
+        } satisfies LeaseRecord;
+        leaseChanged = true;
+      } else {
+        return failure(
+          decision.code,
+          `canonical task lease acquire rejected the Todo claim: ${decision.code}`,
+          {
+            todo_id: input.todo_id,
+            actor_agent_id: authority.owner,
+            lease_decision: decision,
+          },
+        );
+      }
+    } else if (handoffMode === "hard_lease" &&
+        !activeLeaseForOwner(currentLease, authority.owner, input.now)) {
+      return failure(
+        "handoff_mode_requires_lease",
+        "hard_lease Todo claim requires an active canonical lease held by the claiming agent",
+        { todo_id: input.todo_id, actor_agent_id: authority.owner },
+      );
+    }
+  } catch (error) {
+    return failure(
+      "invalid_coordination_task_lease",
+      error instanceof Error ? error.message : "invalid canonical task lease",
+      {todo_id: input.todo_id},
     );
   }
 
@@ -375,7 +578,8 @@ export async function executeCoordinationTodoClaim(
     "Todo claim mutation authority",
   );
   const updatedAt = input.now.toISOString().replace(/\.\d{3}Z$/u, "Z");
-  const changed = todo.claimed_by !== authority.owner;
+  const todoChanged = todo.claimed_by !== authority.owner;
+  const changed = todoChanged || leaseChanged;
   const result = {
     todo_id: input.todo_id,
     claimed_by: authority.owner,
@@ -383,6 +587,12 @@ export async function executeCoordinationTodoClaim(
     handoff_mode: handoffMode,
     ...(changed ? {updated_at: updatedAt} : {}),
     mutation_authority: mutationAuthority,
+    ...(leaseRequest === null ? {} : {
+      todo_changed: todoChanged,
+      lease_changed: leaseChanged,
+      lease_idempotent: leaseIdempotent,
+      lease,
+    }),
   };
 
   if (input.dry_run) {
@@ -398,13 +608,21 @@ export async function executeCoordinationTodoClaim(
 
   // A successful no-op still consumes its operation identity. Commit only its
   // receipt under the observed head's CAS; never fabricate a Todo mutation.
-  const commit: AuthorityStoreCommit = changed ? prepareCoordinationProjectionCommit({
+  const mutations: CoordinationProjectionMutation[] = [
+    ...(leaseChanged && lease !== null
+      ? [{kind: "lease_upsert" as const, lease}]
+      : []),
+    ...(todoChanged
+      ? [{ kind: "todo_upsert" as const, todo: {...todo,
+        claimed_by: authority.owner, updated_at: updatedAt} }]
+      : []),
+  ];
+  const commit: AuthorityStoreCommit = mutations.length > 0 ? prepareCoordinationProjectionCommit({
     goal_id: input.goal_id,
     operation_id: input.operation_id,
     expected_provider_revision: head.provider_revision,
     projection: head.head,
-    mutations: [{ kind: "todo_upsert", todo: {...todo,
-      claimed_by: authority.owner, updated_at: updatedAt} }],
+    mutations,
   }) : {
     operation_id: input.operation_id,
     expected_provider_revision: head.provider_revision,

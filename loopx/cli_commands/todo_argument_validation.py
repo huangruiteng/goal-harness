@@ -333,10 +333,19 @@ def validate_todo_claim_options(args: argparse.Namespace) -> None:
         )
     _validate_todo_option_subset(
         args,
-        {"role", "todo_id", "claimed_by", "agent_id", "state_file", "claim_operation_id"},
+        {
+            "role", "todo_id", "claimed_by", "agent_id", "state_file",
+            "claim_operation_id", "task_lease_idempotency_key",
+            "task_lease_expected_version",
+        },
         "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-        "--claim-operation-id, --project, --state-file, and --dry-run; unsupported: ",
+        "--claim-operation-id, --task-lease-idempotency-key, "
+        "--task-lease-expected-version, --project, --state-file, and --dry-run; unsupported: ",
     )
+    if args.task_lease_expected_version is not None and not args.task_lease_idempotency_key:
+        raise ValueError(
+            "--task-lease-expected-version requires --task-lease-idempotency-key"
+        )
 
 
 def validate_todo_update_options(args: argparse.Namespace) -> None:
@@ -517,7 +526,7 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
             "--replan-obligation-id is supported only by todo add"
         )
     if (
-        args.todo_command not in {"complete", "supersede"}
+        args.todo_command not in {"claim", "complete", "supersede"}
         and (
             args.task_lease_idempotency_key
             or args.task_lease_expected_version is not None
@@ -525,7 +534,7 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
     ):
         raise ValueError(
             "--task-lease-idempotency-key and --task-lease-expected-version "
-            "are supported only by todo complete and todo supersede"
+            "are supported only by todo claim, todo complete, and todo supersede"
         )
     if args.capability_binding_ref and args.todo_command != "add":
         raise ValueError(
