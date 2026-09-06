@@ -782,6 +782,8 @@ def _inbox_config(
             "sender_profile": profile,
             "sender_identity": "bot",
             "bot_display_name": bot_display_name,
+            "bot_app_id": str(identity.get("bot_app_id") or ""),
+            "bot_open_id": str(identity.get("bot_open_id") or ""),
             "chat_id": chat_id,
             "placement_policy": "source_context",
             "editorial_style": "bullet_points_preferred",

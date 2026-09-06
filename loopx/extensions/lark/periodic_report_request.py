@@ -194,6 +194,10 @@ def _resolved_request_context(
                 != str(identity.get("sender_profile") or "")
                 or str(reply.get("bot_display_name") or "")
                 != str(identity.get("bot_display_name") or "")
+                or str(reply.get("bot_app_id") or "")
+                != str(identity.get("bot_app_id") or "")
+                or str(reply.get("bot_open_id") or "")
+                != str(identity.get("bot_open_id") or "")
                 or str(reply.get("chat_id") or "")
                 != str(channel.get("chat_id") or "")
             )
@@ -214,6 +218,8 @@ def _resolved_request_context(
             "chat_id": channel.get("chat_id"),
             "sender_profile": identity.get("sender_profile"),
             "bot_display_name": identity.get("bot_display_name"),
+            "bot_app_id": identity.get("bot_app_id"),
+            "bot_open_id": identity.get("bot_open_id"),
         }
     )
     return {

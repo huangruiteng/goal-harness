@@ -13,6 +13,7 @@ from loopx.extensions.lark.goal_channel_contracts import (
     write_goal_channel_binding,
 )
 from loopx.extensions.lark.goal_channel_targets import add_lark_goal_channel_target
+from loopx.extensions.lark.event_inbox import _event_from_payload
 from loopx.extensions.runtime import install_extension
 from loopx.extensions.lark import periodic_report_request
 
@@ -121,6 +122,34 @@ def test_lark_request_ports_are_discovered_from_manifest(tmp_path: Path) -> None
     assert callable(ports.settle_source)
 
 
+def test_lark_inbox_rejects_same_name_mention_with_different_provider_identity() -> (
+    None
+):
+    event = _event_from_payload(
+        {
+            "schema_version": "lark_event_inbox_event_v0",
+            "event_id": "evt_same_name_wrong_identity",
+            "message_id": "om_same_name_wrong_identity",
+            "content": "@_user_1 请生成周报",
+            "sender_type": "user",
+            "mentions": [
+                {
+                    "id": {"open_id": "ou_different_bot"},
+                    "name": "Agent Alpha",
+                }
+            ],
+        },
+        bot_display_name="Agent Alpha",
+        bot_app_id="cli_public_fixture",
+        bot_open_id="ou_agent_alpha",
+    )
+
+    assert event is not None
+    assert event["addressed_to_bot"] is False
+    assert event["provider_mention_count"] == 1
+    assert event["target_mention_count"] == 0
+
+
 def test_lark_request_context_resolves_registered_agent_inbox(
     tmp_path: Path,
 ) -> None:
@@ -167,6 +196,7 @@ def test_lark_request_context_resolves_registered_agent_inbox(
                     "sender_profile": "agent-alpha-bot",
                     "sender_identity": "bot",
                     "bot_display_name": "Agent Alpha",
+                    "bot_app_id": "cli_public_fixture",
                     "chat_id": "oc_public_fixture",
                 },
             }
