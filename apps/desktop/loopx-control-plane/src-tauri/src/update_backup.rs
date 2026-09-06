@@ -6,8 +6,15 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
-fn app_bundle() -> Result<PathBuf, String> {
-    let executable = std::env::current_exe().map_err(|_| "app_bundle_required")?;
+pub(crate) fn app_bundle() -> Result<PathBuf, String> {
+    app_bundle_at(&std::env::current_exe().map_err(|_| "app_bundle_required")?)
+}
+
+// The pinned macOS updater moves the old App bundle away before moving the new
+// one in, so callers that must verify the installed App is still in place
+// (failed replacement recovery) resolve it from the running executable.
+// Path-level so synthetic App layouts are testable without a signed build.
+pub(crate) fn app_bundle_at(executable: &Path) -> Result<PathBuf, String> {
     let bundle = executable
         .parent()
         .and_then(Path::parent)
@@ -137,6 +144,36 @@ mod tests {
         )
         .is_err());
         assert_eq!(fs::read_to_string(app.join("original")).unwrap(), "keep");
+    }
+
+    #[test]
+    fn synthetic_app_layout_verifies_only_when_the_bundle_survives() {
+        // A synthetic App layout stands in for the second-rename failure of
+        // the pinned macOS installer: when the original location is emptied,
+        // the running executable's ancestor bundle must stop verifying, which
+        // is what blocks the safe-restart promise after a failed replacement.
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Synthetic.app/Contents/MacOS");
+        fs::create_dir_all(&app).unwrap();
+        let executable = app.join("loopx-control-plane");
+        fs::write(&executable, "binary").unwrap();
+        fs::write(app.join("../Info.plist"), "plist").unwrap();
+        assert_eq!(
+            app_bundle_at(&executable),
+            Ok(dir.path().join("Synthetic.app"))
+        );
+        // The updater's first rename moved the original away: no bundle with
+        // an Info.plist remains at the executable's ancestors.
+        fs::remove_file(app.join("../Info.plist")).unwrap();
+        assert_eq!(
+            app_bundle_at(&executable),
+            Err("app_bundle_required".into())
+        );
+        // A bare executable outside any .app bundle never verifies.
+        let loose = dir.path().join("bin/loopx-control-plane");
+        fs::create_dir_all(loose.parent().unwrap()).unwrap();
+        fs::write(&loose, "binary").unwrap();
+        assert_eq!(app_bundle_at(&loose), Err("app_bundle_required".into()));
     }
 
     #[test]
