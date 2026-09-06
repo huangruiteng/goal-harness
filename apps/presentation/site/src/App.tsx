@@ -799,6 +799,7 @@ export function App() {
           <a href="#workflow">{copy.nav[1]}</a>
           <a href={`${basePath}docs/book/${language === "en" ? "en/" : ""}`}>{copy.nav[2]}</a>
           <a href="#showcases">{language === "zh" ? "案例" : "Showcases"}</a>
+          <a href={`${basePath}blog/${language === "zh" ? "zh/" : ""}`}>Blog</a>
           <a href={`${basePath}docs/`}>Docs</a>
         </nav>
         <div className="header-actions">
@@ -834,6 +835,7 @@ export function App() {
             <a href="#showcases" onClick={() => setMenuOpen(false)}>
               {language === "zh" ? "案例" : "Showcases"}
             </a>
+            <a href={`${basePath}blog/${language === "zh" ? "zh/" : ""}`}>Blog</a>
             <a href={`${basePath}docs/`}>Docs</a>
             <a href="https://github.com/huangruiteng/loopx">GitHub</a>
           </nav>
@@ -1107,6 +1109,7 @@ export function App() {
         <nav>
           <a href="https://github.com/huangruiteng/loopx">GitHub</a>
           <a href={`${basePath}benchmarks/swe-marathon/${language === "zh" ? "?lang=zh" : ""}`}>Research</a>
+          <a href={`${basePath}blog/${language === "zh" ? "zh/" : ""}`}>Blog</a>
           <a href={`${basePath}frontstage/`}>Frontstage</a>
           <a href={`${basePath}docs/`}>Docs</a>
         </nav>

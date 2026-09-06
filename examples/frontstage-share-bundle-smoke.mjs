@@ -102,6 +102,35 @@ const siteDir = resolve(outDir, "site");
 assertExists(resolve(siteDir, "index.html"));
 assertExists(resolve(siteDir, "frontstage/index.html"));
 assertExists(resolve(siteDir, "benchmarks/swe-marathon/index.html"));
+// Editorial pages must ship their text and locale navigation without an SPA
+// fallback or client-side execution, including on repository-base hosting.
+const blogArticle = "from-one-shot-agents-to-long-horizon-control/";
+for (const locale of ["", "zh/"]) {
+  for (const article of ["", blogArticle]) {
+    const pagePath = resolve(siteDir, "blog", locale, article, "index.html");
+    assertExists(pagePath);
+    const html = await readFile(pagePath, "utf8");
+    const language = locale ? "zh-CN" : "en";
+    if (!html.includes(`<html lang="${language}">`) || !html.includes("<h1>") || html.includes("<script")) {
+      throw new Error(`Blog must provide static content in ${language}: ${pagePath}`);
+    }
+    for (const hreflang of ["en", "zh-CN", "x-default"]) {
+      if (!html.includes(`hreflang="${hreflang}"`)) throw new Error(`Missing Blog language alternate: ${hreflang}`);
+    }
+    const stylesheet = html.match(/<link rel="stylesheet" href="([^"]+)"/);
+    if (!stylesheet) throw new Error("Blog stylesheet is missing");
+    assertExists(resolve(dirname(pagePath), stylesheet[1]));
+    for (const match of html.matchAll(/<a[^>]+href="([^"]+)"/g)) {
+      const href = match[1];
+      if (/^(https?:|#)/.test(href)) continue;
+      if (href.startsWith("/")) throw new Error("Blog navigation must preserve the hosting base");
+      const target = href.split(/[?#]/)[0];
+      // MkDocs pages are built later by the publication workflow.
+      if (target.includes("docs/")) continue;
+      assertExists(resolve(dirname(pagePath), target, "index.html"));
+    }
+  }
+}
 assertExists(resolve(siteDir, "install.sh"));
 assertExists(resolve(siteDir, "status.frontstage-share.json"));
 assertExists(resolve(outDir, "README.md"));
