@@ -61,6 +61,10 @@ addressing, the selected Goal/Agent binding, provider target, and inbox
 identity. It neither scans other inbox items nor inspects text for report
 keywords. Its bind/settle ports are discovered from `extension.toml`; source
 ACK happens only after the capability has persisted `delivery_ready` state.
+Transient ACK failures remain replayable. A missing source or binding/receipt
+identity drift is recorded as a terminal settlement failure and left un-ACKed;
+after correcting the configuration or retention issue, re-deliver the request
+as a new Lark message and invoke the typed action with its new `message_id`.
 
 The [event inbox guide](docs/lark-event-inbox.md) documents the complete
 collector, processing, reply, reaction, and acknowledgement lifecycle. The

@@ -326,7 +326,12 @@ receipt and delivery Todo are durable. If ACK fails or the adapter is
 temporarily unavailable, the typed request stays pending. A later
 `consume-pending` call loads the durable receipt, retries settlement only, and
 does not regenerate artifacts or add another delivery Todo. Exact ACK replay
-is idempotent.
+is idempotent. A provider may instead return a typed `terminal_failure` when
+the bound source is gone or its binding/receipt identity has drifted. LoopX
+then records `settlement_failed`, leaves the provider source un-ACKed, and
+removes that request from automatic retry projection. After repairing the
+provider binding or retention problem, the operator must obtain a new provider
+event and issue a new typed request with that event's opaque source reference.
 
 ### Post-writeback hook boundary
 

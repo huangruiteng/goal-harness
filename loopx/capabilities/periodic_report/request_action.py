@@ -24,6 +24,7 @@ REQUEST_JOURNAL_ENTRY_SCHEMA = "periodic_report_request_journal_entry_v0"
 REQUEST_RECEIPT_SCHEMA = "periodic_report_request_receipt_v0"
 SOURCE_BINDING_RECEIPT_SCHEMA = "periodic_report_source_binding_receipt_v0"
 SOURCE_SETTLEMENT_RECEIPT_SCHEMA = "periodic_report_source_settlement_receipt_v0"
+SOURCE_SETTLEMENT_TERMINAL_STATUS = "terminal_failure"
 REQUEST_HOOK_ID = "periodic_report.request"
 REQUEST_BIND_PORT = "periodic_report.request.bind_source"
 REQUEST_SETTLE_PORT = "periodic_report.request.settle_source"
@@ -263,11 +264,15 @@ def _load_request_entry(path: Path) -> dict[str, Any] | None:
     if (
         not isinstance(value, dict)
         or value.get("schema_version") != REQUEST_JOURNAL_ENTRY_SCHEMA
-        or value.get("status") not in {"pending", "settled"}
+        or value.get("status") not in {"pending", "settled", "settlement_failed"}
         or value.get("request_id") != path.stem
         or not isinstance(value.get("source_receipt"), Mapping)
         or not isinstance(value.get("profile_ref"), Mapping)
         or not isinstance(value.get("trigger_policy"), Mapping)
+        or (
+            value.get("status") != "pending"
+            and not isinstance(value.get("settlement"), Mapping)
+        )
     ):
         return None
     return value
@@ -487,22 +492,45 @@ def settle_periodic_report_request(
     if (
         not isinstance(result, Mapping)
         or result.get("schema_version") != SOURCE_SETTLEMENT_RECEIPT_SCHEMA
+        or result.get("status")
+        not in {"preview", "failed", "settled", SOURCE_SETTLEMENT_TERMINAL_STATUS}
+        or (
+            result.get("status") in {"preview", "settled"}
+            and result.get("ok") is not True
+        )
+        or (
+            result.get("status") in {"failed", SOURCE_SETTLEMENT_TERMINAL_STATUS}
+            and result.get("ok") is not False
+        )
         or result.get("external_writes_performed") is not False
         or result.get("raw_content_returned") is not False
+        or (
+            result.get("status") == SOURCE_SETTLEMENT_TERMINAL_STATUS
+            and not _IDENTITY_RE.fullmatch(str(result.get("failure_code") or ""))
+        )
     ):
         raise ValueError("periodic-report source settlement receipt is invalid")
     normalized = dict(result)
     if (
         execute
-        and normalized.get("ok") is True
-        and normalized.get("status") == "settled"
+        and (
+            (normalized.get("ok") is True and normalized.get("status") == "settled")
+            or (
+                normalized.get("ok") is False
+                and normalized.get("status") == SOURCE_SETTLEMENT_TERMINAL_STATUS
+            )
+        )
     ):
         request_id = str(entry["request_id"])
         path = _request_path(runtime_root, goal_id, request_id)
         with exclusive_file_lock(path, operation="periodic_report_request_settlement"):
             current = _load_request_entry(path)
             if current is not None and current.get("status") == "pending":
-                current["status"] = "settled"
+                current["status"] = (
+                    "settled"
+                    if normalized.get("status") == "settled"
+                    else "settlement_failed"
+                )
                 current["settlement"] = {
                     key: value
                     for key, value in normalized.items()
@@ -525,6 +553,7 @@ __all__ = [
     "REQUEST_SETTLE_PORT",
     "SOURCE_BINDING_RECEIPT_SCHEMA",
     "SOURCE_SETTLEMENT_RECEIPT_SCHEMA",
+    "SOURCE_SETTLEMENT_TERMINAL_STATUS",
     "discover_periodic_report_request_ports",
     "periodic_report_request_intents",
     "record_periodic_report_request",

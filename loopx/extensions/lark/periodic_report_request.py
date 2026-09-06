@@ -22,6 +22,7 @@ from ...capabilities.periodic_report.request_action import (
     REQUEST_SETTLE_PORT,
     SOURCE_BINDING_RECEIPT_SCHEMA,
     SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+    SOURCE_SETTLEMENT_TERMINAL_STATUS,
 )
 from ...control_plane.runtime.goal_project_route import resolve_goal_project_route
 from ..hook_adapters import HOOK_ADAPTER_FACTORY_CONTEXT_SCHEMA_VERSION
@@ -48,6 +49,18 @@ from .routed_inbox import lark_inbox_config_kind
 
 
 LARK_REQUEST_ADAPTER_ID = "lark-periodic-report-source"
+
+
+def _terminal_settlement_failure(failure_code: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "schema_version": SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+        "status": SOURCE_SETTLEMENT_TERMINAL_STATUS,
+        "failure_code": failure_code,
+        "write_performed": False,
+        "raw_content_returned": False,
+        "external_writes_performed": False,
+    }
 
 
 def _digest(value: object) -> str:
@@ -322,12 +335,15 @@ def settle_lark_periodic_report_source(
 ) -> dict[str, Any]:
     """ACK the exact source only after capability durability is established."""
 
-    context = _resolved_request_context(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=goal_id,
-        agent_id=agent_id,
-    )
+    try:
+        context = _resolved_request_context(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+        )
+    except ValueError:
+        return _terminal_settlement_failure("source_binding_drift")
     source_ref = str(source_receipt.get("source_ref") or "")
     if (
         source_receipt.get("schema_version") != SOURCE_BINDING_RECEIPT_SCHEMA
@@ -336,19 +352,22 @@ def settle_lark_periodic_report_source(
         or source_receipt.get("binding_revision") != context["binding_revision"]
         or not MESSAGE_ID_PATTERN.fullmatch(source_ref)
     ):
-        raise ValueError("Lark periodic-report source binding drifted")
+        return _terminal_settlement_failure("source_binding_drift")
     inbox = context["config"]["inbox_path"]
     event = _event_from_file(inbox / f"{source_ref}.json")
     if not isinstance(event, Mapping):
-        raise ValueError("Lark periodic-report source is unavailable")
-    current = _source_receipt(
-        event,
-        goal_id=goal_id,
-        agent_id=agent_id,
-        binding_revision=str(context["binding_revision"]),
-    )
+        return _terminal_settlement_failure("source_unavailable")
+    try:
+        current = _source_receipt(
+            event,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            binding_revision=str(context["binding_revision"]),
+        )
+    except ValueError:
+        return _terminal_settlement_failure("source_receipt_drift")
     if current != dict(source_receipt):
-        raise ValueError("Lark periodic-report source receipt drifted")
+        return _terminal_settlement_failure("source_receipt_drift")
     receipt = acknowledge_lark_event_inbox(
         project=context["project"],
         config_path=context["selected_config_ref"],

@@ -112,6 +112,97 @@ def test_lark_adapter_binds_only_agent_selected_source_without_text_classificati
     assert ack_calls == [[selected]]
 
 
+def test_lark_adapter_classifies_identity_drift_as_terminal_without_ack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    source_ref = "om_terminal_identity"
+    context = {
+        "project": tmp_path,
+        "selected_config_ref": ".loopx/inbox.json",
+        "config": {"inbox_path": inbox},
+        "binding_revision": "sha256:" + "a" * 64,
+    }
+    monkeypatch.setattr(
+        periodic_report_request,
+        "_resolved_request_context",
+        lambda **_kwargs: context,
+    )
+    ack_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        periodic_report_request,
+        "acknowledge_lark_event_inbox",
+        lambda **kwargs: ack_calls.append(list(kwargs["message_ids"])),
+    )
+    source_receipt = {
+        "schema_version": "periodic_report_source_binding_receipt_v0",
+        "provider": "lark",
+        "goal_id": "goal-alpha",
+        "agent_id": "agent-alpha",
+        "source_ref": source_ref,
+        "source_digest": "sha256:" + "b" * 64,
+        "observed_at": "2026-09-06T05:00:00Z",
+        "requester_kind": "user",
+        "addressing_source": "provider_mention",
+        "binding_revision": context["binding_revision"],
+        "raw_content_returned": False,
+        "external_writes_performed": False,
+    }
+
+    unavailable = periodic_report_request.settle_lark_periodic_report_source(
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        goal_id="goal-alpha",
+        agent_id="agent-alpha",
+        source_receipt=source_receipt,
+        execute=True,
+    )
+    assert unavailable["status"] == "terminal_failure"
+    assert unavailable["failure_code"] == "source_unavailable"
+
+    drifted = periodic_report_request.settle_lark_periodic_report_source(
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        goal_id="goal-alpha",
+        agent_id="agent-alpha",
+        source_receipt={
+            **source_receipt,
+            "binding_revision": "sha256:" + "c" * 64,
+        },
+        execute=True,
+    )
+    assert drifted["status"] == "terminal_failure"
+    assert drifted["failure_code"] == "source_binding_drift"
+
+    (inbox / f"{source_ref}.json").write_text(
+        json.dumps(_event(source_ref, "synthetic request")),
+        encoding="utf-8",
+    )
+    current = periodic_report_request.bind_lark_periodic_report_source(
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        goal_id="goal-alpha",
+        agent_id="agent-alpha",
+        source_ref=source_ref,
+    )
+    receipt_drifted = periodic_report_request.settle_lark_periodic_report_source(
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        goal_id="goal-alpha",
+        agent_id="agent-alpha",
+        source_receipt={
+            **current,
+            "source_digest": "sha256:" + "e" * 64,
+        },
+        execute=True,
+    )
+    assert receipt_drifted["status"] == "terminal_failure"
+    assert receipt_drifted["failure_code"] == "source_receipt_drift"
+    assert ack_calls == []
+
+
 def test_lark_request_ports_are_discovered_from_manifest(tmp_path: Path) -> None:
     state_file = tmp_path / "runtime" / "extensions" / "state.json"
     manifest = Path(periodic_report_request.__file__).with_name("extension.toml")

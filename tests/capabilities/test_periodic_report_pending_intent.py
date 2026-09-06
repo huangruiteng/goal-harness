@@ -19,6 +19,7 @@ from loopx.capabilities.periodic_report.request_action import (
     PeriodicReportRequestPorts,
     SOURCE_BINDING_RECEIPT_SCHEMA,
     SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+    SOURCE_SETTLEMENT_TERMINAL_STATUS,
     periodic_report_request_intents,
     record_periodic_report_request,
     settle_periodic_report_request,
@@ -663,6 +664,105 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
         )
         == []
     )
+
+
+def test_terminal_source_settlement_is_durable_and_not_retried(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    source_ref = "om_terminal_source"
+    source_identity = {
+        "provider": "fixture",
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "source_ref": source_ref,
+        "observed_at": "2026-08-30T09:00:00Z",
+        "requester_kind": "user",
+        "addressing_source": "provider_mention",
+        "binding_revision": "sha256:" + "d" * 64,
+    }
+    source_digest = "sha256:" + hashlib.sha256(
+        json.dumps(
+            source_identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    settlement_calls: list[bool] = []
+
+    def bind_source(**_kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": SOURCE_BINDING_RECEIPT_SCHEMA,
+            **source_identity,
+            "source_digest": source_digest,
+            "raw_content_returned": False,
+            "external_writes_performed": False,
+        }
+
+    def settle_source(**kwargs: object) -> dict[str, object]:
+        settlement_calls.append(bool(kwargs["execute"]))
+        return {
+            "ok": False,
+            "schema_version": SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+            "status": SOURCE_SETTLEMENT_TERMINAL_STATUS,
+            "failure_code": "source_receipt_drift",
+            "write_performed": False,
+            "raw_content_returned": False,
+            "external_writes_performed": False,
+        }
+
+    adapter = PeriodicReportRequestAdapter(
+        adapter_id="fixture-periodic-report-source",
+        bind_source=bind_source,
+        settle_source=settle_source,
+    )
+    ports = PeriodicReportRequestPorts(adapters={adapter.adapter_id: adapter})
+    accepted = record_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        source_ref=source_ref,
+        request_ports=ports,
+        source_adapter_id=None,
+        execute=True,
+    )
+    intents = periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    settlement = settle_periodic_report_request(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        intent=intents[0],
+        request_ports=ports,
+        execute=True,
+    )
+
+    assert settlement["status"] == SOURCE_SETTLEMENT_TERMINAL_STATUS
+    assert settlement["failure_code"] == "source_receipt_drift"
+    assert settlement["write_performed"] is True
+    request_path = (
+        runtime
+        / "goals"
+        / GOAL_ID
+        / "periodic_report_requests"
+        / f"{accepted['request_id']}.json"
+    )
+    journal = json.loads(request_path.read_text(encoding="utf-8"))
+    assert journal["status"] == "settlement_failed"
+    assert journal["settlement"]["failure_code"] == "source_receipt_drift"
+    assert periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    ) == []
+    assert settlement_calls == [True]
 
 
 def test_report_artifacts_leave_no_temp_residue(tmp_path: Path) -> None:
