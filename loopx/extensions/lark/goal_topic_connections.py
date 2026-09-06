@@ -616,25 +616,25 @@ def connect_lark_goal_topic(
                 blocker="provider_api_failed",
                 public_summary="the Goal Topic root message could not be sent",
             )
-        verified = message_readback_verified(
-            runner=runner,
-            cli_bin=effective_cli_bin,
-            profile=profile,
-            identity="bot",
-            message_id=root_message_id,
-            expected_text=topic_text,
+    if not message_readback_verified(
+        runner=runner,
+        cli_bin=effective_cli_bin,
+        profile=profile,
+        identity="bot",
+        message_id=root_message_id,
+        expected_text=f"Goal ID: {goal_id}" if reusable_root else topic_text,
+        expected_chat_id=safe_chat_id if reusable_root else None,
+    ):
+        return operation_packet(
+            ok=False,
+            goal_id=goal_id,
+            operation="connect_topic",
+            execute=True,
+            status="blocked" if reusable_root else "sent_unverified",
+            blocker="readback_mismatch",
+            public_summary="the Goal Topic could not be verified; binding preserved",
+            external_write_performed=not bool(reusable_root),
         )
-        if not verified:
-            return operation_packet(
-                ok=False,
-                goal_id=goal_id,
-                operation="connect_topic",
-                execute=True,
-                status="sent_unverified",
-                blocker="readback_mismatch",
-                public_summary="the Goal Topic was sent but could not be verified",
-                external_write_performed=True,
-            )
 
     connector_binding: dict[str, Any] | None = None
     if normalized_agent_id and ingress_mode != IngressMode.DIRECT_SESSION.value:
@@ -694,7 +694,7 @@ def connect_lark_goal_topic(
                 status="sent_verified_registration_failed",
                 blocker="agent_inbox_registration_failed",
                 public_summary="the Agent-scoped inbox could not be registered",
-                external_write_performed=True,
+                external_write_performed=not bool(reusable_root),
                 readback_verified=True,
             )
 
@@ -743,7 +743,7 @@ def connect_lark_goal_topic(
         execute=True,
         status="connected",
         public_summary="connected one Goal to a dedicated Lark topic",
-        external_write_performed=True,
+        external_write_performed=not bool(reusable_root),
         readback_verified=True,
         idempotency_key=key,
         details={

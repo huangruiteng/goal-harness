@@ -743,9 +743,10 @@ def reusable_goal_topic_root(
         existing = binding_for_goal(
             payload,
             goal_id,
-            provider_target=provider_target,
             connection_id=connection_id,
         )
+        if existing is not None:
+            existing = _resolve_goal_binding(existing, provider_target=provider_target)
     except ValueError:
         return ""
     if not existing or existing.get("enabled") is not True:

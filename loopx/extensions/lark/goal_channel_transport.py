@@ -298,6 +298,7 @@ def message_readback_verified(
     identity: str,
     message_id: str,
     expected_text: str,
+    expected_chat_id: str | None = None,
 ) -> bool:
     result = call(
         runner,
@@ -322,6 +323,10 @@ def message_readback_verified(
         result.get("returncode") == 0
         and contains_exact_field(payload, "message_id", message_id)
         and payload_contains_text(payload, expected_text)
+        and (
+            expected_chat_id is None
+            or contains_exact_field(payload, "chat_id", expected_chat_id)
+        )
     )
 
 
