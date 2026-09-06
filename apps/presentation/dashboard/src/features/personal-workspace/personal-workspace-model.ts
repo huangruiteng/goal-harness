@@ -1,3 +1,4 @@
+import type { WorkspaceLoadError } from "../../data/workspace-progressive-status";
 export type WorkspaceGoalState =
   | "需修复"
   | "等你"
@@ -64,6 +65,7 @@ export type WorkspaceGoalSubagentConfiguration = {
 
 export type WorkspaceGoal = {
   loadState?: "loading" | "error";
+  loadError?: WorkspaceLoadError;
   activationState: "active" | "stopped";
   agentId: string;
   agentLanes?: Array<{

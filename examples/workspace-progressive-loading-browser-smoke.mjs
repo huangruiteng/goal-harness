@@ -12,10 +12,10 @@ const require = createRequire(import.meta.url);
 const port = Number(process.env.LOOPX_PROGRESSIVE_PORT ?? "5204");
 const origin = `http://127.0.0.1:${port}`;
 const directory = { ok: true, schema_version: "loopx_workspace_directory_v1", registry_revision: "r1",
-  goals: ["slow", "ready", "retry"].map((id) => ({ id, display_name: `${id} project`, activation_state: "active", registry_member: true })) };
+  goals: ["slow", "ready", "retry", "archived"].map((id) => ({ id, display_name: `${id} project`, activation_state: id === "archived" ? "stopped" : "active", registry_member: true })) };
 function snapshot(id) {
   const payload = structuredClone(require(resolve(root, "examples/status.example.json")));
-  payload.run_history.goals = [{ ...payload.run_history.goals[0], id, display_name: `${id} project`, activation_state: "active", registry_member: true }];
+  payload.run_history.goals = [{ ...payload.run_history.goals[0], id, display_name: `${id} project`, activation_state: id === "archived" ? "stopped" : "active", registry_member: true }];
   for (const item of payload.attention_queue.items) item.goal_id = id;
   payload.workspace_registry_revision = directory.registry_revision;
   return payload;
@@ -26,10 +26,12 @@ let releaseSlow;
 const slowGate = new Promise((done) => { releaseSlow = done; });
 try {
   await waitForHttp(`${origin}/chat/`);
-  browser = await launchBrowser(loadPlaywright().chromium);
+  browser = process.env.LOOPX_PROGRESSIVE_ENGINE === "webkit"
+    ? await loadPlaywright().webkit.launch({ headless: true }) : await launchBrowser(loadPlaywright().chromium);
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  let readyFailures = 1;
   let retryFails = true;
   let revisionMismatch = false;
   let active = 0;
@@ -45,6 +47,7 @@ try {
     requested.push(id); active++; peak = Math.max(peak, active);
     if (id === "slow") await slowGate;
     active--;
+    if (id === "ready" && readyFailures-- > 0) return route.fulfill({ status: 503, json: { ok: false } });
     return route.fulfill(id === "retry" && retryFails ? { status: 503, json: { ok: false } } : { json: revisionMismatch && id === "retry" ? { ...snapshot(id), workspace_registry_revision: "changed" } : snapshot(id) });
   });
   await page.route("**/api/**", (route) => route.fulfill({ status: 503, json: { ok: false } }));
@@ -72,11 +75,20 @@ try {
   revisionMismatch = false;
   await page.getByTestId("goal-status-loading").getByRole("button").click();
   await page.getByTestId("goal-status-loading").waitFor({ state: "hidden" });
+  assert.ok(requested.filter((id) => id === "ready").length >= 2, "a transient service error should recover automatically");
+  assert.ok(!requested.includes("archived"), "stopped history must not compete with the active first screen");
+  await page.locator(".personal-stopped-goals summary").click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes("goal_id=archived")),
+    page.locator('.personal-goal-link').filter({ hasText: "archived project" }).click(),
+  ]);
+  await page.getByTestId("goal-status-loading").waitFor({ state: "hidden" });
+  assert.ok(requested.includes("archived"), "selected stopped Goal loads on demand");
   assert.ok(peak <= 2, `bounded fanout exceeded: ${peak}`);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: resolve(out, "ready-mobile.png") });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ok: true, directory_ms: directoryMs, peak_concurrent_requests: peak, checks: ["directory-before-slow-goal", "ready-peer-usable", "queue-progress", "isolated-failure", "registry-revision-fence", "retry", "mobile", "no-render-errors"] }));
+  console.log(JSON.stringify({ ok: true, directory_ms: directoryMs, peak_concurrent_requests: peak, checks: ["directory-before-slow-goal", "ready-peer-usable", "queue-progress", "isolated-failure", "registry-revision-fence", "retry", "service-restart-recovery", "lazy-stopped-goals", "mobile", "no-render-errors"] }));
 } finally {
   releaseSlow();
   await cleanupBrowserSmoke({ browser, server, fixturePaths: [] });
