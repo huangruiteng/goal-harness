@@ -208,6 +208,19 @@ broader actor lifecycle or authority model than the implementation provides.
 
 ## Engineering Quality And Right-Sized Scope
 
+### Refactor Real-Path Validation
+
+Before delivering a refactor, validate the affected production entrypoint and
+real backend, not only mocks, in-memory substitutes, or unit tests. Authority
+store refactors that affect PostgreSQL must run the PostgreSQL integration
+suite against an isolated real server; report the exact source and results.
+Use a separate database/tenant and disposable runtime with synthetic fixtures
+or an owner-authorized read-only snapshot. Never test by promoting, rewriting,
+or corrupting an active goal, its registry, writer fence, Todo, or lease state.
+If the required real environment is unavailable, report the evidence gap and
+hold delivery; a skipped test does not satisfy this gate. See the testing and
+quality guide for the same safety and evidence boundary.
+
 Treat code volume as a cost, especially during refactors. A good LoopX change
 should make the next change easier to localize, test, and revert; it should not
 turn a design possibility into unused production structure.

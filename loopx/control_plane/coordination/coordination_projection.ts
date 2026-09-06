@@ -14,11 +14,20 @@ import {
   canonicalAuthoritySha256,
   requireAuthorityStoreId,
 } from "./authority_store_codec.ts";
+import {
+  canonicalCoordinationTodoRecord,
+  canonicalTodoDomainRecord,
+  TODO_DOMAIN_READ_RECORD_SCHEMA,
+  TODO_DOMAIN_RECORD_CONTRACT,
+  TODO_CANONICAL_READ_RECORD_FIELDS,
+  TODO_CANONICAL_READ_RECORD_SCHEMA,
+} from "./coordination_state_contract.ts";
 
 export const COORDINATION_PROJECTION_MUTATION_EVENT_SCHEMA =
   "loopx_coordination_projection_mutation_event_v0";
 export const COORDINATION_PROJECTION_MUTATION_RECEIPT_SCHEMA =
   "loopx_coordination_projection_mutation_receipt_v0";
+export { TODO_CANONICAL_READ_RECORD_FIELDS, TODO_CANONICAL_READ_RECORD_SCHEMA };
 
 export interface CoordinationTodoProjectionIndex {
   readonly todos: ReadonlyMap<string, JsonObject>;
@@ -31,7 +40,7 @@ export interface CoordinationProjectionIndex extends CoordinationTodoProjectionI
 }
 
 export type CoordinationProjectionMutation =
-  | { readonly kind: "todo_upsert"; readonly todo: JsonObject }
+  | { readonly kind: "todo_upsert"; readonly todo: JsonObject; readonly clear_fields?: readonly string[] }
   | { readonly kind: "todo_remove"; readonly todo_id: string }
   | { readonly kind: "lease_upsert"; readonly lease: JsonObject }
   | { readonly kind: "lease_remove"; readonly todo_id: string };
@@ -109,6 +118,134 @@ export function indexCoordinationProjectionTodos(
   };
 }
 
+/**
+ * Validate the revision-bound Todo consumer contract carried by a promotable
+ * projection. This is intentionally stricter than identity indexing: a head
+ * that can coordinate claims but cannot reproduce the existing Todo list is
+ * not eligible to become the read authority.
+ */
+export function validateCoordinationTodoReadModel(
+  value: JsonObject,
+  expectedGoalId: string,
+): JsonObject {
+  const index = indexCoordinationProjectionTodos(value, expectedGoalId);
+  const records = index.todo_ids.map((todoId) => index.todos.get(todoId)!);
+  if (!Array.isArray(value.todos) ||
+      !canonicalAuthorityBytes(value.todos).equals(canonicalAuthorityBytes(records))) {
+    throw new AuthorityStoreProtocolError(
+      "coordination Todo read records must use deterministic todo_id order",
+    );
+  }
+  const readModel = canonicalAuthorityObject(
+    value.todo_read_model,
+    "projection.todo_read_model",
+  );
+  const domain = readModel.schema_version === TODO_DOMAIN_READ_RECORD_SCHEMA;
+  if (!domain && readModel.schema_version !== TODO_CANONICAL_READ_RECORD_SCHEMA) {
+    throw new AuthorityStoreProtocolError("coordination Todo read-model schema mismatch");
+  }
+  if (readModel.todo_count !== records.length) {
+    throw new AuthorityStoreProtocolError("coordination Todo read-model count mismatch");
+  }
+  if (readModel.records_sha256 !== canonicalAuthoritySha256(records)) {
+    throw new AuthorityStoreProtocolError("coordination Todo read-model digest mismatch");
+  }
+  if (!canonicalAuthorityBytes(readModel.contract_fields).equals(
+    canonicalAuthorityBytes(domain ? TODO_DOMAIN_RECORD_CONTRACT.fields : TODO_CANONICAL_READ_RECORD_FIELDS)
+  )) {
+    throw new AuthorityStoreProtocolError("coordination Todo read-model field contract mismatch");
+  }
+  const validateRecord = domain ? canonicalTodoDomainRecord : canonicalCoordinationTodoRecord;
+  for (const [recordIndex, record] of records.entries()) {
+    validateRecord(record, `coordination Todo read record ${recordIndex}`);
+  }
+  return readModel;
+}
+
+function todoReadModel(records: readonly JsonObject[], previous: JsonObject): JsonObject {
+  return {
+    schema_version: previous.schema_version,
+    contract_fields: previous.contract_fields,
+    todo_count: records.length,
+    records_sha256: canonicalAuthoritySha256(records),
+  };
+}
+
+function requireCompleteTodoReplacement(
+  previous: JsonObject | undefined,
+  replacement: JsonObject,
+  index: number,
+  clearFields: readonly string[] = [],
+): void {
+  if (previous === undefined) return;
+  const explicitClears = new Set(clearFields);
+  const omittedFields = Object.keys(previous)
+    .filter((field) => !(field in replacement) && !explicitClears.has(field))
+    .sort(authorityUnicodeCompare);
+  if (omittedFields.length > 0) {
+    throw new AuthorityStoreProtocolError(
+      `coordination Todo replacement ${index} omits existing fields: ${omittedFields.join(", ")}`,
+    );
+  }
+}
+
+function applyCoordinationMutation(
+  mutation: CoordinationProjectionMutation,
+  index: number,
+  todos: Map<string, JsonObject>,
+  leases: Map<string, JsonObject>,
+  claimMutationTarget: (kind: "todo" | "lease", todoId: string) => void,
+  requireCompleteReplacement: boolean,
+): void {
+  switch (mutation.kind) {
+    case "todo_upsert": {
+      const todo = canonicalAuthorityObject(mutation.todo, `mutations[${index}].todo`);
+      const todoId = requireAuthorityStoreId(todo.todo_id, `mutations[${index}].todo_id`);
+      claimMutationTarget("todo", todoId);
+      if (requireCompleteReplacement) {
+        requireCompleteTodoReplacement(todos.get(todoId), todo, index, mutation.clear_fields);
+      }
+      todos.set(todoId, todo);
+      return;
+    }
+    case "todo_remove": {
+      const todoId = requireAuthorityStoreId(
+        mutation.todo_id,
+        `mutations[${index}].todo_id`,
+      );
+      claimMutationTarget("todo", todoId);
+      if (!todos.delete(todoId)) {
+        throw new AuthorityStoreProtocolError("coordination projection todo remove target missing");
+      }
+      return;
+    }
+    case "lease_upsert": {
+      const lease = canonicalAuthorityObject(mutation.lease, `mutations[${index}].lease`);
+      const todoId = requireAuthorityStoreId(lease.todo_id, `mutations[${index}].todo_id`);
+      claimMutationTarget("lease", todoId);
+      leases.set(todoId, lease);
+      return;
+    }
+    case "lease_remove": {
+      const todoId = requireAuthorityStoreId(
+        mutation.todo_id,
+        `mutations[${index}].todo_id`,
+      );
+      claimMutationTarget("lease", todoId);
+      if (!leases.delete(todoId)) {
+        throw new AuthorityStoreProtocolError("coordination projection lease remove target missing");
+      }
+      return;
+    }
+    default: {
+      const unreachable: never = mutation;
+      throw new AuthorityStoreProtocolError(
+        `unsupported coordination projection mutation: ${String(unreachable)}`,
+      );
+    }
+  }
+}
+
 /** Validate the complete Todo/lease identity graph of one coordination head. */
 export function indexCoordinationProjection(
   value: JsonObject,
@@ -145,6 +282,8 @@ export function reduceCoordinationProjection(
     throw new AuthorityStoreProtocolError("coordination projection mutation batch is empty");
   }
   const current = indexCoordinationProjection(value, expectedGoalId);
+  const readModel = value.todo_read_model === undefined
+    ? undefined : validateCoordinationTodoReadModel(value, expectedGoalId);
   const todos = new Map(current.todos);
   const leases = new Map(current.leases);
   const mutatedRecords = new Set<string>();
@@ -160,50 +299,14 @@ export function reduceCoordinationProjection(
   };
 
   for (const [index, mutation] of mutations.entries()) {
-    switch (mutation.kind) {
-      case "todo_upsert": {
-        const todo = canonicalAuthorityObject(mutation.todo, `mutations[${index}].todo`);
-        const todoId = requireAuthorityStoreId(todo.todo_id, `mutations[${index}].todo_id`);
-        claimMutationTarget("todo", todoId);
-        todos.set(todoId, todo);
-        break;
-      }
-      case "todo_remove": {
-        const todoId = requireAuthorityStoreId(
-          mutation.todo_id,
-          `mutations[${index}].todo_id`,
-        );
-        claimMutationTarget("todo", todoId);
-        if (!todos.delete(todoId)) {
-          throw new AuthorityStoreProtocolError("coordination projection todo remove target missing");
-        }
-        break;
-      }
-      case "lease_upsert": {
-        const lease = canonicalAuthorityObject(mutation.lease, `mutations[${index}].lease`);
-        const todoId = requireAuthorityStoreId(lease.todo_id, `mutations[${index}].todo_id`);
-        claimMutationTarget("lease", todoId);
-        leases.set(todoId, lease);
-        break;
-      }
-      case "lease_remove": {
-        const todoId = requireAuthorityStoreId(
-          mutation.todo_id,
-          `mutations[${index}].todo_id`,
-        );
-        claimMutationTarget("lease", todoId);
-        if (!leases.delete(todoId)) {
-          throw new AuthorityStoreProtocolError("coordination projection lease remove target missing");
-        }
-        break;
-      }
-      default: {
-        const unreachable: never = mutation;
-        throw new AuthorityStoreProtocolError(
-          `unsupported coordination projection mutation: ${String(unreachable)}`,
-        );
-      }
-    }
+    applyCoordinationMutation(
+      mutation,
+      index,
+      todos,
+      leases,
+      claimMutationTarget,
+      value.todo_read_model !== undefined,
+    );
   }
 
   for (const todoId of leases.keys()) {
@@ -213,11 +316,19 @@ export function reduceCoordinationProjection(
       );
     }
   }
-  return canonicalAuthorityObject({
+  const nextTodos = sortedIds(todos.keys()).map((todoId) => todos.get(todoId)!);
+  const reduced = canonicalAuthorityObject({
     ...value,
-    todos: sortedIds(todos.keys()).map((todoId) => todos.get(todoId)!),
+    todos: nextTodos,
     leases: sortedIds(leases.keys()).map((todoId) => leases.get(todoId)!),
+    ...(readModel === undefined
+      ? {}
+      : { todo_read_model: todoReadModel(nextTodos, readModel) }),
   }, "coordination projection");
+  if (value.todo_read_model !== undefined) {
+    validateCoordinationTodoReadModel(reduced, expectedGoalId);
+  }
+  return reduced;
 }
 
 function mutationTarget(mutation: CoordinationProjectionMutation, index: number): string {
@@ -251,6 +362,9 @@ export function prepareCoordinationProjectionCommit(
     goalId,
     input.mutations,
   );
+  if (currentProjection.todo_read_model !== undefined) {
+    validateCoordinationTodoReadModel(nextProjection, goalId);
+  }
   const targets = input.mutations.map(mutationTarget).sort(authorityUnicodeCompare);
   const mutationKinds = input.mutations.map((mutation) => mutation.kind).sort(
     authorityUnicodeCompare,

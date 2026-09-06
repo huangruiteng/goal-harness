@@ -17,6 +17,7 @@ from .contract import (
     todo_status_from_marker,
 )
 from .decision_scope import build_standing_decision_authority
+from .machine_region import TODO_REGION_PREFIX, find_todo_regions
 from .todo_summary import (
     MAX_STATUS_TODOS_PER_ROLE,
     compact_todo_group,
@@ -32,6 +33,7 @@ def parse_active_state_todos(
     state_path: Path | None = None,
     preferred_todo_ids: set[str] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
+    available_capabilities: Any = None,
     item_limit: int | None = MAX_STATUS_TODOS_PER_ROLE,
 ) -> dict[str, Any]:
     orchestration = compact_orchestration_policy(
@@ -50,7 +52,14 @@ def parse_active_state_todos(
     archive_source_section: str | None = None
     current_todo: dict[str, Any] | None = None
 
-    for line in state_text.splitlines():
+    lines = state_text.splitlines()
+    regions = find_todo_regions(lines) if TODO_REGION_PREFIX in state_text else None
+    region_starts = {r.start for r in regions} if regions is not None else None
+    region_ends = {r.body_end for r in regions} if regions is not None else set()
+    for index, line in enumerate(lines):
+        if index in region_ends:
+            role = None
+            current_todo = None
         if line.startswith("## "):
             heading = line.lstrip("#").strip()
             normalized_heading = heading.strip().lower()
@@ -59,6 +68,8 @@ def parse_active_state_todos(
             )
             archive_source_section = heading if archive_mode else None
             role = todo_role_for_heading(heading)
+            if role and region_starts is not None and index not in region_starts:
+                role = None
             current_todo = None
             if role and source_sections[role] is None:
                 source_sections[role] = heading
@@ -115,6 +126,7 @@ def parse_active_state_todos(
         preferred_todo_ids=preferred_todo_ids,
         resume_source_items=resume_source_items,
         rollout_events=rollout_events,
+        available_capabilities=available_capabilities,
         item_limit=item_limit,
         include_task_orchestration_authority=include_task_orchestration_authority,
     )
@@ -126,6 +138,7 @@ def parse_active_state_todos(
         preferred_todo_ids=preferred_todo_ids,
         resume_source_items=resume_source_items,
         rollout_events=rollout_events,
+        available_capabilities=available_capabilities,
         item_limit=item_limit,
         include_task_orchestration_authority=include_task_orchestration_authority,
     )

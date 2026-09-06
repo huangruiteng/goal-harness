@@ -315,16 +315,16 @@ def _collect_capability_gate_candidates(
     agent_todo_summary: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str]:
     raw_items, source = _select_advancement_candidate_source(agent_todo_summary)
+    raw_due_monitor_items = agent_todo_summary.get("monitor_due_items")
     due_monitor_items = (
-        agent_todo_summary.get("monitor_due_items")
-        if isinstance(agent_todo_summary.get("monitor_due_items"), list)
-        else []
+        raw_due_monitor_items if isinstance(raw_due_monitor_items, list) else []
+    )
+    raw_blocked_due_monitor_items = agent_todo_summary.get(
+        "monitor_capability_blocked_due_items"
     )
     blocked_due_monitor_items = (
-        agent_todo_summary.get("monitor_capability_blocked_due_items")
-        if isinstance(
-            agent_todo_summary.get("monitor_capability_blocked_due_items"), list
-        )
+        raw_blocked_due_monitor_items
+        if isinstance(raw_blocked_due_monitor_items, list)
         else []
     )
     monitor_sources: list[str] = []

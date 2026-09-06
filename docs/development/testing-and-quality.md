@@ -73,6 +73,37 @@ golden 来让测试通过。
 
 ## Pull-Request Baseline / PR 基线
 
+### Refactor Real-Path Gate / 重构真实路径门
+
+Refactors must exercise the affected production entrypoint and real backend
+before delivery. Unit tests, mocks, and in-memory conformance remain useful,
+but cannot replace that proof. For changes affecting PostgreSQL authority,
+configure `LOOPX_TEST_POSTGRES_URL` to an isolated disposable server and run
+`npm run test:postgresql-authority-store`; a skipped suite is an evidence gap,
+not a pass. Record the exact commit, backend version, tested behavior, and
+failures or limits. If no safe real environment is available, hold delivery.
+
+重构交付前必须验证受影响的真实生产入口和真实后端。单测、mock 与内存 conformance
+不能替代这项证据。影响 PostgreSQL authority 时，配置指向隔离临时实例的
+`LOOPX_TEST_POSTGRES_URL`，运行 `npm run test:postgresql-authority-store`；跳过不算
+通过。记录精确 commit、后端版本、验证行为与失败或局限；没有安全的真实环境则暂停交付。
+
+Keep tests separate from active state: use a disposable database/tenant and
+runtime directory, with synthetic fixtures or an owner-authorized read-only
+snapshot. Never run the integration suite against a shared or production
+database: it creates roles and injects schema-level failure triggers. Never
+promote an active goal, change its provider, or mutate its registry, writer
+fence, Todos, or leases for a test. Keep private snapshots and raw outputs out
+of Git and public reviews; compare source fingerprints before and after an
+owner-authorized snapshot rehearsal. A concurrent source change is reported,
+not overwritten or restored by the test. Stop the temporary server afterward.
+
+测试使用独立临时数据库／tenant 和 runtime 目录，输入为合成 fixture 或经 owner 授权
+的只读快照。集成测试会创建角色并注入 schema 级失败 trigger，禁止连接共享或生产库。
+不为测试晋升正在运行的 goal、切换 provider，或修改其 registry、writer fence、Todo、
+lease。私有快照和原始输出不得进入 Git 或公开 review；快照演练前后比较源指纹。
+发现并发源变更只报告，不擅自覆盖或恢复。测试后停止临时数据库。
+
 Install the test dependencies once:
 
 ```bash
@@ -97,6 +128,31 @@ network latency, provider availability, or a two-hour matrix.
 `.github/workflows/python-tests.yml` 会在相关 Python PR 上运行这条快速通道。
 它刻意不包含真实模型调用和 full smoke catalog，因此普通迭代不依赖凭证、网络
 时延、模型服务可用性或两小时级测试矩阵。
+
+The Linux suite uses two hosted runners with two xdist workers each.
+`pytest-split` partitions the complete collection using `least_duration`;
+without a timing file, tests have equal weight and alternate between shards.
+Lint, type checks, and the CLI budget run separately. The required `pytest`
+check rejects failed/skipped shards and missing coverage artifacts, then uses
+`coverage combine` to enforce the existing 19.6% floor on the union, not on
+individual shards. Relative coverage paths make reports portable across runners.
+The reusable Sonar workflow consumes that same run's XML and never reruns
+pytest or reads cross-run artifacts. Missing Sonar tokens still skip analysis
+successfully; test jobs receive no Sonar secret. The trigger is the union of
+the former Python and Sonar paths, so app-only and Sonar-configuration changes
+also run this lane, including on forks without a token.
+
+Linux 全套测试分到两台 hosted runner，每台保留两个 xdist worker。`pytest-split`
+按完整 collection 分片；没有历史耗时时，等权测试交替分配。lint、类型检查和 CLI
+预算独立执行。必需的 `pytest` 汇总检查会拒绝失败／跳过的分片和缺失的 coverage，
+合并后再执行原有 19.6% 门槛；不要求单个分片达到全套覆盖率。coverage 使用相对路径，
+Sonar 只复用同一次 run 的 XML，不重复测试、不跨 run 取产物。缺少 token 仍成功跳过
+Sonar，测试 job 不接收 Sonar secret。触发范围取原有两套 workflow 的并集，因此仅改
+前端或 Sonar 配置也走此通道，包括没有 token 的 fork。
+
+Reproduce one shard locally with `python -m pytest -q -n 2 --splits 2 --group 1
+--splitting-algorithm least_duration --cov=loopx`. Omit the split arguments to
+run the complete suite locally. 全量本地测试仍省略分片参数即可。
 
 ## Smokes And Canary / Smoke 与 Canary
 

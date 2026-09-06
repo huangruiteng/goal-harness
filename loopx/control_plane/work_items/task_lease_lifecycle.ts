@@ -58,9 +58,16 @@ import {
   type TaskLeaseLifecycleDecision,
   type TaskLeaseLifecycleDecisionInput,
 } from "./task_lease_lifecycle_decision.ts";
+import {
+  beginLeaseOutboxEntry,
+  decodeLocalAuthorityShadowBinding,
+  type LeaseOutboxCapture,
+  type LocalAuthorityShadowBinding,
+} from "../coordination/local_authority_shadow_outbox.ts";
+import { TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA } from "../coordination/coordination_state_contract.generated.ts";
 
 export const TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION =
-  "loopx_task_lease_lifecycle_native_v0";
+  TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA;
 export const TASK_LEASE_LIFECYCLE_RECEIPT_SCHEMA =
   "task_lease_lifecycle_receipt_v0";
 export const TASK_LEASE_FENCE_RECEIPT_SCHEMA = "task_lease_fence_receipt_v0";
@@ -104,6 +111,7 @@ interface LifecycleRequest {
   fence_operation_id: string | null;
   current_time: Date | null;
   owner_pid: number | null;
+  runtime_shadow: LocalAuthorityShadowBinding | null;
 }
 
 interface LifecycleDependencies {
@@ -471,6 +479,41 @@ function decodeRequest(value: unknown): LifecycleRequest {
     fence_operation_id: fenceOperationId,
     current_time: optionalDate(input.current_time, "current_time"),
     owner_pid: optionalPositiveInteger(input.owner_pid, "owner_pid"),
+    runtime_shadow: decodeLocalAuthorityShadowBinding(input.runtime_shadow),
+  };
+}
+
+async function captureLeaseWrite(
+  request: LifecycleRequest,
+  previous: LeaseRecord | null,
+  next: LeaseRecord,
+  writeClass: string,
+): Promise<Awaited<ReturnType<typeof beginLeaseOutboxEntry>> | null> {
+  if (request.runtime_shadow === null) return null;
+  return await beginLeaseOutboxEntry({
+    runtime_root: request.runtime_root,
+    goal_id: request.goal_id,
+    lease_directory: taskLeaseDirectory(request),
+    write_class: writeClass,
+    operation_id: request.idempotency_key ?? request.fence_operation_id,
+    previous_lease: previous,
+    planned_lease: next,
+  });
+}
+
+function attachRuntimeShadowCapture(
+  response: JsonObject,
+  capture: LeaseOutboxCapture | null,
+): JsonObject {
+  if (capture === null) return response;
+  return {
+    ...response,
+    coordination_runtime_shadow_capture: {
+      entry_id: capture.entry_id,
+      seq: capture.seq,
+      source_bytes_digest: capture.source_bytes_digest,
+      failure: capture.failure,
+    },
   };
 }
 
@@ -1673,9 +1716,13 @@ async function ordinaryOperation(
     const response = responseForOrdinary(request, leasePath, next, false, { released: true });
     await persistOperationReceipt(request, "prepared", next, response);
     await dependencies.beforeWrite?.(next);
+    const shadowCapture = await captureLeaseWrite(
+      request, existing, next, "task_lease_release",
+    );
     await atomicWriteJson(leasePath, next);
+    await shadowCapture?.commit();
     await persistOperationReceipt(request, "committed", next, response);
-    return response;
+    return attachRuntimeShadowCapture(response, shadowCapture);
   }
   if (existing === null || decision.next_lease === null) {
     throw transitionError(request, "invalid_lease_snapshot", existing, leasePath);
@@ -1704,9 +1751,13 @@ async function ordinaryOperation(
   await persistOperationReceipt(request, "prepared", next, response);
   await dependencies.beforeWrite?.(next);
   if (request.authority) await revalidateAuthoritySources(request.authority.source_receipts);
+  const shadowCapture = await captureLeaseWrite(
+    request, existing, next, `task_lease_${request.operation}`,
+  );
   await atomicWriteJson(leasePath, next);
+  await shadowCapture?.commit();
   await persistOperationReceipt(request, "committed", next, response);
-  return response;
+  return attachRuntimeShadowCapture(response, shadowCapture);
 }
 
 function fencePayload(
@@ -2212,7 +2263,11 @@ async function fenceVerify(
       };
       await dependencies.beforeWrite?.(lease);
       await revalidateAuthoritySources(request.authority.source_receipts);
+      const shadowCapture = await captureLeaseWrite(
+        request, rawLease, lease, "task_lease_auto_acquire",
+      );
       await atomicWriteJson(leasePath, lease);
+      await shadowCapture?.commit();
       const response = fencePayload(
         { ...request, owner: request.owner },
         lease,
@@ -2231,7 +2286,7 @@ async function fenceVerify(
         base: receipt,
       });
       keep = true;
-      return response;
+      return attachRuntimeShadowCapture(response, shadowCapture);
     }
     // A response can be lost after an auto-acquire write but before the
     // receipt reaches the caller.  The durable fence receipt proves that the
@@ -2558,6 +2613,7 @@ async function fenceClose(
     if (!claimedOwner || claimedOwner.token !== request.lock_token) {
       throw new EffectRuntimeConflictError("task lease fence token is no longer held", "fence_token_invalid");
     }
+    let shadowCapture: LeaseOutboxCapture | null = null;
     if (request.committed && request.release_lease) {
       const at = lifecycleNow(request, dependencies);
       const leasePath = leasePathFor(request);
@@ -2631,7 +2687,11 @@ async function fenceClose(
       if (!alreadyReleased) {
         const next = releasedLease(lease, at);
         await dependencies.beforeWrite?.(next);
+        shadowCapture = await captureLeaseWrite(
+          request, lease, next, "task_lease_fence_close",
+        );
         await atomicWriteJson(leasePath, next);
+        await shadowCapture?.commit();
         released = true;
       }
     }
@@ -2657,7 +2717,7 @@ async function fenceClose(
       fenceExpectedLeaseEpoch: request.fence_expected_lease_epoch ?? receipt?.fence_expected_lease_epoch,
       closeRequestDigest: fenceCloseRequestDigest(request),
     });
-    return response;
+    return attachRuntimeShadowCapture(response, shadowCapture);
   } finally {
     if (claim) {
       await releaseFileMutationLock(
@@ -2682,7 +2742,18 @@ export async function executeTaskLeaseLifecycle(
     if (request.operation === "fence_close") return await fenceClose(request, dependencies);
     if (request.operation === "terminal_verify" || request.operation === "holder_verify") {
       const fence = await fenceVerify(request, dependencies);
-      return { ok: true, schema_version: "task_lease_v0", action: request.operation, fence, settlement: lifecycleSettlement(request, "committed") };
+      const capture = fence.coordination_runtime_shadow_capture;
+      delete fence.coordination_runtime_shadow_capture;
+      return {
+        ok: true,
+        schema_version: "task_lease_v0",
+        action: request.operation,
+        fence,
+        settlement: lifecycleSettlement(request, "committed"),
+        ...(capture === undefined
+          ? {}
+          : { coordination_runtime_shadow_capture: capture }),
+      };
     }
     return await withFileMutationLock(
       legacyCoordinationLeaseLockPath(request.runtime_root, request.goal_id),

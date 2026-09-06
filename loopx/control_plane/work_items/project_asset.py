@@ -351,7 +351,8 @@ def project_asset_handoff_check_projection(item: dict[str, Any]) -> dict[str, An
     if not isinstance(project_asset, dict):
         return None
 
-    quota = project_asset.get("quota") if isinstance(project_asset.get("quota"), dict) else {}
+    raw_quota = project_asset.get("quota")
+    quota = raw_quota if isinstance(raw_quota, dict) else {}
     if not quota and isinstance(item.get("quota"), dict):
         quota = item["quota"]
 

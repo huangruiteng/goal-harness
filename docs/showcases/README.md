@@ -129,6 +129,21 @@ the artifact with `python3 examples/showcase-animation-prototype-smoke.py`.
 
 ## Experimental Feature Demos
 
+### DSH × LoopX: Replan a real decision
+
+[![DSH × LoopX recording cover](../assets/showcases/dsh-loopx/dsh-loopx-cover.png)](../assets/showcases/dsh-loopx/dsh-loopx-quickstart-replan.mp4)
+
+The [60-second real DSH recording](../assets/showcases/dsh-loopx/dsh-loopx-quickstart-replan.mp4)
+starts with one explicit `loopx` skill selection, then shows a serverless
+constraint changing a logging-library decision from Pino to Roarr without
+losing the earlier evidence. The public fixture verifies 3/3 behaviors and
+documents why 12 packages became 4.
+
+    python3 examples/dsh-loopx-demo-smoke.py
+
+Read the [case and evidence boundary](cases/dsh-loopx-replan-demo.md), or
+[reproduce the DSH path](../../examples/dsh-loopx-demo/README.md).
+
 ### Start With A Useful Loop
 
 If you want a lightweight first demo before reading the case studies, start
@@ -201,6 +216,7 @@ directory.
 | [Blocked P0 safe rotation](cases/0617-blocked-p0-safe-rotation.md) | Reproducible demo | Concrete user gate, safe P1/P2 fallback | Focused synthetic smoke |
 | [PR issue automatic fix](cases/0624-pr-issue-auto-fix.md) | Reproducible demo | Issue-fix workflow, repro, reviewer handoff | Public-safe pattern case |
 | [Agent-to-agent PR comment loop](cases/0623-agent-to-agent-pr-comments.md) | Reproducible demo | Claimed handoff, comment, fix, review packet | Public-safe pattern case |
+| [DSH × LoopX Replan](cases/dsh-loopx-replan-demo.md) | Reproducible recorded demo | Native skill selection, durable Replan, GoalBar closeout | Real DSH recording plus deterministic public fixture |
 
 ## Appendix Cases
 

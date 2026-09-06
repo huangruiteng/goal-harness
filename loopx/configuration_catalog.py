@@ -4,6 +4,30 @@ import shlex
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .capabilities.configuration_ui import build_capability_configuration_catalog
+
+DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
+
+
+def build_configuration_capability_descriptors() -> list[dict[str, Any]]:
+    """Discover the same features as Goal settings without inventing Goal state.
+
+    Only static descriptor fields cross this boundary: no current values,
+    Goal-specific commands, or synthetic effective configuration.
+    """
+    catalog = build_goal_configuration_catalog(
+        goal_id="",
+        settings={},
+        feature_summary={},
+        default_multi_subagent_max_children=DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN,
+        explore_harness_profiles=(),
+    )
+    fields = ("feature_id", "display_name", "availability", "effect", "documentation")
+    return [
+        {key: feature[key] for key in fields if key in feature}
+        for feature in catalog["features"]
+    ]
+
 
 def _configure_command(
     goal_id: str,
@@ -58,9 +82,7 @@ def build_goal_configuration_catalog(
     )
     change_quality = (
         feature_summary.get("change_quality_qualification")
-        if isinstance(
-            feature_summary.get("change_quality_qualification"), Mapping
-        )
+        if isinstance(feature_summary.get("change_quality_qualification"), Mapping)
         else {}
     )
     inspect_command = _configure_command(goal_id)
@@ -69,12 +91,15 @@ def build_goal_configuration_catalog(
         "enabled",
         "--max-children",
         str(default_multi_subagent_max_children),
-        "--allowed-domain",
-        "<bounded-domain>",
     )
     peer_coordination = (
         feature_summary.get("peer_task_coordination")
         if isinstance(feature_summary.get("peer_task_coordination"), Mapping)
+        else {}
+    )
+    local_authority_shadow = (
+        feature_summary.get("local_authority_shadow")
+        if isinstance(feature_summary.get("local_authority_shadow"), Mapping)
         else {}
     )
     graph_enable_args = ("--explore-graph-enabled",)
@@ -84,7 +109,7 @@ def build_goal_configuration_catalog(
         "generic",
     )
 
-    return {
+    catalog = {
         "schema_version": "loopx_goal_configuration_catalog_v0",
         "scope": "default_off_optional_capabilities",
         "all_settings_help_command": "loopx configure-goal --help",
@@ -101,29 +126,78 @@ def build_goal_configuration_catalog(
         },
         "features": [
             {
+                "feature_id": "local_authority_shadow",
+                "display_name": "Local post-commit authority observation",
+                "availability": "experimental_opt_in",
+                "default": {"enabled": False},
+                "current": {
+                    "enabled": local_authority_shadow.get("enabled") is True,
+                    "mode": local_authority_shadow.get("mode"),
+                    "status": local_authority_shadow.get("status", "disabled"),
+                },
+                "consider_when": (
+                    "A Goal needs to exercise the first Stage 2C observation "
+                    "plumbing while legacy local writers remain authoritative."
+                ),
+                "effect": (
+                    "Captures a best-effort post-commit snapshot of Todo and "
+                    "task-lease state through the FileAuthorityStore contract."
+                ),
+                "does_not": [
+                    "read the candidate for lifecycle decisions",
+                    "write candidate state back into Markdown or task-lease files",
+                    "promote shared authority or fence legacy writers",
+                    "bind the snapshot to the exact primary transaction",
+                    "guarantee delivery through a durable outbox",
+                    "compare source and candidate or issue a parity verdict",
+                ],
+                "commands": {
+                    "preview_enable": _configure_command(
+                        goal_id, "--local-authority-shadow-file"
+                    ),
+                    "apply_enable": _configure_command(
+                        goal_id, "--local-authority-shadow-file", execute=True
+                    ),
+                    "preview_disable": _configure_command(
+                        goal_id, "--clear-local-authority-shadow"
+                    ),
+                    "apply_disable": _configure_command(
+                        goal_id, "--clear-local-authority-shadow", execute=True
+                    ),
+                    "verify": [inspect_command],
+                },
+                "documentation": {
+                    "path": "docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md",
+                    "url": (
+                        "https://github.com/huangruiteng/loopx/blob/main/"
+                        "docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md"
+                    ),
+                },
+            },
+            {
                 "feature_id": "multi_subagent",
                 "display_name": "Adaptive child capacity",
                 "availability": "supported_opt_in",
-                "default": {"enabled": False},
+                "default": {
+                    "enabled": False,
+                    "max_children": default_multi_subagent_max_children,
+                    "allowed_domains": [],
+                },
                 "current": {
                     "enabled": feature_summary.get("multi_subagent") == "enabled",
                     "max_children": orchestration.get("max_children"),
                     "allowed_domains": list(orchestration.get("allowed_domains") or []),
                 },
-                "required_inputs": {
-                    "bounded-domain": (
-                        "Replace the placeholder with one public-safe child-agent "
-                        "responsibility domain. Repeat --allowed-domain when needed."
-                    )
-                },
+                "required_inputs": {},
                 "consider_when": (
                     "The goal has at least two independent, non-overlapping work items and "
                     "the host can run child agents."
                 ),
                 "effect": (
-                    "Sets the hard capacity and responsibility-domain boundary for "
-                    "adaptive child orchestration; the task coordinator still decides "
-                    "whether, what, and how to parallelize."
+                    "Sets the hard capacity boundary for adaptive child orchestration. "
+                    "Optional --allowed-domain values narrow eligible Todo lanes; without "
+                    "them, the task coordinator still decides whether, what, and how to "
+                    "parallelize within every other admission boundary."
                 ),
                 "does_not": [
                     "force single-agent or multi-agent execution",
@@ -615,3 +689,36 @@ def build_goal_configuration_catalog(
             },
         ],
     }
+    periodic_report = settings.get("periodic_report")
+    catalog["features"].append(
+        {
+            "feature_id": "periodic_report",
+            "display_name": "Periodic reports",
+            "availability": "supported_explicit_override",
+            "default": {"enabled": False, "timezone": "UTC"},
+            **(
+                {"current": dict(periodic_report)}
+                if isinstance(periodic_report, Mapping)
+                else {}
+            ),
+            "consider_when": (
+                "This Goal needs a fixed report route that must not follow the live "
+                "machine default."
+            ),
+            "effect": (
+                "Stores one complete Goal-specific periodic-report override; no fields "
+                "are inherited while the override is present."
+            ),
+            "does_not": [
+                "merge individual Goal fields with machine defaults",
+                "replace credentials or provider bindings with public configuration",
+            ],
+            "commands": {"verify": [inspect_command]},
+            "documentation": {},
+        }
+    )
+    catalog["capability_catalog"] = build_capability_configuration_catalog(
+        goal_features=catalog["features"],
+        explore_harness_profiles=explore_harness_profiles,
+    )
+    return catalog

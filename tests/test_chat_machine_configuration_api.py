@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import http.client
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
@@ -128,6 +130,60 @@ def test_machine_configuration_uses_generic_chat_routes() -> None:
     assert CHAT_MACHINE_CONFIGURATION_ROLLBACK_PATH.endswith("/rollback")
 
 
+def test_real_chat_http_catalog_and_machine_write_boundary(tmp_path: Path) -> None:
+    from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
+
+    server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
+    server.runtime_root = tmp_path
+    server.verbose = False
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(*server.server_address, timeout=5)
+    try:
+        connection.request("GET", CHAT_MACHINE_CONFIGURATION_PATH)
+        response = connection.getresponse()
+        assert response.status == 200
+        catalog = json.loads(response.read())["capability_catalog"]["capabilities"]
+        assert {item["capability_id"] for item in catalog} >= {
+            "periodic_report",
+            "multi_subagent",
+            "explore_graph",
+        }
+        connection.request(
+            "POST",
+            CHAT_MACHINE_CONFIGURATION_PREVIEW_PATH,
+            body=json.dumps(
+                {
+                    "namespace": "multi_subagent",
+                    "namespace_configuration": {"enabled": True},
+                }
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        rejected = connection.getresponse()
+        assert rejected.status == 400
+        assert json.loads(rejected.read())["ok"] is False
+        connection.request(
+            "POST",
+            CHAT_MACHINE_CONFIGURATION_PREVIEW_PATH,
+            body=json.dumps(
+                {
+                    "namespace": "periodic_report",
+                    "namespace_configuration": _namespace(),
+                }
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        accepted = connection.getresponse()
+        assert accepted.status == 201
+        assert json.loads(accepted.read())["status"] == "preview"
+    finally:
+        connection.close()
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def test_inspection_lists_registered_namespaces_without_local_refs(
     tmp_path: Path,
 ) -> None:
@@ -160,10 +216,77 @@ def test_inspection_lists_registered_namespaces_without_local_refs(
             }
         ],
     }
+    capability_catalog = response["capability_catalog"]
+    assert capability_catalog["schema_version"] == "capability_configuration_catalog_v0"
+    capabilities = {
+        item["capability_id"]: item for item in capability_catalog["capabilities"]
+    }
+    capability = capabilities["periodic_report"]
+    assert capability["capability_id"] == "periodic_report"
+    assert capability["available_scopes"] == ["machine", "goal"]
+    assert capability["machine_namespace"] == "periodic_report"
+    assert (
+        capability["default"]
+        == response["namespace_catalog"]["namespaces"][0]["configuration_template"]
+    )
+    assert capability["configuration_editor"]["supported_scopes"] == [
+        "machine",
+        "goal",
+    ]
+    assert [field["key"] for field in capability["configuration_editor"]["fields"]] == [
+        "enabled",
+        "profile_preset",
+        "route_ref",
+        "timezone",
+    ]
+    effective = capability["effective_configuration"]
+    assert effective["source"] == "capability_default"
+    assert effective["configuration"] == capability["default"]
+    assert effective["goal_override_present"] is False
+    assert effective["machine_default_present"] is False
+    assert str(effective["effective_revision"]).startswith("sha256:")
     assert response["machine_configuration"] is None
     encoded = json.dumps(response)
     assert str(tmp_path) not in encoded
     assert "defaults_ref" not in response
+
+
+def test_machine_catalog_discovers_goal_features_without_granting_machine_writes(
+    tmp_path: Path,
+) -> None:
+    from loopx.configuration_catalog import build_goal_configuration_catalog
+
+    handler = _Handler(tmp_path)
+    handler._machine_configuration_inspect()
+    machine = {
+        item["capability_id"]: item
+        for item in handler.responses[0]["capability_catalog"]["capabilities"]
+    }
+    goal = build_goal_configuration_catalog(
+        goal_id="sample",
+        settings={},
+        feature_summary={},
+        default_multi_subagent_max_children=2,
+        explore_harness_profiles=(),
+    )
+    assert set(machine) == {feature["feature_id"] for feature in goal["features"]}
+    assert "multi_subagent" in machine
+    for capability_id, item in machine.items():
+        assert "current" not in item
+        assert "commands" not in item
+        if capability_id != "periodic_report":
+            assert item["available_scopes"] == ["goal"]
+            assert "machine_namespace" not in item
+            assert "machine" not in item["configuration_editor"]["writable_scopes"]
+            assert item["effective_configuration"]["source"] == "not_configured"
+
+    rejected = _Handler(
+        tmp_path,
+        {"namespace": "multi_subagent", "namespace_configuration": {"enabled": True}},
+    )
+    rejected._machine_configuration_update(execute=False)
+    assert rejected.responses[0]["ok"] is False
+    assert rejected.responses[0]["status_code"] == 400
 
 
 def test_preview_apply_inspect_and_rollback_are_revision_locked(tmp_path: Path) -> None:

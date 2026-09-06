@@ -59,7 +59,7 @@ def with_replan_novelty_guidance(action: str) -> str:
 
 
 def replan_obligation_id_from_packet(value: Any) -> str | None:
-    packet = value if isinstance(value, Mapping) else {}
+    packet: Mapping[str, Any] = value if isinstance(value, Mapping) else {}
     return normalize_todo_replan_obligation_id(packet.get("obligation_id"))
 
 
@@ -68,10 +68,9 @@ def todo_lifecycle_settlement_obligation(
 ) -> Mapping[str, Any] | None:
     """Return the lifecycle-settlement subtype from a status payload or obligation."""
 
-    obligation = (
-        value.get("autonomous_replan_obligation")
-        if isinstance(value.get("autonomous_replan_obligation"), Mapping)
-        else value
+    raw_obligation = value.get("autonomous_replan_obligation")
+    obligation: Mapping[str, Any] = (
+        raw_obligation if isinstance(raw_obligation, Mapping) else value
     )
     if obligation.get("resolution_mode") != TODO_LIFECYCLE_SETTLEMENT_RESOLUTION_MODE:
         return None
@@ -91,13 +90,14 @@ def project_todo_lifecycle_settlement_reentry(
     obligation = todo_lifecycle_settlement_obligation(payload)
     if obligation is None:
         return None
+    raw_triggers = obligation.get("triggers")
     triggers = [
         {
             key: item.get(key)
             for key in ("kind", "todo_id", "completion_turn_key")
             if item.get(key) is not None
         }
-        for item in obligation.get("triggers") or []
+        for item in (raw_triggers if isinstance(raw_triggers, list) else [])
         if isinstance(item, Mapping)
         and item.get("kind") == "completed_advancement_without_successor"
         and normalize_todo_id(item.get("todo_id"))
@@ -132,14 +132,14 @@ def build_autonomous_replan_cli_actions(
     )
     if lifecycle_reentry is not None:
         return list(lifecycle_reentry["next_cli_actions"])
-    packet = (
-        payload.get("replan_action_packet")
-        if isinstance(payload.get("replan_action_packet"), Mapping)
-        else {}
+    raw_packet = payload.get("replan_action_packet")
+    packet: Mapping[str, Any] = (
+        raw_packet if isinstance(raw_packet, Mapping) else {}
     )
-    writeback_contract = (
-        packet.get("writeback_contract")
-        if isinstance(packet.get("writeback_contract"), Mapping)
+    raw_writeback_contract = packet.get("writeback_contract")
+    writeback_contract: Mapping[str, Any] = (
+        raw_writeback_contract
+        if isinstance(raw_writeback_contract, Mapping)
         else {}
     )
     successor_command = str(
@@ -217,6 +217,12 @@ def ensure_replan_novelty_policy(
                 "monitor_target_id",
                 "progress_fingerprint",
                 "agent_id",
+                *(
+                    ("latest_generated_at", "oldest_counted_generated_at")
+                    if trigger.get("kind")
+                    in {"periodic_review", "periodic_review_due"}
+                    else ()
+                ),
             )
             if trigger.get(key) is not None
         }
@@ -385,7 +391,11 @@ def _monitor_no_change_evidence(
     if not isinstance(agent_todos, dict):
         return None
     raw_monitors = agent_todos.get("monitor_open_items")
-    monitors = [item for item in raw_monitors or [] if isinstance(item, dict)]
+    monitors = [
+        item
+        for item in (raw_monitors if isinstance(raw_monitors, list) else [])
+        if isinstance(item, dict)
+    ]
     stalled: list[tuple[int, dict[str, Any]]] = []
     for item in monitors:
         try:
@@ -448,8 +458,9 @@ def _future_due_blocking_monitor(
     if not accountable_agent_id:
         return None
     raw_monitors = agent_todos.get("monitor_open_items")
+    monitor_items = raw_monitors if isinstance(raw_monitors, list) else []
     monitors_by_id: dict[str, dict[str, Any]] = {}
-    for monitor in raw_monitors or []:
+    for monitor in monitor_items:
         if not isinstance(monitor, dict):
             continue
         monitor_todo_id = normalize_todo_id(monitor.get("todo_id"))
@@ -469,11 +480,8 @@ def _future_due_blocking_monitor(
         claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
         if accountable_agent_id and claimed_by and claimed_by != accountable_agent_id:
             continue
-        condition = (
-            item.get("resume_condition")
-            if isinstance(item.get("resume_condition"), dict)
-            else {}
-        )
+        raw_condition = item.get("resume_condition")
+        condition = raw_condition if isinstance(raw_condition, dict) else {}
         monitor_todo_id = normalize_todo_id(
             item.get("blocking_monitor_todo_id")
             or condition.get("target_todo_id")

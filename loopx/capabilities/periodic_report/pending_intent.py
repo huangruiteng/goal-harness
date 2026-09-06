@@ -43,6 +43,11 @@ from .incremental import (
     build_periodic_report_publication_candidate,
     write_periodic_report_publication_candidate,
 )
+from .machine_defaults import (
+    build_periodic_report_delivery_authority,
+    resolve_goal_periodic_report_subscription,
+)
+from .machine_store import read_periodic_report_machine_defaults
 from .workspace import (
     build_periodic_report_workspace_projection,
     write_periodic_report_workspace_projection,
@@ -87,11 +92,16 @@ def _intent_key(intent: Mapping[str, Any]) -> str:
     ).hexdigest()[:24]
 
 
-def _periodic_report_delivery_binding_ref(generation_id: object) -> str:
+def _periodic_report_delivery_binding_ref(
+    generation_id: object, authority: Mapping[str, Any]
+) -> str:
     digest_suffix = str(generation_id).split("_")[-1][:16]
+    authority_suffix = str(authority.get("effective_revision") or "").split(":")[-1][
+        :12
+    ]
     # Todo capability binding refs require the namespaced value to start with
     # a letter. Generation digests are hexadecimal and may start with a digit.
-    return f"periodic-report:g{digest_suffix}"
+    return f"periodic-report:g{digest_suffix}-a{authority_suffix}"
 
 
 def _attempt_dir(
@@ -225,10 +235,26 @@ def _load_consumption_receipt(
         not isinstance(receipt, Mapping)
         or receipt.get("schema_version") != CONSUMPTION_RECEIPT_SCHEMA
         or receipt.get("intent_digest") != intent_digest
-        or receipt.get("status") != "approval_pending"
+        or receipt.get("status") not in {"approval_pending", "delivery_ready"}
     ):
         return None
     return receipt
+
+
+def _active_delivery_subscription(
+    *, registry_path: Path, runtime_root: Path, goal_id: str
+) -> dict[str, Any] | None:
+    """Resolve the current standing delivery authority for one pending report."""
+
+    registry = read_json(registry_path)
+    goal = find_registry_goal(registry, goal_id)
+    if not isinstance(goal, Mapping):
+        return None
+    subscription = resolve_goal_periodic_report_subscription(
+        goal,
+        read_periodic_report_machine_defaults(runtime_root),
+    )
+    return dict(subscription) if subscription.get("enabled") is True else None
 
 
 def _next_attempt_revision(
@@ -366,6 +392,14 @@ def periodic_report_pending_intent_interaction_hook(
     normalized_agent_id = str(agent_id or "").strip()
 
     def produce() -> Mapping[str, Any]:
+        try:
+            subscription = _active_delivery_subscription(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+            )
+        except (OSError, TypeError, ValueError):
+            subscription = None
         intents = (
             pending_periodic_report_intents(
                 registry_path=registry_path,
@@ -373,7 +407,7 @@ def periodic_report_pending_intent_interaction_hook(
                 goal_id=goal_id,
                 agent_id=normalized_agent_id,
             )
-            if normalized_agent_id
+            if normalized_agent_id and subscription is not None
             else []
         )
         if not intents:
@@ -406,14 +440,15 @@ def periodic_report_pending_intent_interaction_hook(
                 "action_kind": "consume_periodic_report_intent",
                 "action_summary": (
                     "Prepare the typed report facts, author the required Chinese "
-                    "analysis narrative, then freeze one locally validated draft."
+                    "analysis narrative, freeze one validated draft, then queue its "
+                    "configured Goal Channel delivery."
                 ),
                 "command": (
                     "loopx periodic-report consume-pending "
                     f"--goal-id {goal_id} --agent-id {normalized_agent_id} --execute"
                 ),
                 "generation_authorized": True,
-                "external_delivery_authorized": False,
+                "external_delivery_authorized": True,
                 "agent_read_required": True,
             },
         }
@@ -428,13 +463,29 @@ def periodic_report_pending_intent_interaction_hook(
 
 
 def _progress_facts(
-    *, registry_path: Path, goal_id: str, agent_id: str, completed_at: str
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    completed_at: str,
+    available_capabilities: Any = None,
 ) -> list[dict[str, Any]]:
+    from ...control_plane.todos.todo_index import (
+        MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+    )
+    from ...rollout_event_log import load_rollout_events, rollout_event_log_path
+
     snapshot = build_project_progress_snapshot(
         registry_path=registry_path,
         goal_id=goal_id,
         agent_id=agent_id,
         completed_at=completed_at,
+        available_capabilities=available_capabilities,
+        rollout_events=load_rollout_events(
+            rollout_event_log_path(runtime_root, goal_id),
+            limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+        ),
     )
     if not isinstance(snapshot, Mapping):
         raise ValueError("periodic-report has no public-safe progress items")
@@ -920,12 +971,27 @@ def consume_pending_periodic_report_intent(
             "status": "no_pending_intent",
             "external_writes_performed": False,
         }
+    subscription = _active_delivery_subscription(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+    )
+    if subscription is None:
+        return {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "subscription_disabled",
+            "external_writes_performed": False,
+        }
     intent = intents[0]
     trigger = evaluate_periodic_report_trigger_evaluation_intent(intent)
     payload = intent["payload"]
     stage = payload["stage_completion"]
     completed_at = str(stage["completed_at"])
     project_progress = payload.get("project_progress")
+    fallback_capabilities = payload.get("available_capabilities")
+    if fallback_capabilities is None and isinstance(payload.get("turn"), Mapping):
+        fallback_capabilities = payload["turn"].get("available_capabilities")
     facts = (
         _progress_facts_from_snapshot(
             project_progress,
@@ -935,9 +1001,11 @@ def consume_pending_periodic_report_intent(
         if isinstance(project_progress, Mapping)
         else _progress_facts(
             registry_path=registry_path,
+            runtime_root=runtime_root,
             goal_id=goal_id,
             agent_id=agent_id,
             completed_at=completed_at,
+            available_capabilities=fallback_capabilities,
         )
     )
     actionable, rejection_revision = _next_attempt_revision(
@@ -987,7 +1055,7 @@ def consume_pending_periodic_report_intent(
         ),
     )
     if not response_path.is_file():
-        result = {
+        editorial_result = {
             "ok": True,
             "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
             "status": "editorial_required",
@@ -1003,7 +1071,7 @@ def consume_pending_periodic_report_intent(
         if execute:
             request_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_json(request_path, editorial_request)
-        return result
+        return editorial_result
     authored = _load_editorial_response(
         request=editorial_request,
         response_path=response_path,
@@ -1032,7 +1100,7 @@ def consume_pending_periodic_report_intent(
         document=document, artifacts=[markdown, html]
     )
     generation = bundle["generation_receipt"]
-    digest_suffix = str(generation["generation_id"]).split("_")[-1][:16]
+    delivery_authority = build_periodic_report_delivery_authority(subscription)
     result: dict[str, Any] = {
         "ok": True,
         "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
@@ -1054,7 +1122,8 @@ def consume_pending_periodic_report_intent(
             "evidence_lineage_validated": True,
             "external_writes_performed": False,
         },
-        "approval_scope": f"direction:action:periodic_report_{digest_suffix}",
+        "external_delivery_authorized": True,
+        "delivery_authority": delivery_authority,
         "external_writes_performed": False,
     }
     if not execute:
@@ -1106,59 +1175,37 @@ def consume_pending_periodic_report_intent(
         path=publication_candidate_path,
         candidate=publication_candidate,
     )
-    approval_scope = str(result["approval_scope"])
     delivery = add_goal_todo(
         registry_path=registry_path,
         goal_id=goal_id,
         role="agent",
         text=(
-            "[P0] Deliver the approved periodic report as two independent Goal "
+            "[P0] Deliver the configured periodic report as two independent Goal "
             "Channel messages: the report entry and the Lark document entry for "
             f"{generation['generation_id']}."
         ),
-        status="blocked",
+        status="open",
         note=(
             "Use only the frozen generation consumption receipt and the current "
             "Goal Channel project_bot binding; do not fall back to a user or "
-            "default Bot identity."
+            "default Bot identity. The enabled periodic-report subscription is "
+            "the standing delivery authority."
         ),
         task_class="advancement_task",
         action_kind="deliver_periodic_report_goal_channel",
         task_domain="provider_delivery",
         capability_binding_ref=_periodic_report_delivery_binding_ref(
-            generation["generation_id"]
+            generation["generation_id"], delivery_authority
         ),
         required_write_scopes=["goal_channel/lark/messages"],
         required_capabilities=["network", "lark_bot_message_write"],
         target_capabilities=["periodic_report", "goal_channel"],
-        required_decision_scopes=[approval_scope],
         claimed_by=agent_id,
-        agent_id=agent_id,
-    )
-    gate = add_goal_todo(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        role="user",
-        text=(
-            "[P0] 审阅并批准精确冻结的中文阶段分析周报 "
-            f"{generation['generation_id']}；批准前不得发布妙搭或发送群消息。"
-        ),
-        note=(
-            f"HTML digest {html['content_digest']}; Markdown digest "
-            f"{markdown['content_digest']}; approval grants only the exact frozen payload."
-        ),
-        task_class="user_gate",
-        action_kind="approve_periodic_report_payload",
-        decision_scope=approval_scope,
-        bound_agent=agent_id,
-        blocks_agent=agent_id,
-        unblocks_todo_id=str(delivery["todo_id"]),
         agent_id=agent_id,
     )
     durable = {
         **result,
-        "status": "approval_pending",
-        "approval_todo_id": gate.get("todo_id"),
+        "status": "delivery_ready",
         "delivery_todo_id": delivery.get("todo_id"),
         "artifacts": {
             "html_path": str(html_path),

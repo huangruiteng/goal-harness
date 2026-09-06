@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LoopX Showcase: DSH × LoopX：约束变化后的显式 Replan</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../showcase-page.css">
+</head>
+<body>
+<div class="gh">
+  <div class="grain"></div>
+  <article>
+
+    <nav class="nav" aria-label="Showcase navigation">
+      <a href="../index.html">Showcases</a>
+      <a href="../showcase-catalog.json">Catalog</a>
+      <a href="dsh-loopx-replan-demo.en.html">English</a>
+    </nav>
+
+    <div class="mlab">2026-09 · agent-host-integration</div>
+    <h1>DSH × LoopX：约束变化后的显式 Replan</h1>
+    <div class="accent">真实 DSH 会话在新增 serverless 约束后修正日志库决策，同时保留原始证据和后继工作。</div>
+    <p>用户可以改变关键约束而不丢失决策链；DSH 继续负责执行，LoopX 让工作前沿持续可见。</p>
+    <div class="chips"><span>可复现 Demo</span><span>real_recording_with_reproducible_fixture</span><span>DSH</span><span>real recording</span><span>reproducible</span><span>附录案例</span></div>
+    <div class="diagram" aria-label="LoopX control-plane sketch"> <svg viewBox="0 0 760 320" role="img"> <rect width="760" height="320" fill="#0e0e10"></rect> <rect x="285" y="34" width="190" height="58" rx="8" fill="none" stroke="#6e79d6" stroke-width="2"></rect> <text x="380" y="68" text-anchor="middle" fill="#f1f2f3" font-size="15" font-weight="600">LoopX</text> <line x1="380" y1="92" x2="380" y2="132" stroke="#3a3d42" stroke-width="2"></line> <rect x="52" y="132" width="180" height="78" rx="8" fill="none" stroke="#6a6e76" stroke-width="2"></rect> <rect x="290" y="124" width="180" height="94" rx="8" fill="#6e79d6" fill-opacity=".16" stroke="#6e79d6" stroke-width="2"></rect> <rect x="528" y="132" width="180" height="78" rx="8" fill="none" stroke="#6a6e76" stroke-width="2"></rect> <text x="142" y="166" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">DSH × LoopX：约束变化后的显式 R</text> <text x="380" y="163" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">原生 Skill 激活</text> <text x="618" y="166" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">reproducible synthetic d</text> <text x="142" y="188" text-anchor="middle" fill="#62666d" font-size="11">goal / trigger</text> <text x="380" y="185" text-anchor="middle" fill="#62666d" font-size="11">todo / gate / evidence</text> <text x="618" y="188" text-anchor="middle" fill="#62666d" font-size="11">public outcome</text> <line x1="232" y1="171" x2="282" y2="171" stroke="#6e79d6" stroke-width="2"></line> <polygon points="290,171 280,165 280,177" fill="#6e79d6"></polygon> <line x1="470" y1="171" x2="520" y2="171" stroke="#6e79d6" stroke-width="2"></line> <polygon points="528,171 518,165 518,177" fill="#6e79d6"></polygon> <path d="M618 210 L618 260 L142 260 L142 218" fill="none" stroke="#5a5e65" stroke-width="2"></path> <polygon points="142,210 136,221 148,221" fill="#8a8088"></polygon> </svg> </div>
+
+    <div class="section-head"><span>01</span><h2>案例背景</h2></div>
+    <div class="text-stack"><p>新的关键约束可能推翻 Agent 的旧决策；普通聊天修正容易抹掉计划为什么变化、后续还需验证什么。</p></div>
+
+    <div class="section-head"><span>02</span><h2>仓库证据</h2></div>
+    <div class="panel">
+      <div class="panel-row"><div class="panel-key">证明点</div><div class="panel-val"><p>宿主原生 Agent 可以改变计划，同时保留旧计划为何被替代的证据。</p></div></div>
+      <div class="panel-row"><div class="panel-key">LoopX 介入</div><div class="panel-val"><p>原生 Skill 激活、Replan、后继 Todo、证据与 GoalBar</p></div></div>
+    </div>
+    <div class="metric-grid"><div class="metric"><strong>60s</strong><span>真实录屏</span></div><div class="metric"><strong>12→4</strong><span>依赖包数量</span></div><div class="metric"><strong>3/3</strong><span>行为测试</span></div><div class="metric"><strong>2/2</strong><span>GoalBar Todo</span></div></div>
+    <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">证明点</div><p>宿主原生 Agent 可以改变计划，同时保留旧计划为何被替代的证据。</p></div></div>
+    <div class="evidence-assets"><figure class="evidence-asset"><a href="../../assets/showcases/dsh-loopx/dsh-loopx-cover.png"><img src="../../assets/showcases/dsh-loopx/dsh-loopx-cover.png" alt="DSH × LoopX demo cover showing explicit skill activation, durable work, and a real Replan from Pino to Roarr" loading="lazy"></a><figcaption>Public cover derived from the edited DSH recording; the linked case provides the video, fixture, and evidence boundary.</figcaption></figure></div>
+
+    <div class="section-head"><span>03</span><h2>LoopX 行为</h2></div>
+    <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">在 DSH 技能选择器中显式激活 loopx</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">保留初始决策和证据</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">serverless 约束改变排序时记录 Replan</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">把后继实现与测试绑定到同一个持久 Goal</div></div></li><li><span class="flow-num">5</span><div class="flow-body"><div class="flow-title">修订后的工作完成后才关闭可见 GoalBar</div></div></li></ul>
+
+    <div class="section-head"><span>04</span><h2>用户看到什么</h2></div>
+    <div class="text-stack"><p>用户可以改变关键约束而不丢失决策链；DSH 继续负责执行，LoopX 让工作前沿持续可见。</p></div>
+
+    <div class="section-head"><span>05</span><h2>仓库来源</h2></div>
+    <div class="source-list"><a class="source-ref" href="dsh-loopx-replan-demo.md"><span>案例说明</span><code>docs/showcases/cases/dsh-loopx-replan-demo.md</code></a></div>
+    <div class="boundary-box"><p><strong>证据边界.</strong> 经编辑的真实 DSH 录屏，加上合成的公开 fixture 与测试；不包含凭证、provider 配置、原始推理、安装重试、本地 LoopX 状态或未剪辑录屏。</p></div>
+    <div class="chips"><a class="case-link" href="dsh-loopx-replan-demo.md">案例说明</a></div>
+    <div class="metric"><strong>Demo</strong><span><code>python3 examples/dsh-loopx-demo-smoke.py</code></span></div>
+    <footer>由 docs/showcases/showcase-catalog.json 生成。不包含私有链接、原始聊天、本地状态或内部媒体。</footer>
+  </article>
+</div>
+</body>
+</html>

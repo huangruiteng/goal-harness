@@ -101,6 +101,7 @@ def handle_handoff_mode_command(
     registry_path: Path,
     output_format: Callable[..., str],
     print_payload: PrintPayload,
+    runtime_root_arg: str | None = None,
 ) -> int | None:
     if args.command != "handoff-mode":
         return None
@@ -124,6 +125,7 @@ def handle_handoff_mode_command(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
                 mode=args.mode,
+                runtime_root_arg=runtime_root_arg,
                 **path_args,
             )
     except HandoffModeError as exc:

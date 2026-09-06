@@ -31,17 +31,12 @@ def test_current_repository_debt_is_reviewed_without_line_count_pins() -> None:
     assert set(report["category_counts"]) == {"compatibility_facade"}
     assert report["category_counts"].get("oversized_decision_function", 0) == 0
     assert report["reviewed_exception_count"] == report["finding_count"]
-
-
-def test_current_module_metric_budget_keeps_existing_modules_grandfathered() -> None:
-    report = build_control_plane_maintainability_report(REPOSITORY_ROOT)
-
-    assert report["ok"] is True, render_control_plane_maintainability_report(report)
+    # One scan of the immutable checkout owns both debt and metric assertions.
+    # Mutated temporary repositories below must still be evaluated afresh.
     assert report["policy"]["module_line_limit"] == 1500
     assert report["policy"]["module_any_limit"] == 300
     assert report["policy"]["module_dict_any_limit"] == 300
     assert report["category_counts"].get("module_metric_budget", 0) == 0
-    assert report["unreviewed_count"] == 0
 
 
 def test_module_metric_ratchet_detects_new_oversized_module(tmp_path: Path) -> None:

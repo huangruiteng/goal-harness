@@ -13,6 +13,7 @@ from loopx.control_plane.turn_driver.codex_cli import (
     _diagnostic_failure_category,
     _event_failure_categories,
     _event_failure_category,
+    _prompt,
     _select_failure_category,
     codex_cli_result_schema,
     codex_cli_session_binding,
@@ -20,6 +21,9 @@ from loopx.control_plane.turn_driver.codex_cli import (
     run_codex_cli_host,
 )
 from loopx.control_plane.turn_driver.executor import BuiltInHostError
+from loopx.control_plane.turn_driver.subagent_execution_topology import (
+    OPAQUE_REF_PATTERN,
+)
 
 
 FAILURE_ENVELOPE_FIXTURES = (
@@ -180,6 +184,30 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
     assert set(schema["required"]) == set(schema["properties"])
     assert "raw_trajectory" not in schema["properties"]
     assert "stdout" not in schema["properties"]
+    assert "child_execution_receipts" not in schema["properties"]
+    request = _request()
+    request["subagent_execution_topology"] = {
+        "schema_version": "subagent_execution_topology_v0"
+    }
+    enabled_schema = codex_cli_result_schema(request)
+    receipt_properties = enabled_schema["properties"]["child_execution_receipts"][
+        "items"
+    ]["properties"]
+    assert "task_packet_digest" in receipt_properties
+    assert receipt_properties["context_mode"]["enum"] == [
+        "forked_snapshot",
+        "fresh",
+        "resume",
+    ]
+    assert receipt_properties["runtime_id"] == {
+        "type": "string",
+        "enum": ["codex-cli"],
+    }
+    assert (
+        receipt_properties["evidence_refs"]["items"]["pattern"]
+        == OPAQUE_REF_PATTERN
+    )
+    assert receipt_properties["evidence_refs"]["minItems"] == 1
     assert {
         field: schema["properties"][field]["maxLength"]
         for field in (
@@ -299,6 +327,26 @@ def test_codex_cli_specific_quota_code_wins_over_http_429() -> None:
     }
 
     assert _event_failure_category(event) == "quota_exhausted"
+
+
+def test_codex_cli_prompt_isolates_subagent_instructions_to_enabled_request() -> None:
+    request = _request()
+
+    disabled_prompt = _prompt(request)
+    assert "spawn_agent" not in disabled_prompt
+    assert "subagent_execution_topology" not in disabled_prompt
+
+    request["subagent_execution_topology"] = {
+        "schema_version": "subagent_execution_topology_v0"
+    }
+    prompt = _prompt(request)
+    assert "execute the separate host_adapter projection" in prompt
+    assert "fresh maps to fork_context=false" in prompt
+    assert "forked_snapshot maps to fork_context=true" in prompt
+    assert "never infer native arguments inside the generic LoopX task packet" in prompt
+    assert "set runtime_id to the stable host id codex-cli" in prompt
+    assert "Never use an executable, workspace, session-file" in prompt
+    assert "opaque evidence_refs such as artifact:child-result" in prompt
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(

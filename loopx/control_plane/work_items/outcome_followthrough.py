@@ -63,7 +63,7 @@ def build_outcome_followthrough_hint(
         ],
         "spend_policy": (
             "do not spend for another contract/preparation-only slice; spend only "
-            "after validated product-path evidence, benchmark/case evidence, or a "
+            "after validated goal-outcome evidence or a "
             "precise blocker writeback"
         ),
     }

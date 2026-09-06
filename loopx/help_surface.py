@@ -166,7 +166,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
             },
             {
                 "command": "loopx resolve-agent-thread",
-                "purpose": "Read one exact host thread binding across the current project without mutating authority.",
+                "purpose": (
+                    "Read one exact host thread binding from an opaque id or copied "
+                    "Codex task deep link without mutating authority."
+                ),
             },
             {
                 "command": "loopx unbind-agent-thread",
@@ -288,6 +291,7 @@ COMMAND_GROUPS: list[dict[str, object]] = [
 MANPAGE_COMMAND_HELP_ONLY = frozenset(
     {
         "archive-runtime",
+        "authority-shadow",
         "backup-state",
         "capability",
         "chat-endpoint",
@@ -315,6 +319,7 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "global-risks",
         "global-summary",
         "global-todos",
+        "goal-alignment",
         "handoff-mode",
         "heartbeat-prequota",
         "import-doc-registry-authority",
@@ -327,12 +332,14 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "promotion-gate",
         "read-only-map",
         "refresh-state",
+        "reliability-diagnostics",
         "register-authority-source",
         "registry-boundary",
         "reward",
         "reward-memory",
         "semantic-preference",
         "serve-status",
+        "shared-goal-alignment",
         "uninstall-project",
         "value-connectors",
         "version",

@@ -1,13 +1,16 @@
-import { Bot, ChevronDown, Eye, Info, Menu, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bot, ChevronDown, Eye, Info, Menu, RefreshCw, SlidersHorizontal } from "lucide-react";
 
 import { localizedGoalState, useWorkspaceI18n } from "./i18n";
 import type { WorkspaceAgentOption, WorkspaceGoal, WorkspaceGoalTab } from "./personal-workspace-model";
 import { goalUsageLabel } from "./personal-workspace-model";
+import { WorkspaceSelect } from "./workspace-select";
 
 export function ChannelHeader({
   agents,
   managerChatOpen,
   mobileNavigationOpen,
+  onOpenGoalCapabilities,
   onOpenGoalDetail,
   onOpenManagerChat,
   onRefresh,
@@ -24,6 +27,7 @@ export function ChannelHeader({
   agents: WorkspaceAgentOption[];
   managerChatOpen?: boolean;
   mobileNavigationOpen?: boolean;
+  onOpenGoalCapabilities?: () => void;
   onOpenGoalDetail?: () => void;
   onOpenManagerChat?: () => void;
   onRefresh?: () => void;
@@ -38,6 +42,36 @@ export function ChannelHeader({
   selectedGoalTab: WorkspaceGoalTab;
 }) {
   const { locale, t } = useWorkspaceI18n();
+  const [goalToolsOpen, setGoalToolsOpen] = useState(false);
+  const goalToolsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const goalToolsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!goalToolsOpen) return undefined;
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (!goalToolsRef.current?.contains(event.target as Node)) setGoalToolsOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setGoalToolsOpen(false);
+        goalToolsButtonRef.current?.focus();
+      }
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [goalToolsOpen]);
+
+  useEffect(() => setGoalToolsOpen(false), [selectedGoal?.goalId]);
+
+  function runGoalTool(action?: () => void) {
+    setGoalToolsOpen(false);
+    action?.();
+  }
+
   return (
     <header className="personal-channel-header">
       <button aria-expanded={mobileNavigationOpen ?? false} aria-label={t("header.openGoalNavigation")} className="personal-icon-button personal-mobile-menu" onClick={onOpenNavigation} type="button"><Menu size={18} /></button>
@@ -61,31 +95,53 @@ export function ChannelHeader({
           <button aria-current={managerChatOpen ? "page" : undefined} onClick={onOpenManagerChat} type="button">{t("header.chat")}</button>
         </nav>
       )}
-      {selectedGoal && onOpenGoalDetail ? (
-        <button aria-label={t("header.goalDetails")} className="personal-icon-button" onClick={onOpenGoalDetail} title={t("header.goalDetails")} type="button">
-          <Info size={17} />
-        </button>
-      ) : null}
       <div className="personal-channel-actions">
+        {selectedGoal && onOpenGoalDetail && onOpenGoalCapabilities ? (
+          <div className="personal-goal-tools" ref={goalToolsRef}>
+            <button
+              aria-expanded={goalToolsOpen}
+              aria-haspopup="menu"
+              aria-label={t("header.goalSettingsDescription")}
+              className="personal-goal-tools-trigger"
+              onClick={() => setGoalToolsOpen((open) => !open)}
+              ref={goalToolsButtonRef}
+              title={t("header.goalSettingsDescription")}
+              type="button"
+            >
+              <SlidersHorizontal aria-hidden size={16} />
+              <span>{t("header.goalSettings")}</span>
+              <ChevronDown aria-hidden size={13} />
+            </button>
+            {goalToolsOpen ? (
+              <fieldset aria-label={t("header.goalSettings")} className="personal-goal-tools-menu">
+                <button onClick={() => runGoalTool(onOpenGoalDetail)} type="button">
+                  <Info aria-hidden size={17} />
+                  <span><strong>{t("header.goalDetails")}</strong><small>{t("header.goalDetailsDescription")}</small></span>
+                </button>
+                <button onClick={() => runGoalTool(onOpenGoalCapabilities)} type="button">
+                  <SlidersHorizontal aria-hidden size={17} />
+                  <span><strong>{t("header.goalCapabilities")}</strong><small>{t("header.goalCapabilitiesDescription")}</small></span>
+                </button>
+              </fieldset>
+            ) : null}
+          </div>
+        ) : null}
         {readOnlySourceLabel ? (
           <span className="personal-read-only-source" title={t("header.readOnlySourceDescription", { source: readOnlySourceLabel })}><Eye size={15} />{readOnlySourceLabel}<small>{t("common.readOnly")}</small></span>
         ) : (
-          <label className="personal-agent-select">
-            <Bot size={16} />
-            <small>{t("header.chatRuntime")}</small>
-            <select
-              aria-label={t("header.selectChatRuntime")}
-              onChange={(event) => onSelectAgent(event.target.value)}
-              value={selectedAgentId}
-            >
-              {agents.map((agent) => (
-                <option disabled={!agent.available} key={agent.agentId} value={agent.agentId}>
-                  {agent.label}{agent.available ? "" : ` · ${t("header.agentUnavailable")}`}
-                </option>
-              ))}
-            </select>
-            <ChevronDown aria-hidden size={14} />
-          </label>
+          <WorkspaceSelect
+            ariaLabel={t("header.selectChatRuntime")}
+            className="personal-agent-select"
+            icon={<Bot size={16} />}
+            onChange={onSelectAgent}
+            options={agents.map((agent) => ({
+              disabled: !agent.available,
+              label: `${agent.label}${agent.available ? "" : ` · ${t("header.agentUnavailable")}`}`,
+              value: agent.agentId,
+            }))}
+            prefixLabel={t("header.chatRuntime")}
+            value={selectedAgentId}
+          />
         )}
         <span className="personal-live-indicator"><i />{t("header.live")}</span>
         {onRefresh ? (

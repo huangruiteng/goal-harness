@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
+import stat
+import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -18,12 +21,19 @@ from ..control_plane.coordination.runtime_shadow import (
     load_task_lease_runtime_shadow_records,
     resolve_coordination_runtime_shadow_config,
 )
+from ..control_plane.coordination.local_authority import (
+    read_canonical_todos_if_promoted,
+)
 from ..control_plane.quota.settlement import (
     QuotaSettlementReadback,
     read_heartbeat_settlement,
     settlement_result_payload,
 )
 from ..control_plane.todos.markdown import render_todo_markdown
+from ..control_plane.todos.machine_section_projection import (
+    render_canonical_todo_sections,
+)
+from ..file_lock import exclusive_file_lock
 from ..history import load_index, load_registry
 from ..paths import resolve_runtime_root
 from ..registry import find_registry_goal, registry_goals
@@ -44,6 +54,7 @@ from ..todos import (
     complete_goal_todo,
     list_goal_todos,
     resolve_todo_state,
+    resolve_todo_state_path,
     supersede_goal_todo,
     update_goal_todo,
 )
@@ -58,6 +69,7 @@ from .todo_argument_validation import (
     validate_todo_claim_options,
     validate_todo_complete_options,
     validate_todo_list_options,
+    validate_todo_project_markdown_options,
     validate_todo_suggest_options,
     validate_todo_supersede_options,
     validate_todo_update_options,
@@ -72,6 +84,50 @@ from .post_writeback import (
     PostWritebackProjectionBuilder,
     dispatch_committed_cli_post_writeback_hooks,
 )
+from ..control_plane.agents.capability_gate import (
+    runtime_capabilities_for_cli_projection,
+)
+from ..control_plane.turn_driver.journal_store import (
+    turn_journal_observed_capabilities,
+)
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    if os.name != "posix":  # pragma: no cover - Windows has no directory fsync
+        return
+    descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Durably replace a projection without changing the state-file mode."""
+
+    original_mode = stat.S_IMODE(path.stat().st_mode)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary_path = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            os.chmod(temporary_path, original_mode)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        _fsync_parent_directory(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _read_text_exact(path: Path) -> str:
+    """Decode UTF-8 while preserving every source newline sequence."""
+
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -306,6 +362,7 @@ def register_todo_command(
             "archive-completed",
             "suggest",
             "capture-followups",
+            "project-markdown",
         ],
         default=None,
         help=(
@@ -721,7 +778,18 @@ def register_todo_command(
     todo_parser.add_argument("--project", help="Project root. Defaults to the registry goal repo.")
     todo_parser.add_argument("--state-file", help="Active goal state path. Defaults to the registry goal state_file.")
     todo_parser.add_argument("--dry-run", action="store_true", help="Preview the active-state edit without writing.")
-    todo_parser.add_argument("--execute", action="store_true", help="For archive-completed, write the active-state edit.")
+    todo_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="For archive-completed or project-markdown, write the active-state edit.",
+    )
+    todo_parser.add_argument(
+        "--provider-revision",
+        help=(
+            "For project-markdown, exact canonical authority revision rendered "
+            "into the Todo section markers."
+        ),
+    )
 
 
 def _todo_path_args(args: argparse.Namespace) -> dict[str, Path | None]:
@@ -770,6 +838,61 @@ def handle_todo_command(
                 **_todo_path_args(args),
                 runtime_root_arg=runtime_root_arg,
             )
+        elif args.todo_command == "project-markdown":
+            validate_todo_project_markdown_options(args)
+            registry = load_registry(registry_path)
+            authority_read = read_canonical_todos_if_promoted(
+                runtime_root=resolve_runtime_root(registry, runtime_root_arg),
+                goal_id=args.goal_id,
+            )
+            if not isinstance(authority_read, dict):
+                raise ValueError(
+                    "todo project-markdown requires promoted canonical authority; "
+                    "legacy Markdown mode is unchanged"
+                )
+            if authority_read.get("provider_revision") != args.provider_revision:
+                raise ValueError(
+                    "todo project-markdown provider revision does not match the "
+                    "canonical read head"
+                )
+            _resolved_project, state_path = resolve_todo_state_path(
+                registry_path=registry_path,
+                goal_id=args.goal_id,
+                **_todo_path_args(args),
+            )
+            with exclusive_file_lock(
+                state_path,
+                operation="project_canonical_todo_sections",
+            ):
+                source = _read_text_exact(state_path)
+                projection = render_canonical_todo_sections(
+                    source,
+                    authority_read["todos"],
+                    provider_revision=args.provider_revision,
+                )
+                if args.execute and projection.changed:
+                    _atomic_write_text(state_path, projection.markdown)
+                    if _read_text_exact(state_path) != projection.markdown:
+                        raise RuntimeError("Todo Markdown projection readback mismatch")
+            payload = {
+                "ok": True,
+                "dry_run": not bool(args.execute),
+                "command": "project-markdown",
+                "goal_id": args.goal_id,
+                "state_file": str(state_path),
+                "source_authority": authority_read.get("source_authority"),
+                "provider_revision": projection.provider_revision,
+                "todo_count": projection.todo_count,
+                "changed": projection.changed,
+                "executed": bool(args.execute),
+                "source_sha256": projection.source_sha256,
+                "rendered_sha256": projection.rendered_sha256,
+                "narrative_sha256": projection.narrative_sha256,
+                "section_record_sha256": projection.section_record_sha256,
+                "parse_render_parity": True,
+                "narrative_preserved": True,
+                "legacy_fallback_used": False,
+            }
         elif args.todo_command == "add":
             validate_todo_add_options(args)
             replan_obligation_id = _validated_replan_successor_obligation(
@@ -779,6 +902,7 @@ def handle_todo_command(
             )
             payload = add_goal_todo(
                 registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
                 goal_id=args.goal_id,
                 role=args.role,
                 text=args.text,
@@ -839,6 +963,7 @@ def handle_todo_command(
             validate_todo_claim_options(args)
             payload = update_goal_todo(
                 registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
                 goal_id=args.goal_id,
                 todo_id=args.todo_id,
                 role=args.role,
@@ -852,6 +977,7 @@ def handle_todo_command(
             validate_todo_update_options(args)
             payload = update_goal_todo(
                 registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
                 goal_id=args.goal_id,
                 todo_id=args.todo_id,
                 text=args.text,
@@ -993,6 +1119,7 @@ def handle_todo_command(
             if completion_error is None:
                 payload = complete_goal_todo(
                     registry_path=registry_path,
+                    runtime_root_arg=runtime_root_arg,
                     goal_id=args.goal_id,
                     todo_id=args.todo_id,
                     role=args.role,
@@ -1032,6 +1159,7 @@ def handle_todo_command(
             validate_todo_supersede_options(args)
             payload = supersede_goal_todo(
                 registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
                 goal_id=args.goal_id,
                 todo_id=args.todo_id,
                 role=args.role,
@@ -1057,6 +1185,7 @@ def handle_todo_command(
             validate_todo_archive_completed_options(args)
             payload = archive_completed_todos(
                 registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
                 goal_id=args.goal_id,
                 role=args.role or "agent",
                 max_active_done=args.max_active_done,
@@ -1081,6 +1210,7 @@ def handle_todo_command(
                 followups.append(args.text)
             payload = capture_followup_todos(
                 registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
                 goal_id=args.goal_id,
                 followups=followups,
                 evidence=args.evidence or "",
@@ -1156,6 +1286,19 @@ def handle_todo_command(
         identity = settlement_identity.as_dict()
         committed_at = str(payload.get("updated_at") or "").strip()
         if committed_at:
+            # Capability evidence comes only from a Turn journal the TS
+            # journal owner validated against this completion's full
+            # settlement identity (goal/agent/binding/turn/effect): the
+            # journaled envelope froze what this exact Turn's scheduler
+            # observed. No fully-bound journal means no evidence, and gated
+            # successors stay excluded (fail closed).
+            observed = turn_journal_observed_capabilities(
+                resolve_runtime_root(load_registry(registry_path), runtime_root_arg),
+                settlement_identity=identity,
+            )
+            projected = runtime_capabilities_for_cli_projection(observed)
+            if projected:
+                payload["available_capabilities"] = projected
             payload["post_writeback_hooks"] = (
                 dispatch_committed_cli_post_writeback_hooks(
                     payload=payload,

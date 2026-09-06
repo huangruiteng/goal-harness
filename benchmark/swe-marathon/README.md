@@ -1,7 +1,9 @@
 # SWE-Marathon：codex × LoopX 评测
 
-裸 `codex`、codex 原生 `goal`、以及三种 LoopX 接入模式在 SWE-Marathon（Harbor）15 个任务上的对照。
-模型 `gpt-5.6`；agent 预算压至任务时限的 ~30%（`agent_timeout_multiplier=0.3`）；共 75 trial（15×5，每格 1）。
+> [打开双语可视化研究简报](https://huangruiteng.github.io/loopx/benchmarks/swe-marathon/)：以高信息密度方式呈现实验 setting、结果、轨迹机制、证据边界与下一轮实验建议。
+
+裸 `codex`、codex 原生 `goal`、以及三种 LoopX 接入模式在 SWE-Marathon v1.1（Harbor）15 个任务上的对照。
+模型 `GPT-5.6 Sol`，思考深度 `high`；agent 预算压至任务时限的 ~30%（`agent_timeout_multiplier=0.3`）；共 75 trial（15×5，每格 1）。
 目标是在长程领域产出可复算的一手对照，为"无人自动化默认姿势"提供评测证据。
 
 > **性质**：单次、每格 1 trial、多机制同变的**探索性观察**。数值为描述性统计，机制陈述为假设，需重复的匹配实验方能证实。
@@ -82,6 +84,7 @@ scoring/   评分/聚合/可视化（口径见 _common.py）
 skills/    两个五模式 benchmark skill
 runtime/   模式框架 + turn 驱动，含 automation 唤醒循环 loopx_turn_runner.py（见 runtime/RUNTIME.md）
 data.json  pinned public-safe 聚合产物
+case_insights.json  非官方 draft case-insight 记录（scoring/case_insights.py 由 data.json 生成）
 ```
 
 依赖 `loopx.capabilities.benchmark_toolkit` 与 harbor；内部网络拓扑与凭证未内嵌。
@@ -106,11 +109,11 @@ python3 scoring/_compare.py   <private_results_dir>
 
 | 组件 | 版本 |
 |---|---|
-| model | `gpt-5.6` |
+| model | `GPT-5.6 Sol`（reasoning effort: `high`） |
 | Codex | `0.151.0` |
 | LoopX | `0.5.3`（repo `bd52b28a`） |
 | harness (harbor) | `0.20.0` |
-| benchmark / verifier | SWE-Marathon（Harbor 任务集，`partial_score` 由任务 verifier 写入 `/logs/verifier/metrics.json`） |
+| benchmark / verifier | SWE-Marathon v1.1（Harbor 任务集；`partial_score` 由任务 verifier 写入 `/logs/verifier/metrics.json`） |
 | 预算 | `agent_timeout_multiplier=0.3`（~30%） |
 | 规模 | 75 trial（15 任务 × 5 模式，每格 1） |
 

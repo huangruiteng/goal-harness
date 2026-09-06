@@ -145,8 +145,9 @@ different version identifiers imply.
 
 `v0.5.4` does not mean that all of LoopX has been rewritten in TypeScript. The current release baseline is:
 
-- TypeScript owns the canonical semantics for migrated slices of the Effect Program, Turn settlement,
-  Todo completion, quota delivery routing, workspace causality, and scheduler transition/state;
+- TypeScript owns the canonical semantics for migrated slices of the Effect Program, Turn and Host Todo
+  settlement, Todo completion, quota delivery/spend/void/monitor-poll, the local task-lease lifecycle,
+  Vision refresh, governed capability validation, and scheduler heartbeat/state;
 - during the migration, the Python CLI still owns transport, legacy response projection, explicit
   external Provider calls, and some Markdown/event writeback;
 - each migrated rule has one semantic owner. A Python facade adapts a TypeScript transaction; it must not
@@ -156,8 +157,9 @@ different version identifiers imply.
 
 Treat the `v0.5.4` tag and release notes as the shipped baseline. Use the current status of the
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)
-for later cutovers and final CLI/App convergence. RFC Stages 3 and 4 remain future direction, not shipped
-behavior.
+for later cutovers and final CLI/App convergence. `v0.5.4` ships only the first receipt-bound scheduler
+follow-up slice of Stage 3; broader CLI/App convergence and Stage 4 distribution cleanup remain future
+work.
 
 ### Updating your mental model from `v0.4.4` to `v0.5.4`
 
@@ -165,10 +167,11 @@ If you read an earlier edition of the Dev Book, recalibrate these four areas fir
 
 | Area | Shipped in `v0.5.4` | Continue with |
 | --- | --- | --- |
-| Control Plane | Several high-risk decisions and effects have typed TypeScript transaction owners; Python facades still carry migration-time boundaries | [Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/) |
+| Control Plane | Complete Turn/Host Todo settlement, quota commit, task-lease lifecycle, Vision refresh, and scheduler-heartbeat transactions have typed TypeScript owners; Python facades still carry migration-time boundaries | [Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/) |
 | Operator surface | Personal Workspace exposes Goal, Task, Chat, and read-only status-source entrypoints; the UI is not a new source of truth | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v0.5.4/apps/presentation/dashboard/README.md) |
 | Host runtime | Codex, Claude Code, OpenCode, Pi, KunlunCode, DeepSeek Harness, and custom runners have distinct activation and stop contracts | [Runtime Connector Catalog](/loopx/docs/integrations/runtime-connector-catalog/) |
 | Capability and Provider | A Capability is defined by a package-owned catalog entry, a real command, and durable validation; a Provider or Extension does not inherit Kernel authority | [Capability Catalog](/loopx/docs/capabilities/) |
+| Shared authority | File, NoKV, and PostgreSQL providers remain staged candidates; installing a Provider does not change the default local authority | [Shared Authority RFC](/loopx/docs/architecture/rfcs/shared-goal-authority-state-provider-v0/) |
 
 This table is a reading map, not a copy of the release notes. Confirm whether a surface is usable through
 the installed release's `doctor`, `capability show`, Host readback, and versioned documentation.

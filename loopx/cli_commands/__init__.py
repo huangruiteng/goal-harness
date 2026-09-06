@@ -142,6 +142,10 @@ def _load_exports() -> None:
         handle_support_control_command,
         register_support_control_commands,
     )
+    from .authority_shadow import (
+        handle_authority_shadow_command,
+        register_authority_shadow_command,
+    )
     from .task_lease import handle_task_lease_command, register_task_lease_command
     from .todo import handle_todo_command, register_todo_command
     from .version import handle_version_command, register_version_command
@@ -221,6 +225,7 @@ __all__ = [
     "handle_starter_visible_pilot_command",
     "handle_summary_all_command",
     "handle_support_control_command",
+    "handle_authority_shadow_command",
     "handle_task_lease_command",
     "handle_todo_command",
     "handle_version_command",
@@ -268,6 +273,7 @@ __all__ = [
     "register_summary_all_command",
     "register_status_commands",
     "register_support_control_commands",
+    "register_authority_shadow_command",
     "register_task_lease_command",
     "register_todo_command",
     "register_version_command",

@@ -249,13 +249,18 @@ def test_multi_subagent_todo_parser_projects_untruncated_admission_authority() -
     lines = ["## Agent Todo", ""]
     for index in range(1, 19):
         todo_id = "todo_blocked_child" if index == 18 else f"todo_agent_{index}"
+        validation = (
+            " validation_command=python3%20-m%20pytest"
+            if index == 2
+            else ""
+        )
         lines.extend(
             [
                 f"- [ ] [P0] Inspect agent fixture {index}.",
                 (
                     f"  <!-- loopx:todo todo_id={todo_id} status=open "
                     "task_class=advancement_task action_kind=inspect "
-                    "task_domain=code -->"
+                    f"task_domain=code{validation} -->"
                 ),
             ]
         )
@@ -292,6 +297,10 @@ def test_multi_subagent_todo_parser_projects_untruncated_admission_authority() -
     user_authority = adaptive["user_todos"]["task_orchestration_authority"]
     assert len(agent_authority["candidate_items"]) == 18
     assert agent_authority["candidate_items"][-1]["todo_id"] == "todo_blocked_child"
+    declared_validation = agent_authority["candidate_items"][1]
+    assert declared_validation["completion_validation_required"] is True
+    assert "validation_command" not in declared_validation
+    assert "validation_command_argv" not in declared_validation
     assert user_authority["user_blocker_items"] == [
         {
             "todo_id": "todo_user_18",

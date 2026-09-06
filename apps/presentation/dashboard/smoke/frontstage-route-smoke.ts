@@ -55,6 +55,7 @@ includes(routerSource, 'todoLane: z.enum(["all", "user", "agent"]).optional().de
 includes(routerSource, 'todoQuery: z.string().optional().default("")', "frontstage todo search param");
 includes(routerSource, "basepath:", "router basepath option");
 includes(routerSource, "import.meta.env.BASE_URL", "Vite base URL router source");
+includes(routerSource, 'trailingSlash: "preserve"', "router preserves packaged subpath trailing slash");
 includes(packageSource, '"smoke:frontstage-browser"', "frontstage browser smoke script");
 includes(packageSource, '"smoke:frontstage-route"', "frontstage smoke script");
 includes(privateTrapFixtureSource, "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA", "fake-private status trap plan marker");

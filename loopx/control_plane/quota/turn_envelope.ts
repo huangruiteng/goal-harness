@@ -38,7 +38,8 @@ const CONTRACT_CAPSULE_FIELDS: Readonly<Record<string, readonly string[]>> = {
   work_lane_contract: [
     "schema_version", "lane", "monitor_kind", "next_lane", "obligation",
     "must_attempt_work", "reason_codes", "monitor_policy", "selected_todo_id",
-    "selected_next_due_at", "material_transition", "action",
+    "selected_next_due_at", "non_runnable_non_monitor_count",
+    "material_transition", "action",
   ],
   execution_profile: ["cadence", "minimum_scale", "spend_rule", "must_include"],
   execution_obligation: [

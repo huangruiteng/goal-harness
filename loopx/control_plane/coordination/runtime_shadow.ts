@@ -13,35 +13,44 @@ import {
   canonicalAuthoritySha256,
   requireAuthorityStoreId,
 } from "./authority_store_codec.ts";
-import { indexCoordinationProjectionTodos } from "./coordination_projection.ts";
+import {
+  indexCoordinationProjectionTodos,
+  validateCoordinationTodoReadModel,
+} from "./coordination_projection.ts";
 import { FileAuthorityStore } from "./file_authority_store.ts";
+import {
+  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_COMMIT_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_COMMIT_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+} from "./coordination_state_contract.generated.ts";
 
 export const COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_commit_v0";
+  COORDINATION_RUNTIME_SHADOW_COMMIT_REQUEST_SCHEMA;
 export const COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_result_v0";
-export const COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA =
-  "loopx_coordination_runtime_shadow_receipt_v0";
-export const COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_inspect_v0";
-export const COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_inspection_v0";
-export const COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_bootstrap_v0";
-export const COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_bootstrap_result_v0";
-export const COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_rollback_v0";
-export const COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_rollback_result_v0";
-export const COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_qualify_v0";
-export const COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_qualification_v0";
-export const COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA =
-  "loopx_coordination_runtime_shadow_todo_read_v0";
-export const COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA =
-  "loopx_coordination_runtime_shadow_todo_read_result_v0";
+  COORDINATION_RUNTIME_SHADOW_COMMIT_RESULT_SCHEMA;
+export {
+  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+} from "./coordination_state_contract.generated.ts";
 
 interface RuntimeShadowRequest {
   runtime_root: string;
@@ -955,6 +964,27 @@ export async function qualifyCoordinationRuntimeShadow(
     }
     const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
     const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
+    let todoReadModel: JsonObject;
+    try {
+      validateCoordinationTodoReadModel(request.projection, request.goal_id);
+      todoReadModel = validateCoordinationTodoReadModel(head.head, request.goal_id);
+    } catch (error) {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+        status: "drifted",
+        reason_code: "shadow_todo_consumer_semantics_invalid",
+        reason: error instanceof Error ? error.message : "Todo read-model validation failed",
+        policy,
+        qualified: false,
+        parity_matches: false,
+        expected_projection_sha256: expectedProjectionSha256,
+        observed_projection_sha256: observedProjectionSha256,
+        provider_revision: head.provider_revision,
+        cursor: head.cursor,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
     const lineage = await scanShadowLineage(store);
     if (lineage.status === "failed") {
       return {
@@ -1011,6 +1041,8 @@ export async function qualifyCoordinationRuntimeShadow(
         missing_required_event_kinds: missingRequiredEventKinds,
         enough_operations: enoughOperations,
         coverage_complete: coverageComplete,
+        todo_consumer_semantics_verified: true,
+        todo_read_model: todoReadModel,
         ...(transactionFailure === null ? {} : { reason_code: transactionFailure }),
       },
       primary_writeback_preserved: true,

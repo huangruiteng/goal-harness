@@ -226,6 +226,15 @@ def assert_status_uses_enum_not_raw_value() -> None:
     )
     assert (
         delivery_batch_scale_for_run({"classification": "owner_handoff_consumer_test"})
+        == UNKNOWN_DELIVERY_BATCH_SCALE
+    )
+    assert (
+        delivery_batch_scale_for_run(
+            {
+                "classification": "owner_handoff_consumer_test",
+                "delivery_batch_scale": DeliveryBatchScale.TEST_ONLY.value,
+            }
+        )
         == DeliveryBatchScale.TEST_ONLY.value
     )
 

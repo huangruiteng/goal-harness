@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -281,6 +282,7 @@ def test_runtime_writeback_can_read_legacy_unbounded_monitor(tmp_path: Path) -> 
 
     result = write_monitor_poll_todo_state(
         registry_path=registry,
+        runtime_root=tmp_path / "runtime",
         goal_id=GOAL_ID,
         generated_at="2026-08-11T00:00:00Z",
         execute=False,
@@ -701,7 +703,7 @@ def test_same_turn_should_run_settles_polled_monitor_before_successor_reselectio
         ),
         encoding="utf-8",
     )
-    refresh = run_json_cli(
+    refresh_args = (
         "refresh-state",
         "--goal-id",
         GOAL_ID,
@@ -729,9 +731,24 @@ def test_same_turn_should_run_settles_polled_monitor_before_successor_reselectio
         str(delivery_worktree),
         "--no-global-sync",
         "--suppress-external-sinks",
-        registry_path=registry,
-        runtime_root=runtime,
     )
+    index = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    before_refresh = index.read_text(encoding="utf-8").splitlines()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        refreshes = list(pool.map(
+            lambda _: run_json_cli(
+                *refresh_args, registry_path=registry, runtime_root=runtime
+            ),
+            range(2),
+        ))
+    assert sum(result["appended"] for result in refreshes) == 1
+    refresh = next(result for result in refreshes if result["appended"])
+    assert refresh["refresh_recovery"]["reason"] == "complete_material_monitor_writeback"
+    assert refresh["vision_checkpoint"]["satisfied"] is True
+    after_refresh = index.read_text(encoding="utf-8").splitlines()
+    assert len(after_refresh) == len(before_refresh) + 1
+    assert after_refresh[:len(before_refresh)] == before_refresh
+    assert next(result for result in refreshes if not result["appended"])["idempotent_replay"]
     assert refresh["settlement_result"]["ok"] is True
     spend = run_json_cli(
         "quota",

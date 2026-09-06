@@ -6,6 +6,7 @@ import hashlib
 import heapq
 import json
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,12 @@ DEFAULT_WORKSPACE_INDEX_LIMIT = 100
 MAX_WORKSPACE_INDEX_LIMIT = 200
 MAX_WORKSPACE_INDEX_OFFSET = 10_000
 _PROJECTION_FILENAME = "workspace-projection.json"
+
+
+def _delivered_at_order(value: object) -> datetime:
+    """Compare normalized UTC timestamps chronologically, not lexically."""
+
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
 def _canonical_digest(value: object) -> str:
@@ -253,7 +260,7 @@ def collect_periodic_report_workspace_index(
     normalized_offset = min(max(0, int(offset)), MAX_WORKSPACE_INDEX_OFFSET)
     root = runtime_root.expanduser().resolve() / "goals"
     total_count = 0
-    selected: list[tuple[str, str, dict[str, Any]]] = []
+    selected: list[tuple[datetime, str, dict[str, Any]]] = []
     selection_size = normalized_offset + normalized_limit
     pattern = (
         f"{goal_id}/periodic_reports/publication-cursors/*.json"
@@ -284,7 +291,11 @@ def collect_periodic_report_workspace_index(
             },
         }
         if selection_size:
-            candidate = (str(item["delivered_at"]), str(path), item)
+            candidate = (
+                _delivered_at_order(item["delivered_at"]),
+                str(path),
+                item,
+            )
             if len(selected) < selection_size:
                 heapq.heappush(selected, candidate)
             elif candidate[:2] > selected[0][:2]:

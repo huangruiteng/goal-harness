@@ -178,6 +178,18 @@ def test_workspace_index_bounds_latest_items_and_supports_offset(
         limit=2,
         offset=2,
     )
+    final_page = collect_periodic_report_workspace_index(
+        runtime_root=tmp_path,
+        goal_id="synthetic-goal",
+        limit=2,
+        offset=4,
+    )
+    past_end = collect_periodic_report_workspace_index(
+        runtime_root=tmp_path,
+        goal_id="synthetic-goal",
+        limit=2,
+        offset=10,
+    )
 
     assert latest["count"] == 2
     assert latest["returned_count"] == 2
@@ -190,6 +202,47 @@ def test_workspace_index_bounds_latest_items_and_supports_offset(
     assert page["offset"] == 2
     assert page["items"][0]["delivered_at"] < latest["items"][-1]["delivered_at"]
     assert page["items"][-1]["delivered_at"] == "2026-01-02T12:05:00Z"
+    assert final_page["returned_count"] == 1
+    assert final_page["truncated"] is False
+    assert past_end["items"] == []
+    assert past_end["truncated"] is False
+
+
+def test_workspace_index_orders_mixed_timestamp_precision_chronologically(
+    tmp_path: Path,
+) -> None:
+    projection, _cursor = _published(tmp_path)
+    candidate = build_periodic_report_publication_candidate(
+        goal_id="synthetic-goal",
+        agent_id="fractional-agent",
+        generation_id="report_generation_fractional",
+        trigger_receipt={"coalesced_trigger_ids": ["trigger_fractional"]},
+        facts=[
+            {
+                **fact,
+                "fact_fingerprint": "sha256:" + str(index) * 64,
+            }
+            for index, fact in enumerate(_facts(), start=1)
+        ],
+        baseline=None,
+        workspace_projection_sha256=str(projection["content_sha256"]),
+    )
+    commit_periodic_report_publication_cursor(
+        runtime_root=tmp_path,
+        candidate=candidate,
+        publication_id="publication_fractional",
+        delivered_at="2026-01-10T12:05:00.500000Z",
+        covered_until="2026-01-10T12:00:00Z",
+    )
+
+    latest = collect_periodic_report_workspace_index(
+        runtime_root=tmp_path,
+        goal_id="synthetic-goal",
+        limit=1,
+    )
+
+    assert latest["items"][0]["agent_id"] == "fractional-agent"
+    assert latest["items"][0]["delivered_at"] == "2026-01-10T12:05:00.500000Z"
 
 
 def test_published_workspace_projection_preserves_delta_and_lineage(

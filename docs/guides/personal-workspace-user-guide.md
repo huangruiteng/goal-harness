@@ -117,14 +117,19 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 
 在侧边栏点击具体的 Goal（例如 `Apollo Spacecraft Telemetry Pipeline`），进入该 Goal 的独立工作台。
 
-### 4.1 Tasks 任务看板视图
+### 4.1 Tasks 列表与看板视图
 ![Goal Tasks 4 列看板](../assets/personal-workspace/guide_goal_tasks_board.png)
 
-- **4 列看板流转**：
+- 默认显示四列看板；可切换到分组列表，列表中空分组隐藏、已完成分组默认折叠。
+- 看板与列表共享已完成历史（包含归档，排除持续监控任务），按工作 Agent 筛选。列表的已完成组默认折叠；展开并滚动可按需加载，每页 40 条，使用五分钟快照保持翻页稳定。两种视图均只渲染可见区域附近的记录，切换视图保留历史和总数。快照过期可重试，读取失败保留当前记录。只读远端来源不调用本机历史接口。本机历史详情保留 Todo 读取层返回的文本、路径和证据，不额外截断或替换路径；Markdown 读取层原有的 500 字符规范化上限仍适用。
+- 初次连接先显示加载状态，不把示例任务当作实时数据。执行会话连接失败时显示重连提示并退避轮询，隐藏页面暂停新的会话查询。
+- Files 的“前往会话”进入 Goal 会话；“导出摘要”导出安全摘要 Markdown，不下载原始文件。
+
+- **分组含义**：
   - **待确认（Attention Required）**：需用户决策或授权的卡片（黄色/红色标红，显示等待时间）；
   - **待执行 / 进行中（In Progress）**：按 P0 / P1 优先级排列的 Agent 待办事项；
   - **定时与持续（Scheduled & Continuous）**：绑定的周期性检查与监控；
-  - **已完成（Completed）**：最近已交付的待办归档。
+  - **已完成（Completed）**：已标记完成的工作任务；摘要总数与当前可查询明细的范围分别展示。
 
 - **💬 对话建议一键「转为 Task」**：
   - 看板顶部横幅会展示 Agent 最新的进度报告与下一步建议；
@@ -153,6 +158,7 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 
 - **执行健康度**：展示 Session ID、是否可继续以及当前 Agent 状态；
 - **代码仓只读绑定**：明确展示当前绑定的 GitHub / 本地仓库、生效分支及只读隔离属性；
+- **自适应子代理执行**：按 Goal 展示当前开关、可选的 `task_domain` 限制与最多子代理数；
 - **Lark / 飞书话题连接**：
   - 展示当前绑定的飞书群组与 Topic 话题；
   - **Capture scope**：可选择只接收明确 @ / 回复 App 的消息，或接收该 Goal Topic
@@ -165,6 +171,58 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
     - **Async inbox (`async_inbox`)**：写入该 Agent 的本地私有收件箱，等待后续显式
       `lark-inbox drain`；投递本身不会创建内联 Session，也不会提前回复或 ACK；
   - **Reply mode**：回复仍限定在来源 Topic 内，避免跨群或跨 Goal 投递。
+
+### 6.1 按 Goal 体验自适应子代理执行
+
+该控制面默认不对外暴露。先在 Goal 所在主机上显式启动带权威 opt-in 的本地
+Dashboard；不带此参数启动时，配置 API、状态字段和界面卡片都会保持缺失：
+
+```bash
+loopx dashboard --enable-goal-subagent-configuration
+```
+
+然后要为一个 Goal 开启运行时能力：
+
+1. 进入该 Goal，点击 **`Goal 详情`**；
+2. 在「自适应子代理执行」中选择最多子代理数。任务领域限制是可选项：全部不选表示
+   不按领域过滤；需要进一步收窄时，再从当前 Goal 开放 advancement Todo 已声明的
+   `task_domain` 中多选。每个选项会显示当前匹配的开放 Todo 数量。控制台优先读取
+   完整 Todo index，压缩的 Goal 卡片 Todo 仅作兼容回退；
+3. 点击开关。此时只生成零写入预览；检查领域限制与并发上限后，再点击「确认」；
+4. 界面只有在 source registry 写入、共享 registry 同步和读回校验都成功后，才把
+   开关显示为「开启」。
+
+可在终端读取同一权威配置和运行时决策：
+
+```bash
+loopx configure-goal --goal-id <goal-id>
+loopx quota should-run --goal-id <goal-id>
+```
+
+要撤销 Dashboard 配置面的 opt-in，停止当前 Dashboard 后不带
+`--enable-goal-subagent-configuration` 重新启动。这个启动参数只暴露本机 loopback
+上的 preview-locked 配置合同，不授予 Agent 新的 Goal、仓库、凭证、发布或生产权限。
+
+关闭时再次点击开关、检查预览并确认；也可以使用同一配置入口：
+
+```bash
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --multi-subagent-feature off \
+  --execute
+```
+
+如果当前没有开放 advancement Todo 声明 `task_domain`，界面会显示说明性空状态，
+但不会阻止开启。此时只是不增加领域过滤，Todo 仍必须通过状态、依赖、quota、能力、
+仓库、写入范围和冲突检查。选择了一个或多个领域后，未声明或不匹配领域的 Todo 会被
+拒绝。控制台不会从 Todo 文本猜测领域，也不会提供与真实 Todo 无关的固定候选列表；
+已保存但当前匹配数为 0 的领域仍会显示，方便审阅或移除既有边界。
+
+这个开关只给运行时增加有界的临时子代理容量，不会强制并行，不会创建持久 Agent
+层级，也不会绕过 Todo 归属、quota、能力、Gate 或写入范围。SSH 状态来源保持只读，
+必须在 Goal 所在主机上修改。所选 `allowed_domains` 会进入 Goal 配置，不要填写凭证、
+客户名或其他私密信息。完整执行语义见
+[Codex sub-agent orchestration](../integrations/codex-subagent-orchestration.md)。
 
 在「通知设置 → Lark / 飞书 → Connections」中选择 Goal、Target Agent、群聊、
 Capture scope 与 Agent ingress，保存后可在同一页读回当前模式、Session 绑定状态、

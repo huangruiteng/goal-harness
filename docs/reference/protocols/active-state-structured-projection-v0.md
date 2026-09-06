@@ -8,6 +8,21 @@ quota, review packets, dashboards, and future event-store migration.
 This is not a new canonical store. The projection is recomputable from the
 current active-state Markdown and does not grant write permission.
 
+The machine-owned Todo read subset is versioned separately in
+`coordination_state_contract_v0.json`. That provider-neutral contract is shared
+by Python and TypeScript. It declares the legacy consumer record and a separate
+native domain record for file, NoKV, or PostgreSQL authority heads.
+`archive_state` is durable task state: archival changes handoff and succession
+eligibility independently of completion. `source_section` and optional `index`
+belong to the Markdown compatibility projection, not native creation inputs.
+Legacy v0 records retain those fields; importing them into the domain version
+requires explicit qualification, including preservation of priority tie ordering
+currently influenced by `index`. There is no automatic stored-head migration.
+Provider-bound projection rejects an unknown
+field instead of silently dropping it. Removing a declared field requires a
+reviewed compatibility decision and maintainer approval, including for fields
+that are persisted but not yet used by a decision path.
+
 ## Shape
 
 ```json
@@ -102,12 +117,89 @@ Writers must continue to use LoopX commands such as `loopx todo`,
 `loopx refresh-state`, `loopx operator-gate`, and future event append APIs.
 Directly editing a projection is not a state transition.
 
+## Markdown Ownership Boundary
+
+Markdown is not one undifferentiated database row. Its free-form rationale,
+notes, and operator narrative remain human-authored. Sections that correspond
+to the versioned coordination contract may later be regenerated as a
+deterministic compatibility projection after authority promotion. Promotion
+must not make unrelated prose generated or discard text that is outside the
+machine-owned record contract.
+
+The cutover is deliberately section-sized, not document-sized:
+
+- before promotion, Markdown remains the authority and existing writers are
+  unchanged;
+- after promotion, the versioned Todo records live in the canonical provider
+  head and Markdown's Todo section is a compatibility/workbench projection;
+- free-form rationale and operator narrative remain Markdown-owned;
+- a provider outage after promotion fails closed and never makes stale
+  Markdown authoritative again.
+
+The first write using this boundary is Todo claim. It exercises a complete
+provider-neutral TypeScript transaction while leaving the default local path
+unchanged. After promotion, `loopx todo project-markdown` can explicitly
+regenerate the two active Todo sections from the exact provider revision. It
+never runs before promotion and never turns Markdown back into authority.
+
+The projection command has four safety properties:
+
+- it replaces only the active user and agent Todo section spans;
+- it preserves every segment outside those spans byte-for-byte;
+- it fails closed when a canonical field cannot be represented by the current
+  Markdown metadata grammar, rather than dropping that field;
+- it parses the rendered sections back and requires deterministic parity and
+  idempotent second rendering before an `--execute` write.
+
+The writer imports the legacy LoopX-generated H2/list/metadata layout. It stops
+at the first non-generated line, rather than extending replacement to the next
+H2 or EOF; following H1, Setext, indented headings and ordinary narrative remain
+outside its ownership. Code fences and multiline comments are not Todo headers.
+The projection then emits paired `loopx:todo-region-v0` begin/end markers under
+each Todo heading. The renderer, active Todo reader and section editor share
+that boundary contract. Future projections use those explicit bounds; orphan,
+nested, mismatched or missing markers, and non-generated content inside a marked
+region, fail closed. No ordinary Goal is rewritten or opted in by installation.
+Legacy unmarked readers and bootstrap output remain unchanged.
+
+Narrative byte preservation and canonical Todo parse/render parity are separate
+checks: the former compares untouched source slices, while the latter reads only
+the generated regions. Neither marker is provider authority or a current-head
+freshness guarantee.
+
+Each section includes a compact `loopx:todo-section-projection-v0` marker with
+the canonical provider revision and a SHA-256 digest of the complete canonical
+records for that role. The marker is lineage evidence, not a write API.
+The command proves that the rendered records came from the exact provider head
+observed at read time. It does not claim that the revision remains the current
+head after that read; a later canonical mutation makes the Markdown projection
+stale and requires another explicit projection. Consumers must always read the
+provider, never the Markdown marker, when they need current authority state.
+
+Rollback is intentionally asymmetric. Before promotion, the existing shadow
+rollback quarantines the candidate provider lineage and Markdown remains
+canonical. After promotion, a provider outage or revision mismatch fails
+closed; operators may restore a reviewed provider snapshot and regenerate the
+Todo sections, but must not promote stale Markdown back to canonical truth.
+
 ## Migration Path
+
+The explicit projector currently accepts only complete legacy v0 records for
+the two active Todo sections. Native `TodoDomainRecord` manifests and archived
+records remain fail-closed inputs; this command must not invent missing
+Markdown provenance or claim native/archive export qualification. A later
+adapter slice must prove native domain parity, legacy ordering preservation,
+and archive ownership before expanding that boundary. It is a manual
+read-time projection, not the transaction-bound projection outbox needed for
+automatic synchronization.
 
 1. Emit this projection from active-state Markdown.
 2. Add parity smokes comparing it with existing status todo summaries.
 3. Move Markdown parsing into a dedicated active-state read-model module behind
    the same projection fields.
-4. Add event-store dual-read parity.
-5. Promote event projection only after rollback and idempotency checks are in
-   place.
+4. Promote one complete provider-backed mutation at a time behind the durable
+   writer fence; keep the default Markdown mode unchanged.
+5. Regenerate only machine-owned sections from one exact canonical provider
+   revision, preserving human narrative and validating parse/render parity.
+6. Promote a provider projection only after rollback and idempotency checks are
+   in place.

@@ -10,13 +10,14 @@ ports, accounts or private receipts.
 | --- | --- | --- |
 | Compile secret-free profiles, one-pass account rings and logical model routes | Migrated and strengthened | `contract.py::compile_catalog`; preferred entry points, terminal fallback tails, modality and Fast eligibility are explicit |
 | Generate explicit Fast sibling rows and inject the Fast request tier | Migrated as a public-safe compiler/normalizer contract | `contract.py::compile_catalog` plus `normalize_selector_request`; the live CPA adapter/plugin enforces the same decision before alias mapping |
-| Project host identity separately from actual A/B routing and quota | Migrated as a public-safe adapter boundary | `contract.py::project_runtime_status`; raw CPA management responses and logs remain operator-local |
-| Generate a Codex catalog from cached model entries, start an isolated App Server, call `model/list` | Partially migrated | Catalog contract and content-free readback assertions are public; spawning the host-owned App Server remains an operator adapter |
+| Project host identity separately from actual account routing and quota | Migrated | `operator_observations.py` reduces local observations; `contract.py::project_runtime_status` retains the public boundary |
+| Generate a Codex catalog from cached model entries, start an isolated App Server, call `model/list` | Migrated | `operator_catalog.py` uses explicit cache/binary references; `selectors.py` shares the existing ring compiler |
 | Verify a patched desktop runtime across versioned anchors, ASAR member/header integrity, signature, launch and heartbeat readback | Migrated as a read-only qualification | `qualify_desktop_patch`; patching, signing and process lifecycle remain operator-owned effects |
 | Invalidate a provider cooldown after a newer successful quota reset | Migrated as a recovery ordering contract | `qualify_quota_recovery`; CPA owns the live invalidation and bounded reprobe |
+| Invalidate incident cooldown and revalidate degraded fallback affinity after a provider-wide outage ends | Migrated as a recovery ordering contract | `qualify_outage_recovery`; CPA owns the live invalidation, bounded probe and binding revalidation |
 | Preserve Code Mode tool item shape across heterogeneous fallback | Migrated as admission plus qualification | profile `tool_transports`, `normalize_selector_request` and `qualify_tool_transport`; adapters must prove custom-item preservation before declaring support |
 | Reconcile an ordered multi-PR candidate against exact heads and required seams | Migrated as a public-safe planning contract | `reconcile_integration_candidate` returns core `integration-branch` inputs; Git effects remain outside the extension |
-| Prepare/start/serve/stop CPA; reconcile A/B OAuth slots; load third-party API credentials | Private runtime boundary | Not copied. A future permissioned provider may wrap install/status/validate, but login and secret loading stay operator-owned |
+| Prepare/start/serve/stop CPA; reconcile OAuth slots; load referenced credentials | Migrated as an explicit local CLI | `operator.py`, `operator_runtime.py` and `operator_settings.py`; private configuration and credentials remain outside Git and the read-only extension protocol |
 | Snapshot App/selector configuration, validate hashes and roll back selected files | Planning contract migrated | `upgrade_plan` owns order, matrix and rollback trigger; filesystem effects need a future request-bound execution envelope |
 | Scan local config/auth files for secret patterns | Split | `reject_private_material` protects extension input/output; scanning owner-local files remains an operator preflight |
 | Emit failover evidence rows | Replaced | `upgrade_plan.required_checks` and `qualify_snapshot.checks` are the public evidence vocabulary; raw evidence directories are excluded |
@@ -49,6 +50,8 @@ The package keeps credential-free examples for every operation, including:
   signature, launch and heartbeat qualification;
 - [`examples/quota-recovery.json`](examples/quota-recovery.json): reset/cooldown
   ordering with bounded reprobe;
+- [`examples/outage-recovery.json`](examples/outage-recovery.json): incident-end
+  ordering with stale cooldown invalidation, bounded probe and affinity revalidation;
 - [`examples/tool-transport.json`](examples/tool-transport.json): requested and
   observed tool item transport plus dispatch outcome.
 
@@ -60,17 +63,11 @@ provider round and a 65-second cooldown ceiling. They contain placeholders and
 omit all credential-bearing CPA sections. The extension never fills those
 placeholders or writes the templates into a Codex home.
 
-## Future Promotion Gate
+## Local operator promotion
 
-An effectful operator adapter can move into this extension only after it has:
-
-1. a request-bound execution envelope with explicit local-write scope;
-2. dry-run and readback receipts for every file/process change;
-3. exact target allowlists instead of broad home-directory access;
-4. secret references that are never returned or copied into LoopX state;
-5. idempotent install/upgrade/rollback tests in an isolated temporary home;
-6. a stop condition that never deletes a task store or rewrites rollout/SQLite
-   history.
-
-Until then, the public extension remains read-only and the private runtime
-adapter remains the owner of live effects.
+The effectful adapter is now the optional [local operator](OPERATOR.md), invoked
+separately with an explicit private configuration and per-command `--execute`.
+The managed extension remains read-only. Fixed target allowlists, dry-run
+receipts, snapshots, integrity checks and isolated regression tests accompany
+the promotion. Host credentials, artifact pins, service-manager files and
+private evidence remain operator-owned; no local prototype path is shipped.

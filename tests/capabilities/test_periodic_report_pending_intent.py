@@ -21,7 +21,7 @@ from loopx.capabilities.periodic_report.incremental import (
 from loopx.capabilities.periodic_report.project_progress_snapshot import (
     build_project_progress_snapshot,
 )
-from loopx.todos import add_goal_todo, complete_goal_todo
+from loopx.todos import add_goal_todo
 from loopx.status import collect_status, parse_active_state_todos
 from loopx.quota import build_quota_should_run
 from loopx.control_plane.capability_hooks import dispatch_interaction_projection_hooks
@@ -39,9 +39,10 @@ def test_delivery_binding_ref_is_valid_when_generation_digest_starts_with_digit(
 ):
     assert (
         _periodic_report_delivery_binding_ref(
-            "report_generation_53429b77872cbe1130a3e2f3"
+            "report_generation_53429b77872cbe1130a3e2f3",
+            {"effective_revision": "sha256:" + "a" * 64},
         )
-        == "periodic-report:g53429b77872cbe11"
+        == "periodic-report:g53429b77872cbe11-aaaaaaaaaaaaa"
     )
 
 
@@ -116,6 +117,14 @@ status: active
                         "coordination": {
                             "agent_model": "peer_v1",
                             "registered_agents": [AGENT_ID],
+                        },
+                        "control_plane": {
+                            "periodic_report": {
+                                "enabled": True,
+                                "profile_preset": "weekly-progress",
+                                "route_ref": "report-route",
+                                "timezone": "Asia/Shanghai",
+                            }
                         },
                     }
                 ],
@@ -246,38 +255,6 @@ def _write_editorial_response(first: dict[str, object]) -> None:
     response_path.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
 
 
-def _reject_approval(
-    *, state_path: Path, approval_todo_id: str, updated_at: str
-) -> None:
-    updated_lines: list[str] = []
-    for line in state_path.read_text(encoding="utf-8").splitlines():
-        if approval_todo_id in line and "loopx:todo" in line:
-            line = line.replace("status=open", "status=done")
-            line = line.replace(
-                " -->",
-                f" decision_outcome=reject completed_at={updated_at} "
-                f"updated_at={updated_at} -->",
-            )
-        updated_lines.append(line)
-    state_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
-
-
-def _append_cancelled_approval(
-    *, state_path: Path, approval_scope: str, updated_at: str
-) -> None:
-    state = state_path.read_text(encoding="utf-8")
-    cancellation = (
-        "\n- [x] Cancel the superseded report payload.\n"
-        "  <!-- loopx:todo todo_id=todo_cancelled status=done "
-        "task_class=user_gate action_kind=cancel_periodic_report_payload "
-        f"decision_scope={approval_scope} decision_outcome=cancel "
-        f"bound_agent={AGENT_ID} blocks_agent={AGENT_ID} "
-        f"completed_at={updated_at} updated_at={updated_at} -->\n"
-    )
-    state = state.replace("\n## Agent Todo\n", cancellation + "\n## Agent Todo\n")
-    state_path.write_text(state, encoding="utf-8")
-
-
 def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) -> None:
     registry, runtime = _fixture(tmp_path)
 
@@ -295,7 +272,7 @@ def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) 
     projection = dispatch["projections"]["pending_capability_intent"]
     assert projection["state"] == "pending"
     assert projection["generation_authorized"] is True
-    assert projection["external_delivery_authorized"] is False
+    assert projection["external_delivery_authorized"] is True
     assert projection["agent_read_required"] is True
     assert "consume-pending" in projection["command"]
 
@@ -341,7 +318,43 @@ def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) 
     assert gated["interaction_contract"]["agent_channel"]["must_attempt"] is True
 
 
-def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
+def test_disabling_subscription_revokes_pending_automatic_delivery(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    payload = json.loads(registry.read_text(encoding="utf-8"))
+    payload["goals"][0]["control_plane"]["periodic_report"] = {
+        "enabled": False,
+        "timezone": "Asia/Shanghai",
+    }
+    registry.write_text(json.dumps(payload), encoding="utf-8")
+
+    dispatch = dispatch_interaction_projection_hooks(
+        [
+            periodic_report_pending_intent_interaction_hook(
+                registry_path=registry,
+                runtime_root=runtime,
+                goal_id=GOAL_ID,
+                agent_id=AGENT_ID,
+            )
+        ]
+    )
+    consumed = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+
+    assert "pending_capability_intent" not in dispatch["projections"]
+    assert consumed["status"] == "subscription_disabled"
+    assert "deliver_periodic_report_goal_channel" not in (
+        registry.parent / "ACTIVE_GOAL_STATE.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_consumption_queues_authorized_delivery_and_exact_replay_does_not_duplicate(
     tmp_path: Path,
 ) -> None:
     registry, runtime = _fixture(tmp_path)
@@ -376,7 +389,16 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
         execute=True,
     )
 
-    assert first["status"] == "approval_pending"
+    assert first["status"] == "delivery_ready"
+    assert first["external_delivery_authorized"] is True
+    assert first["delivery_authority"] == {
+        "schema_version": "periodic_report_delivery_authority_v0",
+        "kind": "enabled_periodic_report_subscription",
+        "goal_id": GOAL_ID,
+        "source": "goal_override",
+        "effective_revision": first["delivery_authority"]["effective_revision"],
+        "route_ref": "report-route",
+    }
     assert first["external_writes_performed"] is False
     assert first["content_checks"] == {
         "schema_version": "periodic_report_content_checks_v0",
@@ -408,47 +430,17 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
         == []
     )
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
-    assert state.count("approve_periodic_report_payload") == 1
-    assert "批准前不得发布妙搭或发送群消息" in state
+    assert "approve_periodic_report_payload" not in state
     parsed = parse_active_state_todos(state)
     delivery = next(
         item
         for item in parsed["agent_todos"]["items"]
         if item.get("todo_id") == first["delivery_todo_id"]
     )
-    gate = next(
-        item
-        for item in parsed["user_todos"]["items"]
-        if item.get("todo_id") == first["approval_todo_id"]
-    )
-    assert delivery["status"] == "blocked"
+    assert delivery["status"] == "open"
     assert delivery["action_kind"] == "deliver_periodic_report_goal_channel"
     assert delivery["capability_binding_ref"].startswith("periodic-report:g")
-    assert delivery["required_decision_scopes"][0]["scope_key"].startswith(
-        "periodic_report_"
-    )
-    assert gate["unblocks_todo_id"] == delivery["todo_id"]
-
-    completion = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=str(first["approval_todo_id"]),
-        role="user",
-        agent_id=AGENT_ID,
-        decision_outcome="approve",
-        evidence="owner approved the exact frozen report payload",
-    )
-    assert completion["unblock_resume"]["state"] == "resumed"
-    approved = parse_active_state_todos(
-        (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
-    )
-    delivery_after = next(
-        item
-        for item in approved["agent_todos"]["items"]
-        if item.get("todo_id") == first["delivery_todo_id"]
-    )
-    assert delivery_after["status"] == "open"
-    assert delivery_after.get("required_decision_scopes", []) == []
+    assert delivery.get("required_decision_scopes", []) == []
     status = collect_status(
         registry_path=registry,
         runtime_root_override=str(runtime),
@@ -462,7 +454,7 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
         agent_id=AGENT_ID,
         available_capabilities=["network", "lark_bot_message_write"],
     )
-    assert quota["selected_todo"]["todo_id"] == delivery_after["todo_id"], quota
+    assert quota["selected_todo"]["todo_id"] == delivery["todo_id"], quota
     assert quota["user_todo_summary"]["open_count"] == 0
 
 
@@ -485,7 +477,7 @@ def test_report_artifacts_leave_no_temp_residue(tmp_path: Path) -> None:
         execute=True,
     )
 
-    assert first["status"] == "approval_pending"
+    assert first["status"] == "delivery_ready"
     artifact_dir = Path(first["artifacts"]["markdown_path"]).parent
     names = sorted(item.name for item in artifact_dir.iterdir())
     for expected in (
@@ -591,9 +583,7 @@ def test_report_html_not_left_behind_when_rename_is_interrupted(
         )
 
     assert list(runtime.rglob("report.html")) == []
-    assert not [
-        item for item in runtime.rglob("*") if item.name.endswith(".tmp")
-    ]
+    assert not [item for item in runtime.rglob("*") if item.name.endswith(".tmp")]
 
 
 def test_atomic_write_temp_file_stays_in_directory_and_never_collides_with_target(
@@ -904,7 +894,9 @@ def test_consumption_rejects_snapshot_outcome_after_stage_completion(
         )
 
 
-def test_consumption_recovers_when_gate_precedes_receipt_write(tmp_path: Path) -> None:
+def test_consumption_recovers_when_delivery_todo_precedes_receipt_write(
+    tmp_path: Path,
+) -> None:
     registry, runtime = _fixture(tmp_path)
 
     required = consume_pending_periodic_report_intent(
@@ -933,137 +925,11 @@ def test_consumption_recovers_when_gate_precedes_receipt_write(tmp_path: Path) -
         execute=True,
     )
 
-    assert recovered["status"] == "approval_pending"
+    assert recovered["status"] == "delivery_ready"
     assert recovered["generation_receipt"] == first["generation_receipt"]
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
-    assert state.count("approve_periodic_report_payload") == 1
-
-
-def test_rejected_approval_reopens_the_intent_in_a_fresh_attempt(
-    tmp_path: Path,
-) -> None:
-    registry, runtime = _fixture(tmp_path)
-    required = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    _write_editorial_response(required)
-    first = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
-    _reject_approval(
-        state_path=state_path,
-        approval_todo_id=str(first["approval_todo_id"]),
-        updated_at="2026-08-30T10:00:00Z",
-    )
-
-    reopened = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-
-    assert reopened["status"] == "editorial_required"
-    assert reopened["editorial_request_path"] != required["editorial_request_path"]
-    assert "retry-" in reopened["editorial_request_path"]
-    assert not Path(reopened["editorial_response_path"]).exists()
-    _write_editorial_response(reopened)
-    second = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    assert second["status"] == "approval_pending"
-    assert second["approval_todo_id"] != first["approval_todo_id"]
-    assert (
-        state_path.read_text(encoding="utf-8").count("approve_periodic_report_payload")
-        == 2
-    )
-    assert (
-        pending_periodic_report_intents(
-            registry_path=registry,
-            runtime_root=runtime,
-            goal_id=GOAL_ID,
-            agent_id=AGENT_ID,
-        )
-        == []
-    )
-
-    _reject_approval(
-        state_path=state_path,
-        approval_todo_id=str(second["approval_todo_id"]),
-        updated_at="2026-08-30T11:00:00Z",
-    )
-    reopened_again = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    assert reopened_again["status"] == "editorial_required"
-    assert reopened_again["editorial_request_path"] not in {
-        required["editorial_request_path"],
-        reopened["editorial_request_path"],
-    }
-    assert "retry-" in reopened_again["editorial_request_path"]
-
-
-def test_later_cancel_reopens_an_already_approved_generation(
-    tmp_path: Path,
-) -> None:
-    registry, runtime = _fixture(tmp_path)
-    required = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    _write_editorial_response(required)
-    first = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
-    state = state_path.read_text(encoding="utf-8").replace(
-        "status=open task_class=user_gate action_kind=approve_periodic_report_payload",
-        "status=done task_class=user_gate action_kind=approve_periodic_report_payload "
-        "decision_outcome=approve completed_at=2026-08-30T10:00:00Z",
-    )
-    state_path.write_text(state, encoding="utf-8")
-    _append_cancelled_approval(
-        state_path=state_path,
-        approval_scope=str(first["approval_scope"]),
-        updated_at="2026-08-30T10:05:00Z",
-    )
-
-    reopened = consume_pending_periodic_report_intent(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        execute=True,
-    )
-
-    assert reopened["status"] == "editorial_required"
-    assert reopened["editorial_request_path"] != required["editorial_request_path"]
-    assert "retry-" in reopened["editorial_request_path"]
+    assert state.count("deliver_periodic_report_goal_channel") == 1
+    assert "approve_periodic_report_payload" not in state
 
 
 def test_consumption_rejects_english_or_flat_editorial_response(

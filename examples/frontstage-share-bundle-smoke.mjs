@@ -101,6 +101,7 @@ run(process.execPath, [
 const siteDir = resolve(outDir, "site");
 assertExists(resolve(siteDir, "index.html"));
 assertExists(resolve(siteDir, "frontstage/index.html"));
+assertExists(resolve(siteDir, "benchmarks/swe-marathon/index.html"));
 assertExists(resolve(siteDir, "install.sh"));
 assertExists(resolve(siteDir, "status.frontstage-share.json"));
 assertExists(resolve(outDir, "README.md"));
@@ -142,6 +143,10 @@ if (publishedInstaller !== canonicalInstaller) {
 }
 const homepageSource = await readFile(resolve(repoRoot, "apps/presentation/site/src/App.tsx"), "utf8");
 const homepageStyles = await readFile(resolve(repoRoot, "apps/presentation/site/src/styles.css"), "utf8");
+const benchmarkHtml = await readFile(resolve(siteDir, "benchmarks/swe-marathon/index.html"), "utf8");
+if (benchmarkHtml !== homepageHtml) {
+  throw new Error("SWE-Marathon static route must reuse the compiled public-site entry");
+}
 for (const sourceContract of [
   "Your agents keep",
   'secondPrefix: "the "',
@@ -169,6 +174,7 @@ for (const sourceContract of [
   "跨越 200+ 小时，依然清晰可读。",
   "Prefer the shell? Install LoopX manually.",
   "Developer book",
+  "benchmarks/swe-marathon/",
   "Iowan Old Style",
   "Pi",
 ]) {
@@ -254,6 +260,7 @@ if (manifest.base !== "/loopx/") {
 }
 if (
   manifest.homepage_entry !== "site/index.html" ||
+  manifest.swe_marathon_brief_entry !== "site/benchmarks/swe-marathon/index.html" ||
   manifest.frontstage_entry !== "site/frontstage/index.html" ||
   manifest.installer_entry !== "site/install.sh"
 ) {
@@ -261,6 +268,9 @@ if (
 }
 if (manifest.content_sources?.public_homepage !== "apps/presentation/site") {
   throw new Error(`manifest homepage source mismatch: ${JSON.stringify(manifest.content_sources)}`);
+}
+if (manifest.content_sources?.swe_marathon_brief !== "benchmark/swe-marathon") {
+  throw new Error(`manifest benchmark brief source mismatch: ${JSON.stringify(manifest.content_sources)}`);
 }
 if (manifest.content_sources?.installer_script !== "scripts/install-from-github.sh") {
   throw new Error(`manifest installer source mismatch: ${JSON.stringify(manifest.content_sources)}`);
@@ -331,6 +341,9 @@ if (!readmeText.includes("docs/showcases/showcase-catalog.json")) {
 }
 if (!readmeText.includes("frontstage/")) {
   throw new Error("share bundle README must publish the frontstage showcase entry");
+}
+if (!readmeText.includes("benchmarks/swe-marathon/")) {
+  throw new Error("share bundle README must publish the SWE-Marathon research brief entry");
 }
 
 console.log("frontstage-share-bundle-smoke: ok");

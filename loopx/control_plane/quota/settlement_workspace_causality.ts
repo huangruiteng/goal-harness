@@ -1,19 +1,24 @@
 import type { JsonObject } from "../effect_program.ts";
+import {
+  DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA,
+  DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA,
+  DELIVERY_WORKSPACE_CAUSALITY_SCHEMA,
+  DELIVERY_WORKSPACE_LEGACY_RECEIPT_EVIDENCE_SCHEMA,
+  DELIVERY_WORKSPACE_RESOLUTION_SCHEMA,
+  DELIVERY_WORKSPACE_SETTLEMENT_REQUIREMENT_SCHEMA,
+} from "../coordination/coordination_state_contract.generated.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { requireJsonObject as requiredObject } from "../runtime_decode.ts";
 
 export const DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION =
-  "delivery_workspace_causality_v0";
-export const DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA =
-  "loopx_delivery_workspace_causality_request_v0";
-export const DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA =
-  "loopx_delivery_workspace_causality_result_v0";
+  DELIVERY_WORKSPACE_CAUSALITY_SCHEMA;
+export { DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA, DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA };
 export const DELIVERY_WORKSPACE_RESOLUTION_SCHEMA_VERSION =
-  "delivery_workspace_resolution_v0";
+  DELIVERY_WORKSPACE_RESOLUTION_SCHEMA;
 export const SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION =
-  "settlement_workspace_requirement_v0";
+  DELIVERY_WORKSPACE_SETTLEMENT_REQUIREMENT_SCHEMA;
 export const LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION =
-  "legacy_settlement_receipt_evidence_v0";
+  DELIVERY_WORKSPACE_LEGACY_RECEIPT_EVIDENCE_SCHEMA;
 
 export const DELIVERY_WORKSPACE_REQUIREMENTS = [
   "required",

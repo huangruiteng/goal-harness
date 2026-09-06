@@ -152,7 +152,7 @@ def build_todo_succession_warning_lanes(
     ][:item_limit]
     count = warning.get("count", summary.get("completed_without_successor_count"))
     try:
-        count = max(0, int(count))
+        count = max(0, int(count)) if count is not None else len(items)
     except (TypeError, ValueError):
         count = len(items)
     if count <= 0 and not items:
@@ -193,18 +193,17 @@ def todo_succession_gap_items(
 
     if not isinstance(summary, dict):
         return []
-    warning = (
-        summary.get("todo_succession_warning")
-        if isinstance(summary.get("todo_succession_warning"), dict)
-        else {}
-    )
+    raw_warning = summary.get("todo_succession_warning")
+    warning = raw_warning if isinstance(raw_warning, dict) else {}
     if warning and warning.get("reason_code") != TODO_SUCCESSION_WARNING_REASON_CODE:
         return []
+    warning_items = warning.get("items")
+    completed_items = summary.get("completed_without_successor_items")
     source_items = (
-        warning.get("items")
-        if isinstance(warning.get("items"), list)
-        else summary.get("completed_without_successor_items")
-        if isinstance(summary.get("completed_without_successor_items"), list)
+        warning_items
+        if isinstance(warning_items, list)
+        else completed_items
+        if isinstance(completed_items, list)
         else []
     )
     items = [item for item in source_items if isinstance(item, dict)]

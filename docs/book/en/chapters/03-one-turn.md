@@ -353,15 +353,15 @@ does not directly trust a Host completion claim.
 
 !!! info "Current maturity"
     TurnEnvelope is currently an explicitly enabled bounded projection, not the default quota output.
-    LoopX Turn remains an experimental protocol, but `v0.5.2` ships executable `turn plan` /
+    LoopX Turn remains an experimental protocol, but `v0.5.4` still ships executable `turn plan` /
     `turn run-once` paths and Host adapters. They are suitable for understanding boundaries and building
     explicit opt-in integrations, but should not be described as a recurring runtime enabled by default
     across every Host.
 
 ### Where the TypeScript Effect Program sits in one turn
 
-`v0.5.2` moves the canonical semantics for the Effect Program and several high-risk transactions into
-TypeScript:
+`v0.5.4` extends the Effect Program foundation by moving the canonical semantics for complete
+transactions into TypeScript:
 
 ```text
 Python CLI / Host adapter
@@ -371,10 +371,12 @@ Python CLI / Host adapter
   -> Python compatibility projection / explicit external Provider
 ```
 
-Turn settlement, Todo completion, quota delivery routing, workspace causality, and scheduler state now
-have TypeScript owners. Python remains important as the current CLI, the adapter for explicit external
-Providers, and part of durable writeback. Do not read the migration as “Python has been removed,” and do
-not reimplement the same rule inside a Python facade.
+Shipped typed owners include Turn settlement, Todo completion and Host Todo settlement, quota delivery
+routing plus spend/void/monitor-poll commit, the full local task-lease lifecycle, Vision refresh, governed
+capability-lifecycle validation, and scheduler heartbeat/state plus receipt-bound scheduler follow-up.
+Python still owns current CLI transport, explicit external Provider or Host effects, legacy projections,
+and Markdown/event writeback that has not migrated. Do not read the migration as “Python has been
+removed,” and do not reimplement the same rule inside a Python facade.
 
 The current
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)

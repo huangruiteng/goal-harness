@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .agent_registry import normalize_registered_agents
+from .capabilities.periodic_report import goal_configuration as periodic_report_config
 from .boundary_authority import (
     build_checkpointed_boundary_authority_entry,
     checkpointed_boundary_authority_summary,
@@ -18,7 +19,7 @@ from .capabilities.change_quality.policy import (
     CHANGE_QUALITY_POLICY_SCHEMA_VERSION,
     change_quality_goal_policy_summary,
 )
-from .configuration_catalog import build_goal_configuration_catalog
+from .configuration_catalog import DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN, build_goal_configuration_catalog
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .control_plane.agents.legacy_migration import (
     completed_peer_agent_runtime_migration,
@@ -34,6 +35,8 @@ from .control_plane.agents.runtime_model import (
 )
 from .control_plane.agents.supervisor import normalize_peer_supervisor
 from .control_plane.agents.work_mode import normalize_agent_work_modes
+from .control_plane.coordination import local_authority_shadow_adapter as shadow
+from .control_plane.coordination.configuration import normalize_goal_write_scope
 from .control_plane.operator_inbox_binding import local_private_config_digest
 from .control_plane.reward_memory import (
     reward_memory_goal_policy,
@@ -68,7 +71,6 @@ WAITING_ON_CHOICES = (
 )
 
 MULTI_SUBAGENT_FEATURE_CHOICES = ("off", "enabled")
-DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
 AGENT_MODEL_CHOICES = tuple(model.value for model in AgentRuntimeModel)
 
 
@@ -221,18 +223,6 @@ def _clean_registered_agents(values: list[str] | None) -> list[str] | None:
     return agents
 
 
-def _clean_write_scope(values: list[str] | None) -> list[str] | None:
-    if values is None:
-        return None
-    scopes: list[str] = []
-    for value in values:
-        for part in str(value).split(","):
-            scope = part.strip()
-            if scope and scope not in scopes:
-                scopes.append(scope)
-    return scopes
-
-
 def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
     quota = goal_quota_config(goal)
     control_plane = compact_control_plane_policy(goal.get("control_plane"))
@@ -251,6 +241,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
             "window_hours": quota.get("window_hours"),
         },
         "control_plane": control_plane,
+        "periodic_report": periodic_report_config.configuration_summary(goal),
         "issue_fix_reviewer_notification": _reviewer_notification_config_summary(goal),
         "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "lark_kanban_heartbeat_sync": _lark_kanban_heartbeat_config_summary(goal),
@@ -259,7 +250,9 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "explore_graph": compact_explore_graph_policy(goal.get("explore_graph")),
         "orchestration": orchestration,
         "waiting_on": goal.get("waiting_on"),
-        "write_scope": _clean_write_scope(coordination.get("write_scope") or []) or [],
+        "write_scope": normalize_goal_write_scope(coordination.get("write_scope") or [])
+        or [],
+        "local_authority_shadow": shadow.local_authority_shadow_summary(goal),
         "checkpointed_boundary_authority": checkpointed_boundary_authority_summary(
             coordination
         ),
@@ -430,6 +423,7 @@ def configure_goal(
     self_repair_enabled: bool | None = None,
     self_repair_health: bool | None = None,
     self_repair_waiting_projection: bool | None = None,
+    periodic_report_configuration: Mapping[str, Any] | None = None, clear_periodic_report_configuration: bool = False,
     change_quality_enabled: bool | None = None,
     change_quality_safe_fix: bool | None = None,
     change_quality_strict_receipt: bool | None = None,
@@ -461,6 +455,8 @@ def configure_goal(
     write_scope: list[str] | None = None,
     replace_write_scope: bool = False,
     clear_write_scope: bool = False,
+    local_authority_shadow_file: bool = False,
+    clear_local_authority_shadow: bool = False,
     waiting_on: str | None = None,
     clear_waiting_on: bool = False,
     boundary_authority_scopes: list[str] | None = None,
@@ -535,6 +531,9 @@ def configure_goal(
         raise ValueError(
             "--clear-write-scope cannot be combined with --replace-write-scope"
         )
+    shadow.validate_local_authority_shadow_change(
+        local_authority_shadow_file, clear_local_authority_shadow
+    )
     if clear_waiting_on and waiting_on:
         raise ValueError("--clear-waiting-on cannot be combined with --waiting-on")
     adding_boundary_authority = any(
@@ -634,7 +633,7 @@ def configure_goal(
         clear_todo_lifecycle_authority
     )
     supervised_agents = _clean_registered_agents(supervised_agents)
-    write_scope = _clean_write_scope(write_scope)
+    write_scope = normalize_goal_write_scope(write_scope)
     issue_fix_reviewer_notification_config = _local_private_config_path(
         issue_fix_reviewer_notification_config,
         label="reviewer notification config",
@@ -652,13 +651,14 @@ def configure_goal(
         reward_memory_config,
         label="reward memory experiment config",
     )
-
+    periodic_report_change = periodic_report_config.normalize_change(
+        periodic_report_configuration, clear=clear_periodic_report_configuration
+    )
     payload = read_json(registry_path)
     goals = registry_goals(payload)
     goal = next((item for item in goals if str(item.get("id")) == goal_id), None)
     if goal is None:
         raise ValueError(f"goal_id not found in registry: {goal_id}")
-
     existing_coordination = (
         goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
     )
@@ -838,7 +838,7 @@ def configure_goal(
                 self_repair_waiting_projection
             )
         control_plane["self_repair"] = self_repair
-
+    periodic_report_config.apply_change(goal, periodic_report_change)
     if (
         change_quality_enabled is not None
         or change_quality_safe_fix is not None
@@ -865,7 +865,6 @@ def configure_goal(
             ),
         }
         control_plane["change_quality_qualification"] = change_quality
-
     if (
         issue_fix_reviewer_notification_config is not None
         or clear_issue_fix_reviewer_notification_config
@@ -887,7 +886,6 @@ def configure_goal(
             control_plane["issue_fix"] = issue_fix
         else:
             control_plane.pop("issue_fix", None)
-
     if lark_event_inbox_config is not None or clear_lark_event_inbox_config:
         control_plane = _mutable_control_plane(goal)
         if normalized_lark_inbox_agent:
@@ -921,7 +919,6 @@ def configure_goal(
                 "enabled": True,
                 "config_path": lark_event_inbox_config,
             }
-
     if lark_kanban_heartbeat_sync is not None:
         control_plane = _mutable_control_plane(goal)
         lark_kanban = (
@@ -1218,10 +1215,12 @@ def configure_goal(
                 coordination["write_scope"] = write_scope
             else:
                 existing_write_scope = (
-                    _clean_write_scope(coordination.get("write_scope") or []) or []
+                    normalize_goal_write_scope(coordination.get("write_scope") or [])
+                    or []
                 )
                 coordination["write_scope"] = (
-                    _clean_write_scope([*existing_write_scope, *write_scope]) or []
+                    normalize_goal_write_scope([*existing_write_scope, *write_scope])
+                    or []
                 )
         if clear_boundary_authority:
             coordination.pop("checkpointed_boundary_authority", None)
@@ -1241,6 +1240,9 @@ def configure_goal(
             coordination["checkpointed_boundary_authority"] = [*entries, entry]
         goal["coordination"] = coordination
 
+    shadow.apply_local_authority_shadow_change(
+        goal, local_authority_shadow_file, clear_local_authority_shadow
+    )
     after = _settings_summary(goal)
     changed_fields = _changed_fields(before, after)
     if goal != before_goal and not changed_fields:
@@ -1279,6 +1281,7 @@ def configure_goal(
         "peer_task_coordination": deepcopy(
             after.get("peer_task_coordination") or {"enabled": False}
         ),
+        "local_authority_shadow": deepcopy(after["local_authority_shadow"]),
         "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "lark_kanban_heartbeat_sync": _lark_kanban_heartbeat_config_summary(goal),
         "reward_memory": reward_memory_goal_policy_summary(goal),

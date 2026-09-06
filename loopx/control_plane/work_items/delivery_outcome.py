@@ -167,7 +167,12 @@ def delivery_turn_kind_for_run(
     *,
     delivery_outcome: Any = None,
 ) -> str:
-    """Classify the latest turn without relying on free-form classification text alone."""
+    """Read explicit delivery semantics; narrative and evidence presence grant none.
+
+    Missing or invalid historical fields remain unknown. A blocker needs an
+    explicit turn kind or a scoped typed observation; an outcome gap alone
+    does not prove blocker writeback.
+    """
 
     raw_explicit = str(run.get("delivery_turn_kind") or "").strip()
     if raw_explicit:
@@ -177,40 +182,19 @@ def delivery_turn_kind_for_run(
     outcome = normalize_delivery_outcome(
         delivery_outcome if delivery_outcome is not None else run.get("delivery_outcome")
     )
-    classification = str(run.get("classification") or "").strip().lower()
-    health_check = str(run.get("health_check") or "").strip().lower()
-    recommended_action = str(run.get("recommended_action") or "").strip().lower()
-    searchable = " ".join(part for part in (classification, health_check, recommended_action) if part)
-
+    if qualifies_turn_scoped_blocker_settlement(
+        outcome,
+        run.get("progress_observation"),
+        work_item_id=run.get("todo_id"),
+        replan_obligation_id=run.get("replan_obligation_id"),
+    ):
+        return DeliveryTurnKind.BLOCKER_WRITEBACK.value
     if outcome == DeliveryOutcome.PRIMARY_GOAL_OUTCOME:
         return DeliveryTurnKind.PRODUCT_PATH_EXECUTION.value
-
-    evidence_keys = (
-        "case_result",
-        "compact_evidence",
-    )
-    if outcome == DeliveryOutcome.OUTCOME_PROGRESS or any(run.get(key) for key in evidence_keys):
+    if outcome == DeliveryOutcome.OUTCOME_PROGRESS:
         return DeliveryTurnKind.COMPACT_EVIDENCE.value
-
-    if any(hint in searchable for hint in ("blocker", "blocked", "cannot proceed", "can't proceed")):
-        return DeliveryTurnKind.BLOCKER_WRITEBACK.value
-
-    if outcome == DeliveryOutcome.SURFACE_ONLY or any(
-        hint in classification
-        for hint in (
-            "contract",
-            "prep",
-            "preparation",
-            "protocol",
-            "policy",
-            "surface",
-            "smoke",
-            "setup",
-        )
-    ):
+    if outcome == DeliveryOutcome.SURFACE_ONLY:
         return DeliveryTurnKind.CONTRACT_ONLY_PREPARATION.value
-
     if outcome == DeliveryOutcome.OUTCOME_GAP:
         return DeliveryTurnKind.OUTCOME_GAP.value
-
     return DeliveryTurnKind.UNKNOWN.value

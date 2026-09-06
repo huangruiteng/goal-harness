@@ -70,6 +70,7 @@ export const todoItemSchema = z.object({
   archive_state: z.string().optional().nullable(),
   source_section: z.string().optional().nullable(),
   task_class: z.string().optional().nullable(),
+  task_domain: z.string().optional().nullable(),
   action_kind: z.string().optional().nullable(),
   claimed_by: z.string().optional().nullable(),
   required_capabilities: z.array(z.string()).optional(),
@@ -492,6 +493,10 @@ export const runGoalSchema = z.object({
   control_plane: controlPlaneSchema.optional().nullable(),
   spawn_policy: orchestrationPolicySchema.optional().nullable(),
   orchestration: orchestrationPolicySchema.optional().nullable(),
+  coordination: z.object({
+    agent_model: z.string().optional().nullable(),
+    registered_agents: z.array(z.string()).optional().default([]),
+  }).optional().nullable(),
   index_exists: z.boolean().optional().default(false),
   raw_index_records: z.number().optional().default(0),
   unique_runs: z.number().optional().default(0),
@@ -726,6 +731,17 @@ export const statusContractSchema = z.object({
   reload_hint: "scripts/macos-dashboard-launchagent.sh restart",
 });
 
+export const goalProjectionScopeSchema = z.object({
+  schema_version: z.literal("loopx_goal_projection_scope_v0"),
+  scope: z.enum(["all", "active", "stopped"]),
+  complete: z.boolean(),
+  projected_goal_count: z.number().int().nonnegative(),
+  registry_goal_count: z.number().int().nonnegative(),
+  // Stable fingerprint of the registry's goal activation partition. Two
+  // scoped snapshots are safe to merge only when their revisions match.
+  registry_revision: z.string().optional().nullable(),
+});
+
 export const localDashboardApiSchema = z.object({
   source: z.string().optional().default("serve-status"),
   status_url: z.string().optional().nullable(),
@@ -838,18 +854,35 @@ export const periodicReportIndexItemSchema = z.object({
   detail_ref: periodicReportDetailRefSchema,
 }).strict();
 
+const periodicReportIndexBaseSchema = z.object({
+  schema_version: z.literal("periodic_report_workspace_index_v0"),
+  count: z.number().int().nonnegative(),
+  items: z.array(periodicReportIndexItemSchema),
+});
+
+const periodicReportWindowedIndexSchema = periodicReportIndexBaseSchema.extend({
+  returned_count: z.number().int().nonnegative(),
+  total_count: z.number().int().nonnegative(),
+  limit: z.number().int().nonnegative(),
+  offset: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+}).strict();
+
+const periodicReportLegacyIndexSchema = periodicReportIndexBaseSchema.strict().transform((value) => ({
+  ...value,
+  returned_count: value.count,
+  total_count: value.count,
+  limit: value.count,
+  offset: 0,
+  truncated: false,
+}));
+
 export const periodicReportIndexResponseSchema = z.object({
   ok: z.literal(true),
-  periodic_reports: z.object({
-    schema_version: z.literal("periodic_report_workspace_index_v0"),
-    count: z.number().int().nonnegative(),
-    returned_count: z.number().int().nonnegative(),
-    total_count: z.number().int().nonnegative(),
-    limit: z.number().int().nonnegative(),
-    offset: z.number().int().nonnegative(),
-    truncated: z.boolean(),
-    items: z.array(periodicReportIndexItemSchema),
-  }).strict(),
+  periodic_reports: z.union([
+    periodicReportWindowedIndexSchema,
+    periodicReportLegacyIndexSchema,
+  ]),
 }).strict();
 
 export const periodicReportProjectionSchema = z.object({
@@ -913,6 +946,7 @@ export const statusPayloadSchema = z.object({
   goal_count: z.number(),
   run_count: z.number(),
   status_contract: statusContractSchema,
+  goal_projection: goalProjectionScopeSchema.optional().nullable().default(null),
   local_dashboard_api: localDashboardApiSchema,
   contract: z.object({
     ok: z.boolean(),
@@ -1004,6 +1038,7 @@ export type PeriodicReportDetailRef = z.infer<typeof periodicReportDetailRefSche
 export type PeriodicReportProjection = z.infer<typeof periodicReportProjectionSchema>;
 export type GoalActivationState = "active" | "stopped";
 export type StatusContract = NonNullable<z.infer<typeof statusContractSchema>>;
+export type GoalProjectionScope = z.infer<typeof goalProjectionScopeSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type OperatorGate = z.infer<typeof operatorGateSchema>;

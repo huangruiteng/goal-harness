@@ -25,7 +25,7 @@ from .event_inbox import (
     ingest_lark_event_inbox,
     inspect_lark_event_inbox,
 )
-from .goal_channel_contracts import binding_for_goal
+from .goal_channel_contracts import bindings_for_goal
 from .goal_channel_targets import goal_channel_target_for_name
 from .goal_topic_connections import (
     LarkTopicEventDecisionReason,
@@ -69,24 +69,24 @@ def _active_profile_configs(snapshot: Mapping[str, Any]) -> dict[str, dict[str, 
     for goal_id, payload in binding_payloads.items():
         if not isinstance(payload, Mapping):
             continue
-        binding = binding_for_goal(payload, str(goal_id))
-        if not binding or binding.get("enabled") is not True:
-            continue
-        target = goal_channel_target_for_name(
-            target_payload,
-            str(binding.get("target_ref") or ""),
-        )
-        if target is None or target.get("enabled") is not True:
-            continue
-        identity = target.get("identity")
-        identity = identity if isinstance(identity, Mapping) else {}
-        profile = str(identity.get("sender_profile") or "").strip()
-        if not profile:
-            continue
-        profiles.setdefault(
-            profile,
-            {"cli_bin": str(identity.get("cli_bin") or "lark-cli")},
-        )
+        for binding in bindings_for_goal(payload, str(goal_id)):
+            if binding.get("enabled") is not True:
+                continue
+            target = goal_channel_target_for_name(
+                target_payload,
+                str(binding.get("target_ref") or ""),
+            )
+            if target is None or target.get("enabled") is not True:
+                continue
+            identity = target.get("identity")
+            identity = identity if isinstance(identity, Mapping) else {}
+            profile = str(identity.get("sender_profile") or "").strip()
+            if not profile:
+                continue
+            profiles.setdefault(
+                profile,
+                {"cli_bin": str(identity.get("cli_bin") or "lark-cli")},
+            )
     return profiles
 
 
@@ -146,21 +146,24 @@ def _topic_roots_for_target(
     for goal_id, payload in binding_payloads.items():
         if not isinstance(payload, Mapping):
             continue
-        binding = binding_for_goal(payload, str(goal_id))
-        if (
-            not binding
-            or binding.get("enabled") is not True
-            or str(binding.get("target_ref") or "") != target_ref
-        ):
+        bindings = bindings_for_goal(payload, str(goal_id))
+        roots.extend(_topic_roots_for_bindings(bindings, target_ref=target_ref))
+    return roots
+
+
+def _topic_roots_for_bindings(
+    bindings: list[Mapping[str, Any]], *, target_ref: str
+) -> list[str]:
+    roots: list[str] = []
+    for binding in bindings:
+        if binding.get("enabled") is not True:
             continue
-        topic = (
-            binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
-        )
-        channel = (
-            binding.get("channel")
-            if isinstance(binding.get("channel"), Mapping)
-            else {}
-        )
+        if str(binding.get("target_ref") or "") != target_ref:
+            continue
+        topic = binding.get("topic")
+        topic = topic if isinstance(topic, Mapping) else {}
+        channel = binding.get("channel")
+        channel = channel if isinstance(channel, Mapping) else {}
         root_id = str(
             topic.get("root_message_id") or channel.get("pinned_message_id") or ""
         )
@@ -176,11 +179,10 @@ def _binding_payloads_for_target(
     for goal_id, payload in binding_payloads.items():
         if not isinstance(payload, Mapping):
             continue
-        binding = binding_for_goal(payload, str(goal_id))
-        if (
-            binding
-            and binding.get("enabled") is True
+        if any(
+            binding.get("enabled") is True
             and str(binding.get("target_ref") or "") == target_ref
+            for binding in bindings_for_goal(payload, str(goal_id))
         ):
             selected[str(goal_id)] = payload
     return selected
@@ -591,32 +593,30 @@ class LarkGoalTopicRuntimeService:
             for goal_id, payload in binding_payloads.items():
                 if not isinstance(payload, Mapping):
                     continue
-                binding = binding_for_goal(payload, str(goal_id))
-                if not isinstance(binding, Mapping):
-                    continue
-                raw_routing = binding.get("routing")
-                routing: Mapping[str, Any] = (
-                    raw_routing if isinstance(raw_routing, Mapping) else {}
-                )
-                if routing.get("ingress_mode") != "session_queue":
-                    continue
-                context = contexts.get(str(goal_id))
-                context = context if isinstance(context, Mapping) else {}
-                session_id = str(binding.get("session_id") or "")
-                work_dir = str(context.get("work_dir") or "")
-                try:
-                    has_queued_turns = bool(
-                        session_id
-                        and self.runtime_controller.store.queued_turns(session_id)
+                for binding in bindings_for_goal(payload, str(goal_id)):
+                    raw_routing = binding.get("routing")
+                    routing: Mapping[str, Any] = (
+                        raw_routing if isinstance(raw_routing, Mapping) else {}
                     )
-                except KeyError:
-                    has_queued_turns = False
-                if has_queued_turns and work_dir:
-                    self.runtime_controller.resume_session_queue(
-                        session_id=session_id,
-                        work_dir=Path(work_dir).expanduser().resolve(),
-                        objective=str(context.get("objective") or goal_id),
-                    )
+                    if routing.get("ingress_mode") != "session_queue":
+                        continue
+                    context = contexts.get(str(goal_id))
+                    context = context if isinstance(context, Mapping) else {}
+                    session_id = str(binding.get("session_id") or "")
+                    work_dir = str(context.get("work_dir") or "")
+                    try:
+                        has_queued_turns = bool(
+                            session_id
+                            and self.runtime_controller.store.queued_turns(session_id)
+                        )
+                    except KeyError:
+                        has_queued_turns = False
+                    if has_queued_turns and work_dir:
+                        self.runtime_controller.resume_session_queue(
+                            session_id=session_id,
+                            work_dir=Path(work_dir).expanduser().resolve(),
+                            objective=str(context.get("objective") or goal_id),
+                        )
         with self._lock:
             stale = set(self._workers) - desired
             missing = desired - set(self._workers)

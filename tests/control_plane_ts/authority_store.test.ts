@@ -75,6 +75,11 @@ test("provider profiles map one logical contract onto different backend primitiv
       "service_role_provisioning_and_audit_policy",
     ),
   );
+  assert.ok(
+    AUTHORITY_STORE_PROVIDER_PROFILES.postgresql.qualification_holds.includes(
+      "retention_partitioning_and_measured_capacity",
+    ),
+  );
   assert.notDeepEqual(
     AUTHORITY_STORE_PROVIDER_PROFILES.file,
     AUTHORITY_STORE_PROVIDER_PROFILES.nokv,

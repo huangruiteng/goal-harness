@@ -4,17 +4,21 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from ..coordination.coordination_state_contract_generated import (
+    ACTION_PORTFOLIO_PLANNING_PACKET_REQUEST_SCHEMA,
+    ACTION_PORTFOLIO_PLANNING_PACKET_RESULT_SCHEMA,
+    ACTION_PORTFOLIO_SELECTION_REQUEST_SCHEMA,
+    ACTION_PORTFOLIO_SELECTION_RESULT_SCHEMA,
+)
 from .planning_inventory import (
     build_quota_planning_inventory_request,
     compact_planning_candidate,
 )
 
-ACTION_SELECTION_QUALIFICATION_REQUEST_SCHEMA_VERSION = (
-    "action_selection_qualification_request_v0"
-)
-ACTION_SELECTION_QUALIFICATION_SCHEMA_VERSION = "action_selection_qualification_v0"
-QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION = "quota_planning_packet_request_v0"
-QUOTA_PLANNING_PACKET_SCHEMA_VERSION = "quota_planning_packet_v0"
+ACTION_SELECTION_QUALIFICATION_REQUEST_SCHEMA_VERSION = ACTION_PORTFOLIO_SELECTION_REQUEST_SCHEMA
+ACTION_SELECTION_QUALIFICATION_SCHEMA_VERSION = ACTION_PORTFOLIO_SELECTION_RESULT_SCHEMA
+QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION = ACTION_PORTFOLIO_PLANNING_PACKET_REQUEST_SCHEMA
+QUOTA_PLANNING_PACKET_SCHEMA_VERSION = ACTION_PORTFOLIO_PLANNING_PACKET_RESULT_SCHEMA
 
 
 def _compact_candidate(value: Mapping[str, Any]) -> dict[str, Any] | None:

@@ -317,10 +317,42 @@ def assert_full_queue_builder_parity() -> None:
     assert wrapper["needs_codex"] == 4, wrapper
 
 
+def assert_stopped_goal_context_is_archive_only() -> None:
+    history = {
+        "goals": [
+            {
+                "id": "goal-stopped",
+                "activation_state": "stopped",
+                "registry_member": False,
+                "adapter_status": "connected-read-only",
+                "latest_runs": [],
+            }
+        ]
+    }
+    default_queue = status_module.build_attention_queue(
+        contract={"ok": True},
+        history=deepcopy(history),
+        global_registry={"findings": []},
+    )
+    assert default_queue["items"] == [], default_queue
+
+    archive_queue = status_module.build_attention_queue(
+        contract={"ok": True},
+        history=deepcopy(history),
+        global_registry={"findings": []},
+        include_stopped_goal_context=True,
+    )
+    assert [item["goal_id"] for item in archive_queue["items"]] == [
+        "goal-stopped"
+    ], archive_queue
+    assert archive_queue["items"][0]["activation_state"] == "stopped", archive_queue
+
+
 def main() -> int:
     assert_projection_parity()
     assert_global_registry_merge_parity()
     assert_full_queue_builder_parity()
+    assert_stopped_goal_context_is_archive_only()
     print("attention-queue-readmodel-smoke ok")
     return 0
 

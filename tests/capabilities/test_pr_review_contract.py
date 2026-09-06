@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from loopx.capabilities.pr_review_queue import (
     build_agent_response_contract,
     build_review_plan,
@@ -40,6 +42,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert set(requirements) == {
         "problem_context",
         "architecture_flow",
+        "repository_reuse",
         "changed_line_classification",
         "scope_fit",
         "symbol_map",
@@ -63,9 +66,15 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert "caller_evidence" in requirements["symbol_map"]["item_fields"]
     assert "negative_fields" in requirements["walkthroughs"]
     assert "regression_test" in requirements["failure_analysis"]["fields"]
+    assert requirements["scope_fit"]["required_when"] == "behavior_bearing_change"
+    assert "instruction_install_or_load_path" in requirements["scope_fit"]["fields"]
+    assert "target_audience_and_scope" in requirements["scope_fit"]["fields"]
     assert requirements["typed_state_rule"]["required_when"] == "code_change"
     assert "substring denylists" in requirements["typed_state_rule"]["rule"]
     assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
+    assert requirements["behavior_change_disclosure"]["required_when"] == (
+        "behavior_bearing_change"
+    )
     assert (
         "silent behavior changes" in requirements["behavior_change_disclosure"]["rule"]
     )
@@ -82,7 +91,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert "green CI" in proportionality["rule"]
     assert "original problem" in proportionality["rule"]
     isolation = requirements["default_off_isolation"]
-    assert isolation["required_when"] == "code_change"
+    assert isolation["required_when"] == "behavior_bearing_change"
     assert isolation["verdict_values"] == [
         "isolated",
         "not_isolated",
@@ -90,8 +99,15 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "not_yet_proven",
     ]
     assert "disabled_prompt_or_guidance" in isolation["fields"]
+    assert "declared_activation_scope" in isolation["fields"]
+    assert "availability_signals_that_do_not_activate" in isolation["fields"]
+    assert "installed_or_auto_loaded_instruction_surfaces" in isolation["fields"]
+    assert "disabled_user_experience_parity" in isolation["fields"]
     assert "paired_counterfactual_validation" in isolation["fields"]
     assert "absence of a topology" in isolation["rule"]
+    assert "automatically loaded" in isolation["rule"]
+    assert "availability from activation" in isolation["rule"]
+    assert "runtime default of false" in isolation["rule"]
     authority = requirements["authority_semantics"]
     assert authority["verdict_values"] == [
         "aligned",
@@ -104,6 +120,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert contract["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert contract["completion_gate"]["stale_head_verdict_allowed"] is False
     assert contract["completion_gate"]["blocking_evidence_verdicts"] == {
+        "repository_reuse": ["unjustified_duplication", "not_yet_proven"],
         "change_proportionality": ["disproportionate", "not_yet_proven"],
         "default_off_isolation": ["not_isolated", "not_yet_proven"],
         "authority_semantics": ["misleading", "not_yet_proven"],
@@ -189,6 +206,31 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
     assert template["review_order"] == ["docs/design.md"]
 
 
+def test_agent_instruction_plan_requires_default_off_user_experience_evidence() -> None:
+    item = _item(areas={"agent_instruction_surface": 1})
+    item["key_files"] = [
+        {"path": "skills/project/SKILL.md", "additions": 20, "deletions": 2}
+    ]
+
+    plan = build_review_plan(item)
+
+    assert plan["applicability"]["code_change"] is False
+    assert plan["applicability"]["behavioral_policy_change"] is True
+    assert plan["applicability"]["behavior_bearing_change"] is True
+    assert plan["applicability"]["smoke_or_example_only"] is False
+    assert plan["applicability"]["durable_smoke_value_required"] is False
+    assert plan["applicability"]["scope_fit_required"] is True
+    assert plan["applicability"]["default_off_isolation_required"] is True
+    assert plan["applicability"]["negative_walkthrough_required"] is True
+    assert plan["applicability"]["behavior_change_disclosure_required"] is True
+    assert plan["applicability"]["guidance_vs_obligation_required"] is True
+    assert "scope_fit" in plan["required_evidence_ids"]
+    assert "default_off_isolation" in plan["required_evidence_ids"]
+    assert "behavior_change_disclosure" in plan["required_evidence_ids"]
+    assert "guidance_vs_obligation" in plan["required_evidence_ids"]
+    assert "symbol_map" not in plan["required_evidence_ids"]
+
+
 def test_smoke_only_plan_requires_durable_value_evidence() -> None:
     item = _item(areas={"test_or_example": 1})
     item["key_files"] = [
@@ -227,3 +269,75 @@ def test_test_only_plan_skips_runtime_lenses() -> None:
     assert plan["applicability"]["guidance_vs_obligation_required"] is False
     assert "typed_state_rule" not in plan["required_evidence_ids"]
     assert "domain_neutrality" not in plan["required_evidence_ids"]
+
+
+@pytest.mark.parametrize(
+    "area",
+    [
+        "product_runtime",
+        "app_or_ui_surface",
+        "ci_or_release",
+        "build_or_config",
+        "agent_instruction_surface",
+        "public_entry_or_policy",
+    ],
+)
+def test_behavior_review_requires_repository_reuse_even_with_green_checks(
+    area: str,
+) -> None:
+    item = _item(areas={area: 1, "test_or_example": 1})
+    # A narrow changed-file list and passing CI cannot establish that an
+    # unchanged sibling already implements the same caller outcome.
+    item["key_files"] = [{"path": "src/history_list.py", "additions": 80}]
+    item["checks"] = {"counts": {"success": 4, "failure": 0}}
+    plan = build_review_plan(item)
+    assert plan["applicability"]["repository_reuse_required"] is True
+    assert "repository_reuse" in plan["required_evidence_ids"]
+    assert plan["result_template"]["evidence"]["repository_reuse"] == {
+        "status": "unverified"
+    }
+
+
+@pytest.mark.parametrize("area", ["public_docs", "test_or_example"])
+def test_non_behavior_review_keeps_existing_coverage_policy(area: str) -> None:
+    plan = build_review_plan(_item(areas={area: 1}))
+    assert plan["applicability"]["repository_reuse_required"] is False
+    assert "repository_reuse" not in plan["required_evidence_ids"]
+
+
+def test_reuse_evidence_compares_semantics_beyond_the_diff() -> None:
+    contract = build_agent_response_contract()["review_execution_contract"]
+    reuse = next(
+        row
+        for row in contract["evidence_requirements"]
+        if row["evidence_id"] == "repository_reuse"
+    )
+    assert reuse["required_when"] == "behavior_bearing_change"
+    assert reuse["verdict_values"] == [
+        "reused",
+        "separation_justified",
+        "no_existing_candidate",
+        "unjustified_duplication",
+        "not_yet_proven",
+    ]
+    assert {
+        "searched_revisions",
+        "queries_and_paths",
+        "existing_candidates",
+        "semantic_comparison",
+        "reuse_or_separation_reason",
+        "validation_evidence",
+        "verdict",
+    } <= set(reuse["fields"])
+    assert {
+        "resource_and_caller",
+        "data_scope_and_filters",
+        "ordering_and_pagination",
+        "authority_and_sanitization",
+        "state_retry_and_failure_owner",
+    } <= set(reuse["comparison_dimensions"])
+    assert "unchanged" in reuse["rule"]
+    assert "negative search" in reuse["rule"]
+    assert "coexistence" in reuse["rule"]
+    assert "not an automatic similarity detector" in reuse["rule"]
+    assert "repository_reuse" in contract["verdict_policy"]["open_pr_unresolved_reuse"]

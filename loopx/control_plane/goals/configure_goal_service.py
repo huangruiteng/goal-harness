@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ...configuration_transaction import goal_capability_configuration_revision
 from ...configure_goal import configure_goal
+from ...file_lock import exclusive_file_lock
 from ...global_registry import (
     sanitize_goal_for_global,
     sync_project_registry_to_global,
@@ -225,7 +227,7 @@ def _sync_plan(
     }
 
 
-def configure_goal_with_global_sync(
+def _configure_goal_with_global_sync_unlocked(
     *,
     registry_path: Path,
     goal_id: str,
@@ -352,3 +354,60 @@ def configure_goal_with_global_sync(
             or f"rerun loopx sync-global --goal-id {goal_id} after repairing the shared runtime route"
         )
     return applied
+
+
+def configure_goal_with_global_sync(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    runtime_root_override: str | None,
+    execute: bool,
+    expected_goal_configuration_revision: str | None = None,
+    **configure_options: Any,
+) -> dict[str, Any]:
+    """Configure one Goal under the shared registry mutation lock.
+
+    Browser callers may bind apply to the Goal-owned catalog revision they
+    previewed. The lock keeps that recheck and the source write in one critical
+    section across concurrent Dashboard and CLI configuration requests.
+    """
+
+    if not execute:
+        return _configure_goal_with_global_sync_unlocked(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            runtime_root_override=runtime_root_override,
+            execute=False,
+            **configure_options,
+        )
+    with exclusive_file_lock(
+        registry_path,
+        operation="configure_goal_with_global_sync",
+    ):
+        if expected_goal_configuration_revision is not None:
+            current = configure_goal(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                execute=False,
+            )
+            catalog = current.get("configuration_catalog")
+            capability_catalog = (
+                catalog.get("capability_catalog")
+                if isinstance(catalog, dict)
+                else None
+            )
+            if not isinstance(capability_catalog, dict):
+                raise ValueError("Goal capability catalog is unavailable")
+            actual_revision = goal_capability_configuration_revision(
+                goal_id,
+                capability_catalog,
+            )
+            if actual_revision != expected_goal_configuration_revision:
+                raise ValueError("Goal configuration changed; preview again")
+        return _configure_goal_with_global_sync_unlocked(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            runtime_root_override=runtime_root_override,
+            execute=True,
+            **configure_options,
+        )

@@ -20,6 +20,19 @@ def _goal() -> dict[str, object]:
     }
 
 
+def _canonical_todo(todo_id: str, *, status: str) -> dict[str, object]:
+    return {
+        "schema_version": "todo_item_v0",
+        "todo_id": todo_id,
+        "role": "agent",
+        "status": status,
+        "done": status == "done",
+        "text": f"{status} {todo_id}",
+        "archive_state": "active",
+        "source_section": "Agent Todo",
+    }
+
+
 def _run(
     monkeypatch,
     tmp_path: Path,
@@ -40,8 +53,8 @@ def _run(
         "list_goal_todos",
         lambda **_kwargs: {
             "todos": [
-                {"todo_id": "todo_b", "status": "open"},
-                {"todo_id": "todo_a", "status": "done"},
+                _canonical_todo("todo_b", status="open"),
+                _canonical_todo("todo_a", status="done"),
             ]
         },
     )
@@ -152,8 +165,8 @@ def test_coordination_shadow_bootstrap_requires_execute_and_reads_back_parity(
     assert str(bootstrap_request["operation_id"]).startswith("shadow-bootstrap:goal-a:")
     assert str(bootstrap_request["source_version"]).startswith("legacy-projection:")
     assert bootstrap_request["projection"]["todos"] == [
-        {"todo_id": "todo_a", "status": "done"},
-        {"todo_id": "todo_b", "status": "open"},
+        _canonical_todo("todo_a", status="done"),
+        _canonical_todo("todo_b", status="open"),
     ]
 
 
@@ -262,8 +275,8 @@ def test_coordination_shadow_reads_parity_matched_todo_candidate(
     assert payload["read_candidate"]["todo_id"] == "todo_b"
     assert request["todo_id"] == "todo_b"
     assert request["projection"]["todos"] == [
-        {"todo_id": "todo_a", "status": "done"},
-        {"todo_id": "todo_b", "status": "open"},
+        _canonical_todo("todo_a", status="done"),
+        _canonical_todo("todo_b", status="open"),
     ]
 
 

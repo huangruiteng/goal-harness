@@ -9,8 +9,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ..coordination.coordination_state_contract_generated import (
+    LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+    TASK_LEASE_ACQUIRE_REQUEST_SCHEMA,
+    TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA,
+)
+
 from ...history import load_registry
 from ...paths import resolve_runtime_root
+from ..coordination.runtime_shadow import resolve_coordination_runtime_shadow_config
 from ..goals.active_state_event_projection import (
     state_event_log_candidates as _state_event_log_candidates,
 )
@@ -19,9 +26,47 @@ from ..todos.contract import normalize_todo_id
 from ..todos.handoff_mode import HANDOFF_MODE_LEGACY
 from .local_lease_record import TASK_LEASE_SCHEMA_VERSION, TaskLeaseError
 
-TASK_LEASE_ACQUIRE_NATIVE_SCHEMA_VERSION = "loopx_task_lease_acquire_native_v0"
-TASK_LEASE_LIFECYCLE_NATIVE_SCHEMA_VERSION = "loopx_task_lease_lifecycle_native_v0"
+TASK_LEASE_ACQUIRE_NATIVE_SCHEMA_VERSION = TASK_LEASE_ACQUIRE_REQUEST_SCHEMA
+TASK_LEASE_LIFECYCLE_NATIVE_SCHEMA_VERSION = TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA
 TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS = 3
+
+
+def _attach_local_authority_shadow(
+    result: dict[str, Any],
+    *,
+    registry_path: Path | None,
+    runtime_root: Path,
+    goal_id: str,
+    todo_id: str,
+    operation: str,
+) -> dict[str, Any]:
+    """Observe a committed public lease mutation without changing its verdict."""
+
+    if registry_path is None:
+        return result
+    lease = result.get("lease") if isinstance(result.get("lease"), dict) else {}
+    observation_trigger = ":".join(
+        (
+            f"task_lease_{operation}",
+            str(todo_id),
+            str(lease.get("version") or "none"),
+            str(lease.get("lease_epoch") or "none"),
+            str(lease.get("updated_at") or lease.get("released_at") or "unknown"),
+        )
+    )
+    from ..coordination.local_authority_shadow_adapter import (
+        observe_local_authority_commit,
+    )
+
+    evidence = observe_local_authority_commit(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=str(goal_id),
+        observation_trigger=observation_trigger,
+    )
+    if evidence is not None:
+        result["authority_shadow"] = evidence
+    return result
 
 
 def _authority_source_receipt(source_id: str, path: Path) -> dict[str, Any]:
@@ -280,6 +325,53 @@ def task_lease_acquire_authority_facts(
     )
 
 
+def _require_native_acquire_shape(payload: object) -> dict[str, Any]:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != TASK_LEASE_SCHEMA_VERSION
+        or payload.get("action") != "acquire"
+        or not isinstance(payload.get("ok"), bool)
+    ):
+        raise RuntimeError("native task-lease acquire result shape mismatch")
+    return payload
+
+
+def _finalize_native_acquire_result(
+    payload: dict[str, Any],
+    *,
+    authority: dict[str, Any],
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    todo_id: str,
+    legacy_provider_projection: bool,
+) -> dict[str, Any]:
+    result = dict(payload)
+    if legacy_provider_projection and result.get("ok") is True:
+        result["handoff_mode"] = authority.get("handoff_mode") or HANDOFF_MODE_LEGACY
+        result.pop("settlement", None)
+    if result.get("ok") is True and result.get("acquired") is True:
+        from ..coordination.runtime_shadow_writer_adapter import (
+            settle_lease_runtime_shadow_capture,
+        )
+
+        result = settle_lease_runtime_shadow_capture(
+            result,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+        )
+        result = _attach_local_authority_shadow(
+            result,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            todo_id=todo_id,
+            operation="acquire",
+        )
+    return result
+
+
 def execute_native_task_lease_acquire(
     *,
     registry_path: Path,
@@ -315,30 +407,30 @@ def execute_native_task_lease_acquire(
             "expected_version": expected_version,
             "authority": authority,
         }
-        payload = effect_runtime_result(
-            "task_lease.acquire.native",
-            request,
-            timeout=15.0,
+        registry = load_registry(registry_path)
+        goal = _registry_goal(registry, str(goal_id))
+        if resolve_coordination_runtime_shadow_config(goal).enabled:
+            request["runtime_shadow"] = {
+                "schema_version": LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+                "provider": "file_v0",
+            }
+        payload = _require_native_acquire_shape(
+            effect_runtime_result("task_lease.acquire.native", request, timeout=15.0)
         )
-        if (
-            not isinstance(payload, dict)
-            or payload.get("schema_version") != TASK_LEASE_SCHEMA_VERSION
-            or payload.get("action") != "acquire"
-            or not isinstance(payload.get("ok"), bool)
-        ):
-            raise RuntimeError("native task-lease acquire result shape mismatch")
         if (
             payload.get("error_code") == "authority_source_changed"
             and attempt + 1 < TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS
         ):
             continue
-        result = dict(payload)
-        if _legacy_provider_projection and result.get("ok") is True:
-            result["handoff_mode"] = (
-                authority.get("handoff_mode") or HANDOFF_MODE_LEGACY
-            )
-            result.pop("settlement", None)
-        return result
+        return _finalize_native_acquire_result(
+            payload,
+            authority=authority,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=str(goal_id),
+            todo_id=str(todo_id),
+            legacy_provider_projection=_legacy_provider_projection,
+        )
     raise RuntimeError("native task-lease acquire exhausted source-CAS retries")
 
 
@@ -562,6 +654,14 @@ def execute_native_task_lease_lifecycle(
             # CLI argument or persisted authority fact.
             "current_time": _now.isoformat() if _now is not None else None,
         }
+        if registry_path is not None:
+            registry = load_registry(registry_path)
+            goal = _registry_goal(registry, str(goal_id))
+            if resolve_coordination_runtime_shadow_config(goal).enabled:
+                request["runtime_shadow"] = {
+                    "schema_version": LOCAL_AUTHORITY_SHADOW_BINDING_SCHEMA,
+                    "provider": "file_v0",
+                }
         compacted_todo = _compact_lifecycle_todo(todo, todo_id=str(todo_id))
         if compacted_todo is not None:
             request["todo"] = compacted_todo
@@ -592,6 +692,35 @@ def execute_native_task_lease_lifecycle(
             result["handoff_mode"] = authority["handoff_mode"]
         if _legacy_provider_projection:
             result.pop("settlement", None)
+        if "coordination_runtime_shadow_capture" in result:
+            from ..coordination.runtime_shadow_writer_adapter import (
+                settle_lease_runtime_shadow_capture,
+            )
+
+            result = settle_lease_runtime_shadow_capture(
+                result,
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=str(goal_id),
+            )
+        committed_mutation = (
+            normalized_operation == "renew" and result.get("renewed") is True
+        ) or (
+            normalized_operation == "transfer"
+            and result.get("transferred") is True
+        ) or (
+            normalized_operation == "release"
+            and result.get("released") is True
+        )
+        if committed_mutation and result.get("idempotent") is not True:
+            result = _attach_local_authority_shadow(
+                result,
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=str(goal_id),
+                todo_id=str(todo_id),
+                operation=normalized_operation,
+            )
         # lock_token is an internal bridge value.  Callers that need a held
         # fence read it from the nested native payload before redacting it.
         return result

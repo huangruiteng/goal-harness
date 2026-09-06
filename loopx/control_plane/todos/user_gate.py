@@ -162,9 +162,10 @@ def apply_scoped_user_gate_fallback_projection(
     if projected.get("effective_action") in {"skip", "monitor_quiet_skip", None}:
         projected["effective_action"] = "scoped_user_gate_fallback"
 
+    raw_execution_obligation = projected.get("execution_obligation")
     execution_obligation = (
-        dict(projected.get("execution_obligation"))
-        if isinstance(projected.get("execution_obligation"), dict)
+        dict(raw_execution_obligation)
+        if isinstance(raw_execution_obligation, dict)
         else {}
     )
     execution_obligation.update(
@@ -199,9 +200,10 @@ def build_gate_prompt(
     question = str(item.get("operator_question") or "").strip()
     recommended_action = str(item.get("recommended_action") or "").strip()
     next_handoff_condition = str(item.get("next_handoff_condition") or "").strip()
+    raw_missing_gates = item.get("missing_gates")
     missing_gates = [
         str(gate).strip()
-        for gate in (item.get("missing_gates") if isinstance(item.get("missing_gates"), list) else [])
+        for gate in (raw_missing_gates if isinstance(raw_missing_gates, list) else [])
         if str(gate).strip()
     ]
     if user_todo_summary is None:

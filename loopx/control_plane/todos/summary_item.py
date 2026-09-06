@@ -200,7 +200,8 @@ def todo_summary_source_items(value: dict[str, Any]) -> list[dict[str, Any]]:
     ready_successor_todo_ids = handoff_ready_successor_todo_ids(value)
     open_items: list[dict[str, Any]] = []
     for key in TODO_SUMMARY_SOURCE_KEYS:
-        source_items = value.get(key) if isinstance(value.get(key), list) else []
+        raw_items = value.get(key)
+        source_items = raw_items if isinstance(raw_items, list) else []
         for item in source_items:
             if not isinstance(item, dict) or item.get("done") is True:
                 continue
@@ -251,7 +252,8 @@ def todo_planning_source_items(
     planning_items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for key in TODO_PLANNING_SOURCE_KEYS:
-        source_items = value.get(key) if isinstance(value.get(key), list) else []
+        raw_items = value.get(key)
+        source_items = raw_items if isinstance(raw_items, list) else []
         for item in source_items:
             if not isinstance(item, dict) or (
                 not include_terminal and item.get("status") == "done"

@@ -13,7 +13,12 @@ const timeline = source("./channel-timeline.tsx");
 const runRow = source("./cards/run-row.tsx");
 const larkSettings = source("./lark-settings-page.tsx");
 const machineSettings = source("./machine-configuration-settings.tsx");
+const goalCapabilitySettings = source("./goal-capability-settings.tsx");
+const capabilityFields = source("./capability-configuration-fields.tsx");
+const capabilityLocalization = source("./capability-localization.ts");
+const capabilityWorkbench = source("./capability-workbench.tsx");
 const i18n = source("./i18n.tsx");
+const workspaceTheme = source("./workspace-theme.ts");
 const statusSourceSwitcher = source("./status-source-switcher.tsx");
 const workspaceSettings = source("./workspace-settings-page.tsx");
 const styles = source("./personal-workspace.css");
@@ -100,6 +105,25 @@ assert.match(tasks, /t\("tasks\.viewResult"\)/, "Tasks expose a direct result en
 assert.match(tasks, /t\("tasks\.pendingAndRunning"\)/, "Tasks do not imply that every uncompleted Todo already has an active Run");
 assert.match(tasks, /t\("tasks\.chatRecent"\)/, "Tasks surface the latest Goal conversation without forcing a tab switch");
 assert.match(tasks, /t\("tasks\.chatUnchangedDescription"\)/, "Tasks explain that ordinary Chat does not silently mutate Todo state");
+assert.doesNotMatch(tasks, /personal-task-capability-callout|tab: "capabilities"/, "Goal Tasks does not spend a full-width row on capability settings");
+assert.match(header, /personal-goal-tools-trigger/, "Goal details and capability settings share one compact header entry");
+assert.match(header, /onOpenGoalDetail[\s\S]*onOpenGoalCapabilities/, "The unified Goal entry preserves both existing details and capability settings");
+assert.match(page, /onOpenGoalCapabilities=.*tab: "capabilities"/, "The unified Goal entry opens the selected Goal capability settings directly");
+assert.match(goalCapabilitySettings, /fetchGoalConfiguration\(goalId\)/, "Goal capability settings inspect the selected Goal through the path-free API");
+assert.match(capabilityWorkbench, /personal-capability-editor-status/, "Shared capability details distinguish editable contracts from read-only capabilities");
+for (const settings of [goalCapabilitySettings, machineSettings]) {
+  assert.match(settings, /<CapabilityEditorStatus/, "Both scopes use the shared editor status");
+  assert.match(settings, /<CapabilityConfigurationSummary/, "Both scopes use the shared value and provenance view");
+  assert.match(settings, /canEditCapability\(/, "Both scopes enforce the same editor availability contract");
+}
+assert.match(goalCapabilitySettings, /previewGoalConfiguration\(goalId/, "Goal capability changes start with a typed preview");
+assert.match(goalCapabilitySettings, /preview\.plan_revision/, "Goal capability apply is locked to the reviewed plan revision");
+assert.match(goalCapabilitySettings, /applyGoalConfiguration\(/, "Goal capability settings apply only through the revision-locked API");
+assert.match(machineSettings, /<CapabilityConfigurationFields/, "Machine settings use the shared typed capability field renderer");
+assert.match(goalCapabilitySettings, /<CapabilityConfigurationFields/, "Goal settings use the shared typed capability field renderer");
+for (const inputKind of ["boolean", "number", "select", "string_list"]) {
+  assert.match(capabilityFields, new RegExp(`input_kind === "${inputKind}"`), `Shared capability fields render ${inputKind}`);
+}
 assert.match(tasks, /t\("tasks\.convertToTask"\)/, "Tasks offer an explicit preview-first bridge from a reply to task management");
 assert.match(page, /function todoTextFromMessage[\s\S]*标题[\s\S]*内容/, "Todo parsing preserves structured title and content fields");
 assert.match(page, /t\("home\.taskCount"/, "Home cards expose durable activity when a new Goal has Todos but no run timestamp yet");
@@ -158,7 +182,7 @@ assert.match(dashboard, /statusRequestCanCommit\(statusRequestFenceRef\.current,
 assert.match(sidebar, /Trash2/, "Stopped Goals expose a delete icon");
 assert.match(sidebar, /onRequestGoalLifecycle\(goal, "delete"\)/, "Goal deletion stays behind the lifecycle request boundary");
 assert.match(page, /\{ select: operation !== "stop" \}/, "Goal stop suppresses the confirmation drawer while other lifecycle actions retain it");
-assert.match(page, /await applyProposal\(proposal,\s*\{[\s\S]*?presentation: "feedback"/, "Goal stop reuses the canonical apply state machine and surfaces its receipt as feedback");
+assert.match(page, /await applyProposal\(proposal, \{[\s\S]*lifecycleProjection: stopProjection \?\? undefined,[\s\S]*presentation: "feedback",[\s\S]*\}\)/, "Goal stop reuses the canonical apply state machine with its optimistic lifecycle projection and surfaces the receipt as feedback");
 assert.match(page, /if \(proposal\.status === "ready"\)[\s\S]*setSelection\(\{ item: proposal, kind: "proposal" \}\)/, "A stop action only bypasses review when its typed preview is ready");
 assert.match(page, /A newly discovered authority gate always deserves review/, "A direct action escalates a newly discovered authority gate to the drawer");
 assert.match(sidebar, /disabled=\{lifecycleBusyGoalIds\?\.has\(goal\.goalId\)\}/, "An in-flight Goal stop cannot be submitted twice from the sidebar");
@@ -198,6 +222,32 @@ assert.match(model, /repository\??:\s*WorkspaceRepositoryContext/, "Goal exposes
 assert.match(drawer, /t\("drawer\.repository"\)/, "Goal settings display the localized repository label");
 assert.match(drawer, /t\("common\.readOnly"\)/, "Repository is visibly read-only");
 assert.doesNotMatch(drawer, /Add repository/, "Goal settings do not imply repository binding controls");
+assert.match(model, /subagentExecution\??:\s*WorkspaceGoalSubagentConfiguration/, "Goal exposes the projected sub-agent execution boundary");
+for (const callback of ["onPreviewGoalSubagentConfiguration", "onApplyGoalSubagentConfiguration"]) {
+  assert.match(model, new RegExp(`${callback}\\??:`), `Goal sub-agent settings expose ${callback}`);
+  assert.match(drawer, new RegExp(`callbacks\\.${callback}`), `Goal drawer calls ${callback}`);
+}
+assert.match(drawer, /role="switch"/, "Goal sub-agent control uses an accessible switch");
+assert.match(model, /domainCandidates\??:\s*Array/, "Goal carries finite domain choices projected from current Todos");
+assert.match(drawer, /type="checkbox"/, "Goal sub-agent domains use an accessible multi-select instead of free text");
+assert.match(drawer, /subagentDomainsEmpty/, "Goal sub-agent domains expose an explicit optional empty state");
+assert.doesNotMatch(drawer, /!currentSubagentConfiguration\.enabled && subagentAllowedDomains\.length === 0/, "Goal sub-agent execution does not require a task-domain selection");
+assert.match(drawer, /subagentPreview && subagentMutationState === "ready"/, "Goal sub-agent writes require a visible preview state");
+assert.match(drawer, /normalize.*SubagentDomains|normalizedSubagentDomains/, "Goal sub-agent domains are validated before preview");
+assert.match(chatData, /\/api\/chat\/goal-subagents\/dry-run/, "Dashboard uses the local preview-locked Goal sub-agent API");
+assert.match(chatData, /\/api\/chat\/goal-subagents\/apply/, "Dashboard applies Goal sub-agent settings through the same local API");
+assert.match(chatData, /global_sync\.readback\.verified/, "Goal sub-agent success requires shared-state readback verification");
+assert.match(dashboard, /goal\.spawn_policy\?\.mode === "multi_subagent"/, "Rendered switch state comes from the status spawn-policy projection");
+assert.match(dashboard, /capabilities\.goal_subagent_configuration === "preview_locked"/, "Goal sub-agent UI requires the authoritative Chat capability opt-in");
+assert.match(dashboard, /goalSubagentConfigurationEnabled \? \{[\s\S]*subagentExecution:/, "Capability-off models omit the Goal sub-agent UI contract");
+assert.match(dashboard, /personalSubagentDomainCandidates\(payload, row, goalAgentTodos\)/, "Goal domain choices use the full Todo index with compact-row fallback");
+assert.match(dashboard, /previewGoalSubagentConfiguration/, "Goal setting preview delegates to the canonical Chat data adapter");
+assert.match(dashboard, /applyGoalSubagentConfiguration/, "Goal setting apply delegates to the canonical Chat data adapter");
+assert.match(page, /selection\?\.kind === "goal"[\s\S]*workspaceGoals\.find/, "An open Goal drawer follows refreshed status readback");
+assert.doesNotMatch(drawer, /localStorage[\s\S]{0,120}subagent|subagent[\s\S]{0,120}localStorage/i, "Goal sub-agent state is never stored in browser-local authority");
+assert.match(drawer, /authoritativeSupersedesReceipt/, "A newer authoritative status supersedes an apply receipt without closing the drawer");
+assert.match(drawer, /!subagentConfigurationsMatch\([\s\S]*baseline,[\s\S]*authoritativeSubagentConfiguration/, "Status changes away from the pre-apply baseline supersede the receipt even when they do not echo it");
+assert.match(i18n, /drawer\.subagentDescription/, "Sub-agent authority boundaries are localized in the Goal drawer");
 
 for (const lane of ["needs_you", "running", "observing", "scheduled", "history"]) {
   assert.match(model, new RegExp(`"${lane}"`), `Manager home models the ${lane} lane`);
@@ -211,7 +261,7 @@ assert.match(page, /home\.history/, "Manager home renders localized history copy
 assert.match(page, /personal-home-board/, "Manager home uses the four-lane workspace board");
 assert.doesNotMatch(page, /personal-worker-strip/, "Manager home omits the redundant Agent worker strip");
 assert.doesNotMatch(header, /切换到野兽主题|切换到默认主题/, "Workspace header does not expose theme switching");
-assert.match(page, /loopx-pw-theme/, "Theme preference persists across reloads");
+assert.match(workspaceTheme, /workspaceThemeStorageKey = "loopx-pw-theme"/, "Theme preference persists across reloads");
 assert.match(dashboard, /function isManagerProjectionQuestion[\s\S]*我现在该做什么[\s\S]*哪些 Goal 在等我[\s\S]*Agent 在做什么/, "Manager projection questions use stable intent phrases instead of exact button copy");
 assert.match(dashboard, /targetContextId === "manager" && isManagerProjectionQuestion\(question\)/, "Manager projection questions remain on the cross-Goal manager route when the user adds a read-only boundary");
 assert.match(dashboard, /const asksForNextAction[\s\S]*if \(asksForNextAction\)[\s\S]*personalManagerMatches\(question, \["状态"/, "A next-step question outranks a read-only boundary that mentions state");
@@ -295,8 +345,8 @@ assert.match(i18n, /当前本地工作区（未绑定 Repository）/, "Chinese w
 assert.doesNotMatch(model, /kind: "agent"/, "The drawer model omits the read-only Agent settings variant");
 assert.match(
   dashboard,
-  /statusRequestActive = source\.kind === "example"[\s\S]*?&& Boolean\(activeStatusRequestUrl\)[\s\S]*?&& Boolean\(loadError && requestedStatusUrl\)/,
-  "Initial load and refresh keep the workspace shell visible, while failed authoritative status requests surface recovery",
+  /statusRequestActive = source\.kind === "example"\s*&& !exampleModeRequested;/,
+  "Initial real-status loading must not display bundled example tasks; explicit example mode remains available",
 );
 
 assert.match(page, /if \(settingsOpen\)[\s\S]*<WorkspaceSettingsPage/, "Settings replace the whole workspace shell");
@@ -314,21 +364,61 @@ assert.match(styles, /personal-settings-sidebar/, "Settings page owns its own si
 assert.match(styles, /personal-settings-page\[data-pw-theme="brutal"\]/, "Settings page owns its high-contrast theme styles");
 assert.match(workspaceSettings, /role="radiogroup"/, "Settings expose theme and language selection as accessible radio groups");
 assert.match(workspaceSettings, /setLocale\(option\.value\)/, "Settings updates the workspace locale");
-assert.match(machineSettings, /available_namespaces/, "Machine configuration renders backend-registered namespaces");
-assert.match(machineSettings, /periodicReportNamespace = "periodic_report"/, "Periodic reports are a typed namespace consumer");
+assert.match(machineSettings, /available_scopes\.includes\("machine"\)/, "Machine configuration only renders capabilities that grant machine-scope configuration");
+assert.match(machineSettings, /selected\.capability_id === "periodic_report"/, "Periodic reports expose their governed activation semantics");
 assert.match(machineSettings, /previewMachineConfiguration\(/, "Machine settings require a preview before apply");
 assert.match(machineSettings, /applyMachineConfiguration\([\s\S]*preview\.plan_revision/, "Machine settings apply the exact reviewed revision");
 assert.match(machineSettings, /previewMachineConfigurationRollback\(/, "Machine settings preview rollback before execution");
 assert.match(machineSettings, /liveDefaultDescription/, "Live defaults and Goal overrides are explained together");
-assert.match(machineSettings, /namespace_catalog/, "Machine settings discover capability namespaces from the registry catalog");
-assert.match(machineSettings, /personal-machine-json-editor/, "Every registered namespace has a generic JSON editor fallback");
-assert.match(machineSettings, /selectedNamespace,\s*desiredNamespaceConfiguration/, "Preview targets the selected namespace instead of a periodic-report constant");
-assert.match(machineSettings, /previewMachineConfigurationRemoval\(selectedNamespace\)/, "Configured namespaces expose a typed removal preview");
-assert.match(machineSettings, /applyMachineConfigurationRemoval\(selectedNamespace, preview\.plan_revision\)/, "Removal applies the exact reviewed revision");
-assert.match(machineSettings, /configuredNamespaces\.has\(selectedNamespace\)/, "Only configured namespaces expose removal");
+assert.match(machineSettings, /inspection\?\.capability_catalog\.capabilities/, "Machine settings discover capabilities from the shared registry catalog");
+assert.match(machineSettings, /personal-capability-json-editor/, "Every machine-configurable capability keeps an advanced JSON fallback");
+assert.match(machineSettings, /selected\.machine_namespace, desiredConfiguration/, "Preview targets the selected capability namespace");
+assert.match(machineSettings, /previewMachineConfigurationRemoval\(selected\.machine_namespace\)/, "Configured capabilities expose a typed removal preview");
+assert.match(machineSettings, /applyMachineConfigurationRemoval\(selected\.machine_namespace, preview\.plan_revision\)/, "Removal applies the exact reviewed revision");
+assert.match(machineSettings, /const configured = Boolean\(/, "Only configured capabilities expose removal");
+assert.match(machineSettings, /periodicReportActivationDescription/, "Machine periodic reports explain stage-triggered automatic delivery");
+assert.match(i18n, /Enabled means automatic delivery at validated stage boundaries/, "English machine settings name automatic stage delivery");
+assert.match(i18n, /开启后将在已验证的阶段节点自动投递/, "Chinese machine settings name automatic stage delivery");
+assert.match(machineSettings, /localizedCapabilityFieldCopy\(locale\)/, "Machine capability fields follow the selected locale");
+assert.match(goalCapabilitySettings, /localizedCapabilityFieldCopy\(locale\)/, "Goal capability fields follow the selected locale");
+assert.match(machineSettings, /<CapabilityCatalogNavigation/, "Machine settings use the shared capability catalog navigation");
+assert.match(goalCapabilitySettings, /<CapabilityCatalogNavigation/, "Goal settings use the shared capability catalog navigation");
+assert.match(machineSettings, /<CapabilityDetailHeader/, "Machine settings use the shared capability detail header");
+assert.match(goalCapabilitySettings, /<CapabilityDetailHeader/, "Goal settings use the shared capability detail header");
+assert.match(capabilityWorkbench, /localizeCapability\(rawCapability, locale\)/, "Shared navigation localizes capability metadata without changing capability ids");
+assert.match(capabilityWorkbench, /capability\.capability_id === "multi_subagent"\) return 3/, "Immature child-agent capacity stays behind mature supported capabilities");
+assert.match(capabilityWorkbench, /availability\?\.includes\("experimental"\)/, "Experimental capabilities share a stable late presentation tier");
+assert.match(capabilityWorkbench, /configuration_editor\.writable_scopes\.length === 0/, "Provider-bound read-only capabilities follow directly actionable settings");
+assert.match(capabilityWorkbench, /orderCapabilitiesForPresentation\(capabilities, locale\)/, "Machine and Goal catalogs use one presentation-order policy");
+for (const capabilityId of [
+  "change_quality_qualification",
+  "explore_graph",
+  "explore_harness",
+  "lark_event_inbox",
+  "lark_kanban_heartbeat_sync",
+  "local_authority_shadow",
+  "multi_subagent",
+  "peer_task_coordination",
+  "periodic_report",
+  "reward_memory",
+]) {
+  const matches = capabilityLocalization.match(new RegExp(`${capabilityId}:`, "g")) ?? [];
+  assert.equal(matches.length, 2, `${capabilityId} has English and Simplified Chinese metadata`);
+}
+for (const fieldKey of ["allowed_domains", "coordinator_agent_id", "enabled", "max_children", "profile", "profile_preset", "route_ref", "safe_fix", "strict_receipt", "timezone"]) {
+  const matches = capabilityLocalization.match(new RegExp(`${fieldKey}:`, "g")) ?? [];
+  assert.equal(matches.length, 2, `${fieldKey} has English and Simplified Chinese field copy`);
+}
 assert.doesNotMatch(machineSettings, /password|secret|credential/i, "Machine settings do not collect credentials");
 assert.match(chatData, /machineConfigurationSchema/, "Machine configuration uses a typed frontend contract");
 assert.match(chatData, /machineConfigurationCatalogSchema/, "The frontend validates the generic namespace catalog");
+assert.match(chatData, /capabilityConfigurationCatalogSchema/, "Machine and Goal configuration share one capability catalog contract");
+assert.match(chatData, /capability_catalog: capabilityConfigurationCatalogSchema/, "Machine inspection preserves the shared catalog for the settings UI");
+assert.match(chatData, /goalConfigurationInspectionSchema/, "Goal settings validate the shared capability catalog inspection");
+assert.match(chatData, /fetchGoalConfiguration\(goalId: string\)/, "Goal settings use a dedicated path-free configuration inspection endpoint");
+assert.match(goalCapabilitySettings, /restoreInheritance/, "Goal overrides expose an explicit path back to live machine defaults");
+assert.match(goalCapabilitySettings, /projectEditableCapabilityConfiguration/, "Goal writes project read models onto editor-owned fields");
+assert.match(goalCapabilitySettings, /status === "partial_write"/, "Goal settings preserve partial-write recovery outcomes");
 assert.match(chatData, /namespace_configuration:\s*namespaceConfiguration/, "The browser patches one owned namespace without round-tripping private namespaces");
 assert.match(chatData, /operation:\s*"remove"/, "The browser uses an explicit typed removal operation");
 assert.match(chatData, /z\.enum\(\["create", "update", "delete", "unchanged"\]\)/, "Machine previews recognize deletion as a first-class action");
@@ -345,7 +435,7 @@ assert.match(larkSettings, /t\("lark\.connections"\)/, "Lark management exposes 
 for (const label of ["Connect Lark App", "Group chat", "Bind to Goal", "Create Goal topic automatically", "Topic reply"]) {
   assert.match(i18n, new RegExp(label), `English locale contains ${label}`);
 }
-assert.match(i18n, /One Lark App · many Goals · one topic per Goal/, "Connection cardinality is explicit");
+assert.match(i18n, /One Lark App · many Goals · one isolated route per Agent/, "Connection cardinality is explicit");
 assert.match(larkSettings, /lark_message_permissions_required/, "Missing message permissions receive an actionable error");
 assert.match(larkSettings, /selectedApp\?\.reply_ready/, "Connect stays disabled until automatic replies are healthy");
 assert.match(larkSettings, /lark\.health\.unavailable/, "Existing unhealthy connections expose localized reply health");
@@ -365,6 +455,8 @@ assert.match(larkSettings, /lark\.health\.notAddressed/, "Ignored unaddressed me
 assert.match(larkSettings, /lark\.health\.routeMismatch/, "Route mismatches receive an actionable connection repair hint");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*false/s, "Connect flow previews before execution");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*true/s, "Connect flow performs the approved external write");
+assert.match(larkSettings, /connectAllAgents[\s\S]*targetAgentIds[\s\S]*for \(const targetAgentId of targetAgentIds\)/, "One guided action can connect every registered Agent through isolated routes");
+assert.match(i18n, /Connect every registered Agent/, "Multi-Agent Goal Channel onboarding is explicit");
 assert.match(i18n, /Register another Lark App/, "App chooser exposes localized Feishu registration");
 assert.match(larkSettings, /startLarkAppSetup/, "Registration starts through the local setup API");
 assert.match(larkSettings, /fetchLarkAppSetup/, "Registration polls the local setup session");
@@ -380,7 +472,8 @@ assert.match(status, /recent_completed_advancement_items/, "The status schema ac
 assert.match(model, /doneTodoCount\??:/, "A Goal exposes the payload completed-Todo count");
 assert.match(dashboard, /personalAgentTodoFacts/, "Goal projection derives completion facts from the payload, not open-only item lists");
 assert.match(dashboard, /agentTodos:\s*\[\.\.\.goalAgentTodos,\s*\.\.\.agentTodoFacts\.recentCompleted\]/, "Recent completed Todos stay visible in the Goal board");
-assert.match(tasks, /Math\.max\(goal\.doneTodoCount \?\? 0, doneAgentTodos\.length\)/, "The completed column counts payload completions instead of open-only items");
+assert.match(tasks, /<CompletedTaskLane/, "Completed history is owned by its paginated lane");
+assert.match(source("./completed-task-lane.tsx"), /setTotal\(page\.total\)/, "The history count comes from the scoped full-history page, not its visible window");
 assert.doesNotMatch(tasks, /<span>\{doneAgentTodos\.length\}<\/span>/, "The completed column never reports a false zero");
 assert.match(
   dashboard,

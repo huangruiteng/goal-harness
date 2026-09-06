@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from ...runtime import validate_goal_id_path_segment
+from .subagent_execution_topology import (
+    child_execution_receipts_json_schema,
+)
 from .driver import selected_turn_todo
 from .executor import (
     HOST_AGENT_VISION_JSON_MAX_CHARS,
@@ -232,7 +235,16 @@ def _discard_codex_cli_session(
     _session_path(runtime_root, lineage).unlink(missing_ok=True)
 
 
-def codex_cli_result_schema() -> dict[str, Any]:
+def _has_subagent_topology(request: Mapping[str, Any] | None) -> bool:
+    return bool(
+        isinstance(request, Mapping)
+        and isinstance(request.get("subagent_execution_topology"), Mapping)
+    )
+
+
+def codex_cli_result_schema(
+    request: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     text_limits = dict(HOST_RESULT_TEXT_LIMITS)
     properties: dict[str, Any] = {
         "schema_version": {
@@ -293,6 +305,14 @@ def codex_cli_result_schema() -> dict[str, Any]:
         },
         "summary": {"type": "string", "maxLength": text_limits["summary"]},
     }
+    if _has_subagent_topology(request):
+        child_receipts = child_execution_receipts_json_schema()
+        child_receipt_properties = child_receipts["items"]["properties"]
+        child_receipt_properties["runtime_id"] = {
+            "type": "string",
+            "enum": ["codex-cli"],
+        }
+        properties["child_execution_receipts"] = child_receipts
     return {
         "type": "object",
         "properties": properties,
@@ -305,20 +325,28 @@ def _prompt(request: Mapping[str, Any]) -> str:
     request_json = json.dumps(
         request, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
-    return "\n".join(
-        [
-            "Execute exactly one bounded LoopX Turn in the current workspace.",
-            "Use the TurnEnvelope as the source of truth. Perform work only when its contract allows it.",
-            "Do not write LoopX state, spend quota, or apply scheduler changes; the adapter owns those effects.",
-            "Return only the schema-constrained result. For validated_progress, repair_required, or replan_required, fill every material field with public-safe evidence.",
-            "For those material results, set path_delta_mode=material_replan only when this Turn changes a prior assumption, route, scope, acceptance rule, or stops prior work; then provide a complete bounded agent vision packet with goal_path_delta_v0 in agent_vision_json and leave vision_unchanged_reason empty.",
-            "For routine continuation, retry, successor creation, or no-change replanning, set path_delta_mode=unchanged, leave agent_vision_json empty, and provide vision_unchanged_reason.",
-            "For user_action_required or wait, leave material-only fields empty and explain the stop in summary.",
-            'completed_phases must be exactly ["host_execute","typed_result"], and turn_key must match the request.',
-            "Turn request:",
-            request_json,
+    instructions = [
+        "Execute exactly one bounded LoopX Turn in the current workspace.",
+        "Use the TurnEnvelope as the source of truth. Perform work only when its contract allows it.",
+        "Do not write LoopX state, spend quota, or apply scheduler changes; the adapter owns those effects.",
+        "Return only the schema-constrained result. For validated_progress, repair_required, or replan_required, fill every material field with public-safe evidence.",
+        "For those material results, set path_delta_mode=material_replan only when this Turn changes a prior assumption, route, scope, acceptance rule, or stops prior work; then provide a complete bounded agent vision packet with goal_path_delta_v0 in agent_vision_json and leave vision_unchanged_reason empty.",
+        "For routine continuation, retry, successor creation, or no-change replanning, set path_delta_mode=unchanged, leave agent_vision_json empty, and provide vision_unchanged_reason.",
+        "For user_action_required or wait, leave material-only fields empty and explain the stop in summary.",
+        'completed_phases must be exactly ["host_execute","typed_result"], and turn_key must match the request.',
+        "Turn request:",
+        request_json,
+    ]
+    if _has_subagent_topology(request):
+        instructions[7:7] = [
+            "When subagent_execution_topology is present, return one compact child_execution_receipts item for each observed child, including the actual context_mode. Never copy prompts, transcripts, tool output, credentials, private links, or local absolute paths into a receipt. If no child was observed, return an empty list.",
+            "Launch a child only from its complete child_execution_task_packet_v0. Keep the child inside its objective, acceptance, capability, write-scope, effect, workspace, and execution-budget boundaries, and copy the exact task_packet_digest into its receipt.",
+            "Use the generic task-packet context mode exactly and execute the separate host_adapter projection. For the Codex spawn_agent adapter, fresh maps to fork_context=false and forked_snapshot maps to fork_context=true; never infer native arguments inside the generic LoopX task packet.",
+            "For every Codex child receipt, set runtime_id to the stable host id codex-cli. Keep worker_ref opaque. Never use an executable, workspace, session-file, or other local path as either identifier.",
+            "Use one or more opaque evidence_refs such as artifact:child-result. Receipt identifiers and evidence refs must contain no spaces, prose, URLs, or local paths.",
+            "If a child deviates from that packet, stop or quarantine only that child and its evidence. Do not let the child write LoopX state or block the parent agent; the parent may retry fresh, replace the child, take over serially, or ignore an optional result.",
         ]
-    )
+    return "\n".join(instructions)
 
 
 def codex_cli_event_session_id(event: Mapping[str, Any]) -> str | None:
@@ -698,7 +726,9 @@ def run_codex_cli_host(
         output_path = temporary / "last-message.json"
         schema_path.write_text(
             json.dumps(
-                codex_cli_result_schema(), ensure_ascii=False, separators=(",", ":")
+                codex_cli_result_schema(request),
+                ensure_ascii=False,
+                separators=(",", ":"),
             ),
             encoding="utf-8",
         )

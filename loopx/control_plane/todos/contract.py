@@ -11,7 +11,7 @@ from ...repository_identity import normalize_repository_identity
 from .completion_state import (
     normalize_todo_completion_continuation,
     normalize_todo_completion_recovery,
-    normalize_todo_no_followup,
+    normalize_todo_no_followup as normalize_todo_no_followup,
     require_todo_completion_metadata,
 )
 from .resume_condition import (
@@ -1205,6 +1205,12 @@ def _normalize_todo_metadata_for_write(values: dict[str, Any]) -> dict[str, Any]
                 "excluded_agents"
             )
     return normalized
+
+
+def normalize_todo_metadata_for_write(values: dict[str, Any]) -> dict[str, Any]:
+    """Return canonical typed Todo metadata without Markdown encoding."""
+
+    return _normalize_todo_metadata_for_write(values)
 
 
 def _format_todo_metadata_values(values: dict[str, Any]) -> str | None:

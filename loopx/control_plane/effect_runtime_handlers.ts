@@ -77,6 +77,7 @@ import {
   writeSchedulerState,
 } from "./scheduler/state_store.ts";
 import { buildVisionCheckpoint } from "./goals/vision_checkpoint.ts";
+import { projectSharedGoalAlignment } from "./goals/shared_goal_alignment.ts";
 import {
   evaluateDeliveryRoute,
 } from "./turn_driver/delivery_continuity.ts";
@@ -97,6 +98,11 @@ import {
   executeTaskLeaseAcquire,
 } from "./work_items/task_lease_acquire.ts";
 import { executeTaskLeaseLifecycle } from "./work_items/task_lease_lifecycle.ts";
+import {
+  commitLocalAuthorityShadowEntry,
+  readLocalAuthorityShadow,
+  recordLocalAuthorityShadow,
+} from "./coordination/local_authority_shadow.ts";
 import { evaluateTaskLeaseLifecycleDecision } from "./work_items/task_lease_lifecycle_decision.ts";
 import {
   bootstrapCoordinationRuntimeShadow,
@@ -107,10 +113,16 @@ import {
   rollbackCoordinationRuntimeShadow,
 } from "./coordination/runtime_shadow.ts";
 import {
+  claimLocalCoordinationTodo,
+  createLocalCoordinationTodo,
+  editLocalCoordinationTodo,
+  updateLocalCoordinationTodo,
   mutateLocalCoordinationAuthority,
+  listLocalCoordinationTodos,
   promoteLocalCoordinationAuthority,
   readLocalCoordinationTodo,
 } from "./coordination/local_authority_runtime.ts";
+import { evaluateCoordinationTodoClaimDecision } from "./coordination/todo_claim.ts";
 import {
   checkLegacyCoordinationWriteAllowed,
   engageLegacyCoordinationWriterFence,
@@ -123,13 +135,10 @@ import { resolveRefreshRecommendation } from "./work_items/refresh_recommendatio
 import {
   validateInteractionProjectionHookInvocation,
   validateInteractionProjectionHookRegistration,
-  validatePostWritebackHookInput,
-  validatePostWritebackHookInvocation,
-  validatePostWritebackHookReceipt,
-  validatePostWritebackHookRegistration,
   validateTurnStartHookInvocation,
   validateTurnStartHookRegistration,
 } from "./capability_hooks.ts";
+import { evaluatePostWritebackHookTransaction } from "./post_writeback_hook_transaction.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
 
@@ -344,6 +353,25 @@ export function createEffectRuntimeHandlers(
     ["todo.completion_state.require_metadata", requireTodoCompletionMetadataValue],
     ["todo.completion_state.continuation_for_write", selectTodoCompletionContinuation],
     ["todo.completion_state.metadata_updates", buildTodoCompletionMetadataUpdates],
+    [
+      "todo.claim.decide",
+      (params) => evaluateCoordinationTodoClaimDecision(
+        requiredObject(params.todo, "todo"),
+        {
+          goal_id: requiredString(params.goal_id, "goal_id"),
+          todo_id: requiredString(params.todo_id, "todo_id"),
+          claimed_by: requiredString(params.claimed_by, "claimed_by"),
+          actor_agent_id: params.actor_agent_id === null
+            ? null : requiredString(params.actor_agent_id, "actor_agent_id"),
+          expected_role: params.expected_role === null
+            ? null : requiredString(params.expected_role, "expected_role"),
+          registered_agents: stringArray(params.registered_agents, "registered_agents"),
+          operation_id: "decision-only",
+          dry_run: true,
+          now: new Date(0),
+        },
+      ),
+    ],
     ["todo.completion.reduce", reduceTodoCompletionTransaction],
     ["todo.next_action.transition", transitionTodoNextAction],
     ["todo.resume_condition.normalize", normalizeTodoResumeWhen],
@@ -361,6 +389,7 @@ export function createEffectRuntimeHandlers(
     ["work_item.planning_inventory.detail", projectTodoPlanningInventoryDetail],
     ["work_item.refresh_recommendation.resolve", resolveRefreshRecommendation],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
+    ["goal.shared_goal_alignment.project", projectSharedGoalAlignment],
     ["agent.delivery_workspace.evaluate", evaluateDeliveryWorkspace],
     [
       "quota.delivery_workspace_causality.evaluate",
@@ -384,8 +413,13 @@ export function createEffectRuntimeHandlers(
     ],
     ["coordination.runtime_shadow.rollback", rollbackCoordinationRuntimeShadow],
     ["coordination.local_authority.promote", promoteLocalCoordinationAuthority],
+    ["coordination.local_authority.todo_claim", claimLocalCoordinationTodo],
+    ["coordination.local_authority.todo_create", createLocalCoordinationTodo],
+    ["coordination.local_authority.todo_update", updateLocalCoordinationTodo],
+    ["coordination.local_authority.todo_compatibility_edit", editLocalCoordinationTodo],
     ["coordination.local_authority.mutate", mutateLocalCoordinationAuthority],
     ["coordination.local_authority.todo_read", readLocalCoordinationTodo],
+    ["coordination.local_authority.todo_list", listLocalCoordinationTodos],
     [
       "coordination.local_authority.legacy_writer_fence.engage",
       engageLegacyCoordinationWriterFence,
@@ -396,6 +430,9 @@ export function createEffectRuntimeHandlers(
     ],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     ["quota.monitor_poll.commit", evaluateQuotaMonitorPollCommit],
+    ["coordination.local_authority_shadow.record", recordLocalAuthorityShadow],
+    ["coordination.runtime_shadow.commit_entry", commitLocalAuthorityShadowEntry],
+    ["coordination.runtime_shadow.outbox_read", readLocalAuthorityShadow],
     [
       "effect.program_from_ordered_steps",
       (params) => effectProgramFromOrderedSteps(
@@ -477,31 +514,8 @@ export function createEffectRuntimeHandlers(
       }),
     ],
     [
-      "capability_hook.post_writeback.validate_registration",
-      (params) => validatePostWritebackHookRegistration(params.registration),
-    ],
-    [
-      "capability_hook.post_writeback.validate_input",
-      (params) => validatePostWritebackHookInput({
-        registration: params.registration,
-        hook_input: params.hook_input,
-      }),
-    ],
-    [
-      "capability_hook.post_writeback.validate",
-      (params) => validatePostWritebackHookInvocation({
-        registration: params.registration,
-        hook_input: params.hook_input,
-        result: params.result,
-      }),
-    ],
-    [
-      "capability_hook.post_writeback.validate_receipt",
-      (params) => validatePostWritebackHookReceipt({
-        registration: params.registration,
-        hook_input: params.hook_input,
-        receipt: params.receipt,
-      }),
+      "capability_hook.post_writeback.transaction",
+      evaluatePostWritebackHookTransaction,
     ],
     [
       "settlement.identity",

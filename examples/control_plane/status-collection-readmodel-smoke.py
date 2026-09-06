@@ -140,17 +140,44 @@ def assert_context_orchestration() -> None:
         assert kwargs["limit"] == 20, kwargs
         assert kwargs["goal_id"] == GOAL_ID, kwargs
         assert kwargs["include_runtime_goals"] is True, kwargs
-        return record("collect_history", {"goal_count": 1, "run_count": 0, "goals": []})
+        return record(
+            "collect_history",
+            {
+                "goal_count": 1,
+                "run_count": 0,
+                "goals": [],
+                "activation_state_filter": kwargs.get("activation_state_filter"),
+            },
+        )
 
     def check_contract(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["limit"] == 2, kwargs
         assert kwargs["goal_id_filter"] == GOAL_ID, kwargs
-        return record("check_contract", {"ok": True, "summary": "ok", "warnings": [], "errors": [], "checks": []})
+        return record(
+            "check_contract",
+            {
+                "ok": True,
+                "summary": "ok",
+                "warnings": [],
+                "errors": [],
+                "checks": [],
+                "activation_state_filter": kwargs.get("activation_state_filter"),
+            },
+        )
 
     def build_attention_queue(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["include_task_graph"] is False, kwargs
         assert kwargs["goal_id_filter"] == GOAL_ID, kwargs
-        return record("build_attention_queue", {"items": [], "item_count": 0})
+        return record(
+            "build_attention_queue",
+            {
+                "items": [],
+                "item_count": 0,
+                "include_stopped_goal_context": kwargs.get(
+                    "include_stopped_goal_context"
+                ),
+            },
+        )
 
     context = collection_read_model.StatusCollectionContext(
         load_registry=load_registry,
@@ -198,9 +225,17 @@ def assert_context_orchestration() -> None:
         limit=2,
         goal_id=GOAL_ID,
         available_capabilities=["network", "material_lifecycle"],
+        activation_state_filter="active",
         context=context,
     )
 
+    history_call = next(call for call in calls if call[0] == "collect_history")
+    assert history_call[1]["activation_state_filter"] == "active", history_call
+    contract_call = next(call for call in calls if call[0] == "check_contract")
+    assert contract_call[1]["activation_state_filter"] == "active", contract_call
+    assert payload["goal_projection"]["scope"] == "active", payload["goal_projection"]
+    assert payload["goal_projection"]["complete"] is False, payload["goal_projection"]
+    assert payload["attention_queue"]["include_stopped_goal_context"] is False, payload
     assert payload["runtime_root"] == str(runtime_root), payload
     assert payload["run_history"]["display_limit"] == 2, payload
     assert payload["todo_index"]["limit"] == 240, payload

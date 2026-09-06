@@ -827,6 +827,15 @@ the open user todo visible in `user_todo_summary`, but do not force a repeated
 notification, make the turn a user-action gate, or leave the top-level
 `should_run` set for an otherwise quiet no-op.
 
+Cooldown suppression has precedence over both blocking asks and non-blocking
+`user_action` notices: the final `interaction_contract.user_channel` must be
+`action_required=false, notify=DONT_NOTIFY` and must not retain an action list.
+Goal Channel delivery adds a sink-local replay fence keyed by the gate identity,
+its material state generation, and (only when due) the explicit reminder-window
+generation. Copy changes, recommendation churn, and provider readback misses do
+not create a new send generation; a material Todo transition or a new explicit
+reminder window does.
+
 Monitor catch-up is also bounded across runnable lanes. After two consecutive
 unchanged monitor-only work turns, `monitor_debt_arbitration_v0` prefers a
 same- or higher-priority advancement todo over another overdue monitor,

@@ -101,8 +101,8 @@ def register_periodic_report_commands(
     consume_pending = commands.add_parser(
         "consume-pending",
         help=(
-            "Render one pending durable intent to local artifacts and create an "
-            "exact-payload approval gate without external delivery."
+            "Render one pending durable intent to frozen local artifacts and queue "
+            "its configured Goal Channel delivery under the active subscription."
         ),
     )
     add_subcommand_format(consume_pending)

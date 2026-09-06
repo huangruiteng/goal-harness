@@ -53,7 +53,7 @@ todos remain. A host name or scheduler runtime profile is metadata and never
 supplies `subagent_spawn` or `subagent_resume`. Each candidate is checked
 against:
 
-- `task_domain` and the goal's `allowed_domains`;
+- `task_domain` when the goal declares a non-empty `allowed_domains` filter;
 - todo status, `resume_ready`, and open user dependencies;
 - `required_capabilities` and observed host capabilities;
 - canonical `task_repository` identity when declared (otherwise the goal
@@ -142,6 +142,24 @@ proves versioned execution state, copy-on-write workspace isolation, capacity
 reservation, branch lease, held-result settlement, cancellation, and recovery.
 Context choice is advisory execution strategy and cannot widen LoopX authority.
 
+## Receipt And Enforcement Boundary
+
+Each observed child returns a bounded host receipt. `runtime_id` identifies the
+stable host kind, not a process, executable, workspace, Session file, or other
+local path. The built-in Codex adapter pins it to `codex-cli`; `worker_ref`
+remains an opaque host child reference. LoopX rejects receipts that copy local
+paths or fail to bind the planned bundle, lane, task-packet digest, context,
+workspace, or effect classes. Evidence references are one or more opaque tokens
+such as `artifact:child-result`, never prose, URLs, transcripts, or local paths.
+
+The prevention-first packet check is enforced before launch. Result
+reconciliation is currently observation-only: it can mark missing, rejected,
+cancelled, drifted, or aligned child evidence and require parent acceptance,
+but it does not intercept live host tools or automatically terminate a running
+child. A receipt therefore makes evidence eligible for parent review; it does
+not itself authorize settlement, publication, external writes, or production
+actions.
+
 ## Claims, Leases, And Worktrees
 
 Registered peers claim work through LoopX todos and leases. The control plane
@@ -162,17 +180,32 @@ but must not be reclaimed by that author.
 
 ## Enabling Bounded Orchestration
 
-The feature remains opt-in:
+The configuration surface and the runtime policy are separate opt-ins. To
+expose the local preview-locked API, status field, and Dashboard control, start
+the loopback Dashboard explicitly with:
+
+```bash
+loopx dashboard --enable-goal-subagent-configuration
+```
+
+Without that startup flag, Chat capabilities omit the feature, both
+`/api/chat/goal-subagents/*` routes return 404, status omits `spawn_policy`, and
+the Dashboard does not render the control. After enabling the surface, opt one
+Goal into bounded orchestration:
 
 ```bash
 loopx configure-goal \
   --goal-id example-peer-task-goal \
   --multi-subagent-feature enabled \
   --max-children 2 \
-  --allowed-domain docs \
-  --allowed-domain validation \
   --execute
 ```
+
+Task-domain filtering is optional. With no `--allowed-domain`, both tagged and
+untagged ready Todos remain eligible subject to every other admission boundary.
+Add one or more `--allowed-domain <token>` arguments only to narrow execution to
+matching typed Todos; an untagged or non-matching Todo is then blocked with
+`task_domain_not_allowed`.
 
 `multi_subagent` remains the compatibility name for host child-worker capacity
 and permission policy. It does not ask the user to select a run mode or agent
@@ -184,6 +217,12 @@ not cross-agent scheduling authority.
 Use `--multi-subagent-feature off` to disable worker spawning. The low-level
 `--orchestration-mode` and `--spawn-allowed` flags remain available for host
 integrations.
+
+To remove the configuration surface itself, stop the Dashboard and restart it
+without `--enable-goal-subagent-configuration`. The flag only exposes a local,
+preview-locked configuration contract. It grants no Goal ownership, repository
+write, credential, publication, production, or settlement authority; the Goal
+policy and the observed host capabilities remain independently authoritative.
 
 ## Explicit Registered-Peer Coordination
 

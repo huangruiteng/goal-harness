@@ -16,7 +16,6 @@ from .control_plane.status.runtime_summaries import (
 from .contract import check_contract
 from .control_plane.work_items.delivery_batch_scale import (
     SMALL_DELIVERY_BATCH_SCALES as STRUCTURED_SMALL_DELIVERY_BATCH_SCALES,
-    UNKNOWN_DELIVERY_BATCH_SCALE,
 )
 from .control_plane.work_items.delivery_outcome import (
     DELIVERY_OUTCOME_NOT_CONFIGURED,
@@ -97,7 +96,6 @@ from .control_plane.work_items.backlog_hygiene import (
     MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS as _MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS_READ_MODEL,
 )
 from .control_plane.work_items.delivery_signals import (
-    classification_contains_any as _classification_contains_any_read_model,
     delivery_batch_scale_for_run as _delivery_batch_scale_for_run_read_model,
     delivery_outcome_for_run as _delivery_outcome_for_run_read_model,
     outcome_floor_configured as _outcome_floor_configured_read_model,
@@ -293,29 +291,8 @@ EVENT_LEDGER_EVIDENCE_HINTS = (
 )
 
 
-DELIVERY_BATCH_SCALE_TEST_ONLY_CLASSIFICATION_HINTS = (
-    "_test",
-    "_smoke",
-    "readiness_test",
-    "integrity_test",
-)
-DELIVERY_BATCH_SCALE_MULTI_SURFACE_CLASSIFICATION_HINTS = (
-    "batch",
-    "cross_benchmark",
-    "downstream_pack",
-    "matrix",
-    "owner_handoff_consumer",
-)
-DELIVERY_BATCH_SCALE_IMPLEMENTATION_CLASSIFICATION_HINTS = (
-    "adapter",
-    "builder",
-    "consumer",
-    "implementation",
-    "runner",
-)
 SMALL_DELIVERY_BATCH_SCALES = {
-    *(scale.value for scale in STRUCTURED_SMALL_DELIVERY_BATCH_SCALES),
-    UNKNOWN_DELIVERY_BATCH_SCALE,
+    scale.value for scale in STRUCTURED_SMALL_DELIVERY_BATCH_SCALES
 }
 CONNECTED_ADAPTER_STATUSES = {
     "connected",
@@ -608,16 +585,7 @@ def is_custom_post_handoff_work_run(run: dict[str, Any]) -> bool:
 
 
 def delivery_batch_scale_for_run(run: dict[str, Any]) -> str:
-    return _delivery_batch_scale_for_run_read_model(
-        run,
-        test_only_hints=DELIVERY_BATCH_SCALE_TEST_ONLY_CLASSIFICATION_HINTS,
-        multi_surface_hints=DELIVERY_BATCH_SCALE_MULTI_SURFACE_CLASSIFICATION_HINTS,
-        implementation_hints=DELIVERY_BATCH_SCALE_IMPLEMENTATION_CLASSIFICATION_HINTS,
-    )
-
-
-def _classification_contains_any(classification: str, hints: list[Any]) -> bool:
-    return _classification_contains_any_read_model(classification, hints)
+    return _delivery_batch_scale_for_run_read_model(run)
 
 
 def delivery_outcome_for_run(run: dict[str, Any], profile: dict[str, Any] | None = None) -> str:
@@ -1123,6 +1091,7 @@ def build_attention_queue(
     runtime_root: Path | None = None,
     include_task_graph: bool = False,
     goal_id_filter: str | None = None,
+    include_stopped_goal_context: bool = False,
 ) -> dict[str, Any]:
     queue = _build_attention_queue_read_model(
         contract=contract,
@@ -1164,6 +1133,7 @@ def build_attention_queue(
         runtime_root=runtime_root,
         include_task_graph=include_task_graph,
         goal_id_filter=goal_id_filter,
+        include_stopped_goal_context=include_stopped_goal_context,
     )
     if runtime_root is not None:
         for item in queue.get("items") or []:
@@ -1258,6 +1228,7 @@ def build_status_runtime_summaries(
     display_limit: int,
     todo_index_limit: int,
     recent_run_limit: int | None = None,
+    include_goal_subagent_configuration: bool = False,
 ) -> dict[str, Any]:
     return _build_status_runtime_summaries_read_model(
         history=history,
@@ -1267,6 +1238,9 @@ def build_status_runtime_summaries(
         display_limit=display_limit,
         todo_index_limit=todo_index_limit,
         recent_run_limit=recent_run_limit,
+        include_goal_subagent_configuration=(
+            include_goal_subagent_configuration
+        ),
         context=build_status_runtime_summary_context(),
     )
 
@@ -1301,6 +1275,8 @@ def collect_status(
     available_capabilities: Any = None,
     include_public_boundary_scan: bool = True,
     recent_run_limit: int | None = None,
+    include_goal_subagent_configuration: bool = False,
+    activation_state_filter: str | None = None,
 ) -> dict[str, Any]:
     return _collect_status_read_model(
         registry_path=registry_path,
@@ -1312,5 +1288,9 @@ def collect_status(
         available_capabilities=available_capabilities,
         include_public_boundary_scan=include_public_boundary_scan,
         recent_run_limit=recent_run_limit,
+        include_goal_subagent_configuration=(
+            include_goal_subagent_configuration
+        ),
+        activation_state_filter=activation_state_filter,
         context=build_status_collection_context(),
     )

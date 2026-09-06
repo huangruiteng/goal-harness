@@ -252,9 +252,17 @@ authority answer "which transition is legal?"
 
 ### Shipped Boundary Versus Design Boundary
 
-The current public architecture keeps the CLI as the compatibility baseline and describes a local
-server/daemon as a roadmap. Detailed multi-Host authority, offline queue, and shared-control-plane designs
-live in an RFC whose status is **Draft**. They are not installed cloud features.
+Shared-authority work in `v0.5.4` is more than a paper design: the repository contains a
+provider-neutral TypeScript `AuthorityStore` contract plus staged file, NoKV, and PostgreSQL candidates
+with conformance evidence. That is still not an enabled shared control plane. The release does not wire
+these candidates into the default runtime or ship a ready-to-enable remote authority service. Installing
+a Provider does not change a Goal's source of truth.
+
+Post-`v0.5.4` `main` may contain further default-off shadow, parity, fencing, or provider-first cutover
+slices. They prove migration mechanics; they are not evidence that `v0.5.4` shipped cloud collaboration.
+Use the matching tag and release notes for stable behavior and the current stage in the
+[Shared Control-Plane Authority RFC](/loopx/docs/architecture/rfcs/shared-goal-authority-state-provider-v0/)
+for experimental status.
 
 You can currently rely on:
 
@@ -263,6 +271,8 @@ You can currently rely on:
   idempotency behavior;
 - registered peers, soft claims, optional task leases, and independent-worktree guards;
 - several Hosts reading one registry and Goal through controlled writeback.
+- staged file, NoKV, and PostgreSQL candidates for development and qualification; they do not acquire
+  runtime authority automatically.
 
 Do not currently promise:
 
@@ -273,8 +283,8 @@ Do not currently promise:
 
 A future cross-device control plane should retain one canonical LoopX authority, revision-bound idempotent
 commands and receipts, and separate message delivery, context memory, and state authority. Until the Draft
-is promoted and validated, this book teaches those boundaries rather than a fictional cloud-mode
-quickstart.
+has an independently reviewed promotion, runtime wiring, and release validation, this book teaches those
+boundaries rather than a fictional cloud-mode quickstart.
 
 ## Three layers of integrity for historical artifacts
 

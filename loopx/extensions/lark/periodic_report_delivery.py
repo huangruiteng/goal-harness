@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,8 @@ from ...capabilities.periodic_report.incremental import (
     find_periodic_report_publication_candidate,
 )
 from ...capabilities.periodic_report.machine_defaults import (
+    build_periodic_report_delivery_authority,
+    normalize_periodic_report_delivery_authority,
     resolve_goal_periodic_report_subscription,
 )
 from ...capabilities.periodic_report.machine_store import (
@@ -147,25 +149,30 @@ def _resolved_goal_channel_binding(
     registry_path: Path,
     runtime_root: Path,
     goal_id: str,
+    expected_authority: Mapping[str, Any],
 ) -> dict[str, Any]:
+    registry = read_json(registry_path)
+    goal = goal_from_registry(registry, goal_id)
+    subscription = resolve_goal_periodic_report_subscription(
+        goal,
+        read_periodic_report_machine_defaults(runtime_root),
+    )
+    if subscription.get("enabled") is not True:
+        raise ValueError("periodic report delivery subscription is disabled")
+    current_authority = build_periodic_report_delivery_authority(subscription)
+    if current_authority != dict(expected_authority):
+        raise ValueError("periodic report delivery subscription authority drifted")
+
     payload = read_goal_channel_binding(
         default_goal_channel_binding_path(registry_path)
     )
     raw = binding_for_goal(payload, goal_id)
+    authorized_target_ref = str(expected_authority.get("route_ref") or "").strip()
+    if not authorized_target_ref:
+        raise ValueError("periodic report subscription route is missing")
     target_ref = str((raw or {}).get("target_ref") or "").strip()
     if raw is None:
-        goal = goal_from_registry(read_json(registry_path), goal_id)
-        subscription = resolve_goal_periodic_report_subscription(
-            goal,
-            read_periodic_report_machine_defaults(runtime_root),
-        )
-        if subscription.get("enabled") is not True:
-            raise ValueError(
-                "periodic report delivery requires an enabled subscription"
-            )
-        target_ref = str(subscription.get("route_ref") or "").strip()
-        if not target_ref:
-            raise ValueError("periodic report subscription route is missing")
+        target_ref = authorized_target_ref
         raw = {
             "goal_id": goal_id,
             "provider": "lark",
@@ -174,6 +181,10 @@ def _resolved_goal_channel_binding(
             "channel": {},
             "identity": {},
         }
+    elif target_ref != authorized_target_ref:
+        raise ValueError(
+            "periodic report Goal Channel binding does not match the authorized route"
+        )
     target = None
     if target_ref:
         target = goal_channel_target_for_name(
@@ -215,6 +226,34 @@ def _find_message(value: Any, message_id: str) -> Mapping[str, Any] | None:
             if found is not None:
                 return found
     return None
+
+
+def _message_rows(value: Any) -> list[Mapping[str, Any]]:
+    rows: list[Mapping[str, Any]] = []
+    if isinstance(value, Mapping):
+        message_id = str(value.get("message_id") or "")
+        if MESSAGE_ID_PATTERN.fullmatch(message_id):
+            rows.append(value)
+        for child in value.values():
+            rows.extend(_message_rows(child))
+    elif isinstance(value, list):
+        for child in value:
+            rows.extend(_message_rows(child))
+    return rows
+
+
+def _history_is_complete(value: Mapping[str, Any]) -> bool:
+    completeness: list[bool] = []
+    for candidate in (value, value.get("data")):
+        if not isinstance(candidate, Mapping):
+            continue
+        if isinstance(candidate.get("has_more"), bool):
+            completeness.append(candidate["has_more"] is False)
+    meta = value.get("meta")
+    pagination = meta.get("pagination") if isinstance(meta, Mapping) else None
+    if isinstance(pagination, Mapping) and isinstance(pagination.get("complete"), bool):
+        completeness.append(pagination["complete"] is True)
+    return bool(completeness) and all(completeness)
 
 
 def _message_card(value: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -304,16 +343,31 @@ def _validate_extension_activation(value: Mapping[str, Any]) -> None:
 
 def _normalized_delivery_request(
     request: Mapping[str, Any],
-) -> tuple[dict[str, Any], str, str, list[dict[str, str]], dict[str, Any]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    str,
+    str,
+    list[dict[str, str]],
+    dict[str, Any],
+]:
     payload = _mapping(request, "request")
     _reject_unknown_fields(
         payload,
-        allowed={"schema_version", "generation_bundle", "delivery_intent"},
+        allowed={
+            "schema_version",
+            "generation_bundle",
+            "delivery_authority",
+            "delivery_intent",
+        },
         label="request",
     )
     if payload.get("schema_version") != GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA:
         raise ValueError(f"request must use {GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA}")
     generation = _normalized_generation_bundle(payload.get("generation_bundle"))
+    authority = normalize_periodic_report_delivery_authority(
+        payload.get("delivery_authority")
+    )
     intent = _mapping(payload.get("delivery_intent"), "request.delivery_intent")
     identity_override_keys = sorted(
         {
@@ -371,7 +425,7 @@ def _normalized_delivery_request(
     ]
     if len(artifacts) != 1:
         raise ValueError("delivery intent must resolve exactly one Markdown artifact")
-    return generation, sink_id, idempotency_key, announcements, artifacts[0]
+    return generation, authority, sink_id, idempotency_key, announcements, artifacts[0]
 
 
 class _GoalChannelDeliverySession:
@@ -380,13 +434,66 @@ class _GoalChannelDeliverySession:
         *,
         goal_id: str,
         binding: Mapping[str, Any],
+        history_start_at: str,
+        resolve_current_binding: Callable[[], Mapping[str, Any]],
         runner: CommandRunner,
     ) -> None:
         self.goal_id = goal_id
         self.binding = dict(binding)
+        self.history_start_at = history_start_at
+        self.resolve_current_binding = resolve_current_binding
         self.runner = runner
         self.route: dict[str, Any] = {}
         self.expected_cards: dict[str, list[dict[str, Any]]] = {}
+
+    def _existing_message(
+        self,
+        card: Mapping[str, Any],
+        route: Mapping[str, Any],
+    ) -> str | None:
+        result = call(
+            self.runner,
+            lark_args(
+                cli_bin=str(route["cli_bin"]),
+                profile=str(route["sender_profile"]),
+                tail=[
+                    "im",
+                    "+chat-messages-list",
+                    "--chat-id",
+                    str(route["chat_id"]),
+                    "--start",
+                    self.history_start_at,
+                    "--order",
+                    "asc",
+                    "--page-all",
+                    "--page-limit",
+                    "1000",
+                    "--as",
+                    "bot",
+                    "--no-reactions",
+                    "--format",
+                    "json",
+                ],
+            ),
+        )
+        payload = json_payload(result)
+        if result.get("returncode") != 0:
+            raise ValueError("Goal Channel periodic report dedupe readback failed")
+        for message in _message_rows(payload):
+            sender_type, sender_app_id = _message_sender(message)
+            if (
+                message.get("deleted") is not True
+                and str(message.get("chat_id") or "") == route["chat_id"]
+                and sender_type == "app"
+                and sender_app_id == route["bot_app_id"]
+                and _message_card_matches(message, card)
+            ):
+                return str(message["message_id"])
+        if not _history_is_complete(payload):
+            raise ValueError(
+                "Goal Channel periodic report dedupe history is incomplete"
+            )
+        return None
 
     def resolve(self, requested_goal_id: str) -> Mapping[str, Any]:
         if requested_goal_id != self.goal_id:
@@ -438,6 +545,17 @@ class _GoalChannelDeliverySession:
         key: str,
         route: Mapping[str, Any],
     ) -> Mapping[str, Any]:
+        current_binding = dict(self.resolve_current_binding())
+        if current_binding != self.binding:
+            raise ValueError("periodic report Goal Channel binding drifted")
+        existing_message_id = self._existing_message(card, route)
+        if existing_message_id is not None:
+            self.expected_cards.setdefault(existing_message_id, []).append(dict(card))
+            return {
+                "message_id": existing_message_id,
+                "semantic_dedupe_status": "existing_exact_message",
+                "external_write_performed": False,
+            }
         result = call(
             self.runner,
             lark_args(
@@ -467,7 +585,11 @@ class _GoalChannelDeliverySession:
         if result.get("returncode") != 0 or not message_id:
             raise ValueError("Goal Channel periodic report send failed")
         self.expected_cards.setdefault(message_id, []).append(dict(card))
-        return {"message_id": message_id}
+        return {
+            "message_id": message_id,
+            "semantic_dedupe_status": "no_existing_exact_message",
+            "external_write_performed": True,
+        }
 
     def readback(self, message_id: str) -> Mapping[str, Any]:
         result = call(
@@ -545,18 +667,28 @@ def deliver_periodic_report_to_goal_channel(
     """Deliver one generated report through the Goal-bound project Bot only."""
 
     _validate_extension_activation(extension_activation)
-    generation, sink_id, idempotency_key, announcements, artifact = (
+    generation, authority, sink_id, idempotency_key, announcements, artifact = (
         _normalized_delivery_request(request)
     )
+    if authority["goal_id"] != goal_id:
+        raise ValueError("periodic report delivery authority Goal identity changed")
 
     binding = _resolved_goal_channel_binding(
         registry_path=registry_path,
         runtime_root=runtime_root,
         goal_id=goal_id,
+        expected_authority=authority,
     )
     session = _GoalChannelDeliverySession(
         goal_id=goal_id,
         binding=binding,
+        history_start_at=str(generation["document"]["generated_at"]),
+        resolve_current_binding=lambda: _resolved_goal_channel_binding(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            expected_authority=authority,
+        ),
         runner=runner,
     )
     registry = PeriodicReportAdapterRegistry()
@@ -653,6 +785,7 @@ def deliver_periodic_report_to_goal_channel(
             "project_bot_identity_required": True,
             "caller_identity_override_allowed": False,
             "exact_sender_and_chat_readback_required": True,
+            "exact_history_dedupe_required": True,
             "sender_evidence_source": "message_readback",
             "external_writes_performed": sink_result.get("external_writes_performed")
             is True,

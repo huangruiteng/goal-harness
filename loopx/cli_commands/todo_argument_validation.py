@@ -77,6 +77,7 @@ TODO_OPTION_FIELDS = (
     ("--trigger", "suggestion_trigger"),
     ("--state-file", "state_file"),
     ("--execute", "execute"),
+    ("--provider-revision", "provider_revision"),
 )
 
 _TODO_UPDATE_MUTABLE_FIELDS = (
@@ -294,6 +295,18 @@ def validate_todo_list_options(args: argparse.Namespace) -> None:
         "--agent-id, --limit, --thin, --project, --state-file, --dry-run, and "
         "--format; "
         "unsupported: ",
+    )
+
+
+def validate_todo_project_markdown_options(args: argparse.Namespace) -> None:
+    if not getattr(args, "provider_revision", None):
+        raise ValueError("todo project-markdown requires --provider-revision")
+    _validate_todo_option_subset(
+        args,
+        {"state_file", "execute", "provider_revision"},
+        "todo project-markdown only accepts --goal-id, --provider-revision, "
+        "--project, --state-file, --execute, and "
+        "--format; unsupported: ",
     )
 
 

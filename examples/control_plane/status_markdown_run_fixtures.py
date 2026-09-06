@@ -42,6 +42,8 @@ def append_connected_delivery_fixture(
     *,
     generated_at: str,
     classification: str = "delivery_ranker_readiness_batch",
+    delivery_batch_scale: str = "multi_surface",
+    delivery_outcome: str = "outcome_progress",
 ) -> None:
     run_dir = root / "runtime" / "goals" / DELIVERY_GOAL_ID / "runs"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +54,8 @@ def append_connected_delivery_fixture(
         "generated_at": generated_at,
         "goal_id": DELIVERY_GOAL_ID,
         "classification": classification,
+        "delivery_batch_scale": delivery_batch_scale,
+        "delivery_outcome": delivery_outcome,
         "recommended_action": DELIVERY_ACTION,
         "health_check": "fixture connected delivery run with custom classification",
     }
@@ -174,6 +178,7 @@ def append_post_handoff_run_fixture(root: Path, *, generated_at: str) -> None:
         "generated_at": generated_at,
         "goal_id": "planned-main-control",
         "classification": POST_HANDOFF_CLASSIFICATION,
+        "delivery_batch_scale": "single_surface",
         "recommended_action": POST_HANDOFF_ACTION,
         "health_check": "fixture target agent run after approved handoff",
     }

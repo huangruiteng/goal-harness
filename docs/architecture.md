@@ -95,24 +95,28 @@ Operator-facing docs and heartbeat prompts often summarize a turn as deliver,
 wait, ask, replan, repair, or stay quiet. That shorthand describes interaction
 intent; it is not the typed packet vocabulary carried by the Turn contracts.
 
-Typed Turn decisions use two enums in `loopx/control_plane/turn_driver/`:
+The executable vocabulary lives with its owning contracts:
 
-| Contract | When | Members |
+| Contract | When | Authoritative definition |
 | --- | --- | --- |
-| `LoopXTurnRoute` | Before host execution | `ready_for_host`, `repair_required`, `replan_required`, `user_action_required`, `wait`, `blocked`, `contract_error` |
-| `LoopXTurnResultKind` | After host execution | `validated_progress`, `validated_completion`, `repair_required`, `replan_required`, `user_action_required`, `wait`, `host_failure`, `validation_failed`, `writeback_failed`, `quota_spend_failed` |
+| `LoopXTurnRoute` | Before host execution | [`driver.py`](../loopx/control_plane/turn_driver/driver.py), enum `LoopXTurnRoute` |
+| `TurnResultKind` | After host execution | [`settlement.ts`](../loopx/control_plane/turn_driver/settlement.ts), `TURN_RESULT_KINDS`; Python adapter: [`transaction.py`](../loopx/control_plane/turn_driver/transaction.py), enum `LoopXTurnResultKind` |
 
-Important distinctions the shorthand erases:
+Read the complete member lists in those definitions; this page explains their
+meaning without maintaining another exhaustive enumeration.
 
-- prose "deliver" splits into `validated_progress` versus `validated_completion`;
-- failure kinds (`host_failure`, `validation_failed`, `writeback_failed`,
-  `quota_spend_failed`) are first-class post-execution results;
-- "stay quiet" is a notification / monitor behavior (for example
+- Prose "deliver" splits into `validated_progress` versus `validated_completion`.
+- Execution failures are first-class typed results. In particular,
+  `terminal_closeout_failed` means terminal closeout failed after durable
+  writeback and quota spend. Recovery retries the same Turn's closeout without
+  repeating those committed effects; it must not treat the failure as unspent.
+  The [Turn executor recovery tests](../tests/test_loopx_turn_executor.py)
+  exercise this boundary.
+- "Stay quiet" is notification / monitor behavior (for example
   `monitor_quiet_skip` or heartbeat `DONT_NOTIFY`), not a member of either enum.
 
 Quota `interaction_contract` and heartbeat guidance may still use the operator
-shorthand. When implementing or reviewing Turn adapters, prefer the enums above
-over the six-verb prose list.
+shorthand. Turn adapters use the executable definitions linked above.
 
 ## Runtime Responsibility Model
 
@@ -168,26 +172,27 @@ claim, gate, monitor, quota, writeback, recovery, and terminal closure. See the
 
 ## Current Dependency Budget
 
-Dependency direction is enforced incrementally while large compatibility
-facades are split. `loopx.control_plane` may not gain dependencies on
-presentation, CLI, capability, or benchmark-adapter layers; the architecture
-test keeps one explicit quota-Markdown migration edge as debt.
+The executable boundary policy lives in
+[`test_control_plane_import_boundaries.py`](../tests/architecture/test_control_plane_import_boundaries.py):
 
-The legacy `loopx.status` facade currently has one additional outward edge, the
-SkillsBench verifier-bootstrap attribution helper. This is migration debt, not
-an extension point. The architecture test records its exact module target so a
-new outward edge fails, and removing the edge requires deleting its stale
-allowlist entry in the same change.
+- `test_control_plane_does_not_gain_outward_dependencies` rejects control-plane
+  imports of presentation, CLI, capability, or benchmark-adapter layers.
+- `test_status_has_no_forbidden_outward_dependencies` rejects status imports of
+  benchmark-adapter or presentation layers.
+- `test_quota_markdown_is_owned_by_the_presentation_layer` protects the renderer
+  ownership and CLI composition boundary.
 
-Each edge should move only after characterization parity exists. Adapter-specific
-enrichment belongs behind application/plugin composition rather than in the
-status core. Status Markdown callers now use the presentation renderer directly;
-the former `loopx.status.render_status_markdown` wrapper was retired after parity
-fixtures and repository callers migrated. The formerly SkillsBench-named solution
-quality helper moved inward after characterization showed that it projects only
-generic compact benchmark fields; its shipped schema remains compatible. Hiding
-an adapter dependency inside a function or dynamic import does not count as
-architectural separation.
+These are zero-exception checks. The former quota-Markdown and status
+verifier-bootstrap edges have been removed; there is no remaining debt
+allowlist for these checks. Run the linked architecture test file to inspect
+current violations rather than maintaining an edge inventory in prose.
+
+Adapter-specific enrichment belongs behind application/plugin composition
+rather than in the status core. Move an edge only after characterization
+parity exists. Hiding an adapter dependency inside a function or dynamic import
+does not count as architectural separation; the current AST checks inspect
+static imports, including function-local imports, but do not prove the absence
+of dynamic imports.
 
 ### Status And Quota Facades
 

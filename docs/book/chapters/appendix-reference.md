@@ -61,11 +61,16 @@ loopx doctor
 loopx registry
 loopx status
 loopx todo list --goal-id <goal-id>
+loopx todo list --goal-id <goal-id> --thin --format json
 loopx history --goal-id <goal-id>
 loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin --limit 30
 loopx quota should-run --goal-id <goal-id> --agent-id <agent-id>
 loopx extension list --format json
 ```
+
+`v0.5.4` 新增的 `todo list --thin` 是显式启用的有界投影；它压缩字段和每个 lane 的返回条数，
+但不改变默认 list 的选择、排序、quota 或 lifecycle 语义。需要完整详情时，继续使用不带
+`--thin` 的命令或按 `todo_id` 精确读取。
 
 ## 项目接入入口
 

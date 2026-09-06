@@ -33,7 +33,12 @@ def default_packaged_assets_dir() -> Path:
     return Path(__file__).resolve().parent / "web" / "chat"
 
 
-def _probe_existing_chat(host: str, port: int) -> str:
+def _probe_existing_chat(
+    host: str,
+    port: int,
+    *,
+    goal_subagent_configuration_enabled: bool | None = None,
+) -> str:
     """Return whether the target port already serves LoopX Chat.
 
     The result is one of ``matching`` (the current LoopX runtime is running),
@@ -59,7 +64,10 @@ def _probe_existing_chat(host: str, port: int) -> str:
             status = response.status
         finally:
             connection.close()
-    except ConnectionRefusedError:
+    except (ConnectionRefusedError, TimeoutError):
+        # Some native Windows execution environments time out instead of
+        # returning WSAECONNREFUSED for an unused loopback port. Treat that as
+        # non-reusable and let the later server bind remain authoritative.
         return "unavailable"
     except (OSError, http.client.HTTPException):
         return "foreign"
@@ -79,6 +87,10 @@ def _probe_existing_chat(host: str, port: int) -> str:
     expected_identity = release_runtime_identity(dashboard_release_root())
     if capabilities.get("runtime_identity") != expected_identity:
         return "stale"
+    if goal_subagent_configuration_enabled is not None and (
+        capabilities.get("goal_subagent_configuration") == "preview_locked"
+    ) != goal_subagent_configuration_enabled:
+        return "configuration_mismatch"
     return "matching"
 
 
@@ -202,13 +214,27 @@ def launch_dashboard(
     verbose: bool = False,
     open_browser: bool = True,
     prefer_dev: bool = False,
+    enable_goal_subagent_configuration: bool = False,
 ) -> int:
     release_root = dashboard_release_root()
     dev_launcher = release_root / "scripts" / "dashboard-dev.sh"
     if (prefer_dev or os.environ.get("LOOPX_DASHBOARD_DEV") == "1") and dev_launcher.is_file():
-        return subprocess.call(["bash", str(dev_launcher)], cwd=release_root)
+        environment = dict(os.environ)
+        if enable_goal_subagent_configuration:
+            environment["LOOPX_ENABLE_GOAL_SUBAGENT_CONFIGURATION"] = "1"
+        return subprocess.call(
+            ["bash", str(dev_launcher)],
+            cwd=release_root,
+            env=environment,
+        )
 
-    existing_chat = _probe_existing_chat(host, port)
+    existing_chat = _probe_existing_chat(
+        host,
+        port,
+        goal_subagent_configuration_enabled=(
+            enable_goal_subagent_configuration
+        ),
+    )
     if existing_chat == "matching":
         url = f"http://{host}:{port}{DASHBOARD_CHAT_PATH}"
         if goal_id:
@@ -227,6 +253,11 @@ def launch_dashboard(
             f"port {port} is serving LoopX Chat from a different installed runtime; "
             "stop the old `loopx dashboard` or desktop app, then retry so the "
             "current release can start its matching service."
+        )
+    if existing_chat == "configuration_mismatch":
+        raise RuntimeError(
+            f"port {port} is serving LoopX Chat with a different Goal "
+            "sub-agent configuration gate; restart it with the requested setting."
         )
 
     from .chat_server import serve_chat
@@ -252,5 +283,8 @@ def launch_dashboard(
         assets_dir=resolved_assets,
         verbose=verbose,
         open_browser=open_browser,
+        enable_goal_subagent_configuration=(
+            enable_goal_subagent_configuration
+        ),
     )
     return 0

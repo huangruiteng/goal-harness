@@ -90,6 +90,7 @@ def build_status_runtime_summaries(
     todo_index_limit: int,
     context: StatusRuntimeSummaryContext,
     recent_run_limit: int | None = None,
+    include_goal_subagent_configuration: bool = False,
 ) -> dict[str, Any]:
     def event_class_for_run(run: dict[str, Any]) -> str:
         return event_ledger_event_class(run, context=context)
@@ -107,6 +108,9 @@ def build_status_runtime_summaries(
             quota_status=context.quota_status,
             display_limit=display_limit,
             recent_run_limit=recent_run_limit,
+            include_goal_subagent_configuration=(
+                include_goal_subagent_configuration
+            ),
         ),
         "event_ledger_summary": build_event_ledger_summary(
             history,

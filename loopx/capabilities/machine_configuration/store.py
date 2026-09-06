@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -11,6 +9,12 @@ from uuid import uuid4
 
 from ...file_lock import exclusive_file_lock
 from ...registry import atomic_write_json, read_json
+from ...configuration_transaction import (
+    CONFIGURATION_REVISION_MISSING,
+    build_configuration_update_plan,
+    configuration_payload_revision,
+    require_expected_configuration_plan_revision,
+)
 from .contract import (
     MachineConfigurationRegistry,
     machine_configuration_revision,
@@ -28,16 +32,13 @@ MACHINE_CONFIGURATION_ROLLBACK_RECEIPT_SCHEMA = (
     "machine_configuration_rollback_receipt_v0"
 )
 
-_MISSING_REVISION = "absent"
+_MISSING_REVISION = CONFIGURATION_REVISION_MISSING
 _TRANSACTION_ID_RE = re.compile(r"^machine_configuration_[0-9a-f]{24}$")
 JsonWriter = Callable[[Path, dict[str, Any]], None]
 
 
 def _digest(value: object) -> str:
-    encoded = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return configuration_payload_revision(value)
 
 
 def _now_iso(now: datetime | None = None) -> str:
@@ -173,41 +174,28 @@ def _update_plan(
         if normalized_desired is not None
         else _MISSING_REVISION
     )
-    action = (
-        "create"
-        if stored_current is None and normalized_desired is not None
-        else "unchanged"
-        if current_revision == desired_revision
-        else "delete"
-        if normalized_desired is None
-        else "update"
-    )
-    identity = {
-        "current_revision": current_revision,
-        "desired_revision": desired_revision,
-        "defaults_ref": _store_ref(),
-        "action": action,
-        "changed_namespaces": sorted(
+    changed_namespaces = sorted(
             namespace
             for namespace in set((normalized_desired or {}).get("namespaces", {}))
             | set((stored_current or {}).get("namespaces", {}))
             if (stored_current or {}).get("namespaces", {}).get(namespace)
             != (normalized_desired or {}).get("namespaces", {}).get(namespace)
-        ),
-    }
-    return {
-        "ok": True,
-        "schema_version": MACHINE_CONFIGURATION_UPDATE_PLAN_SCHEMA,
-        "status": "preview",
-        **identity,
-        "plan_revision": _digest(identity),
-        "writes_required": int(action != "unchanged"),
-        "machine_configuration": (
+        )
+    return build_configuration_update_plan(
+        schema_version=MACHINE_CONFIGURATION_UPDATE_PLAN_SCHEMA,
+        current_present=stored_current is not None,
+        desired_present=normalized_desired is not None,
+        current_revision=current_revision,
+        desired_revision=desired_revision,
+        target_identity={"defaults_ref": _store_ref()},
+        changed_units={"changed_namespaces": changed_namespaces},
+        projected_configuration=(
             project_machine_configuration(normalized_desired, registry=registry)
             if normalized_desired is not None
             else None
         ),
-    }
+        projection_field="machine_configuration",
+    )
 
 
 def plan_machine_configuration_update(
@@ -254,18 +242,15 @@ def configure_machine_configuration(
     )
     if not execute:
         return preview
-    expected = str(expected_plan_revision or "").strip()
-    if not expected:
-        raise ValueError("expected_plan_revision is required when execute is true")
-
     store_path = machine_configuration_store_path(runtime_root)
     with exclusive_file_lock(store_path, operation="configure_machine_configuration"):
         current = read_stored_machine_configuration(runtime_root)
         plan = _update_plan(current=current, desired=configuration, registry=registry)
-        if plan["plan_revision"] != expected:
-            raise ValueError(
-                "machine-configuration plan revision changed; preview again"
-            )
+        require_expected_configuration_plan_revision(
+            expected_plan_revision=expected_plan_revision,
+            actual_plan_revision=str(plan["plan_revision"]),
+            subject="machine-configuration",
+        )
         if plan["action"] == "unchanged":
             return {
                 **plan,
@@ -477,10 +462,6 @@ def rollback_machine_configuration(
     )
     if not execute:
         return preview
-    expected = str(expected_plan_revision or "").strip()
-    if not expected:
-        raise ValueError("expected_plan_revision is required when execute is true")
-
     safe_id = _safe_transaction_id(transaction_id)
     store_path = machine_configuration_store_path(runtime_root)
     with exclusive_file_lock(store_path, operation="rollback_machine_configuration"):
@@ -493,10 +474,11 @@ def rollback_machine_configuration(
             backup=backup,
             current=current,
         )
-        if plan["plan_revision"] != expected:
-            raise ValueError(
-                "machine-configuration rollback plan changed; preview again"
-            )
+        require_expected_configuration_plan_revision(
+            expected_plan_revision=expected_plan_revision,
+            actual_plan_revision=str(plan["plan_revision"]),
+            subject="machine-configuration rollback",
+        )
         if not plan["rollback_allowed"]:
             raise ValueError(
                 "machine-configuration rollback is blocked by a newer revision"

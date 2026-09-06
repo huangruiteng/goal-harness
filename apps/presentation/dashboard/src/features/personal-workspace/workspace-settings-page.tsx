@@ -1,16 +1,19 @@
 import { useState } from "react";
-import { ArrowLeft, Check, Languages, Palette, ServerCog, Settings2 } from "lucide-react";
+import { ArrowLeft, Check, Languages, Palette, ServerCog, Settings2, SlidersHorizontal } from "lucide-react";
 
 import type { WorkspaceLocale } from "./i18n";
 import { useWorkspaceI18n } from "./i18n";
 import { LarkSettingsPage } from "./lark-settings-page";
+import { GoalCapabilitySettings } from "./goal-capability-settings";
 import { MachineConfigurationSettings } from "./machine-configuration-settings";
 import type { WorkspaceGoal } from "./personal-workspace-model";
+import type { WorkspaceTheme } from "./workspace-theme";
 
-type WorkspaceSettingsTab = "machine" | "lark" | "appearance" | "language";
+type WorkspaceSettingsTab = "machine" | "capabilities" | "lark" | "appearance" | "language";
 
 const tabIcons: Record<WorkspaceSettingsTab, typeof Settings2> = {
   appearance: Palette,
+  capabilities: SlidersHorizontal,
   language: Languages,
   lark: Settings2,
   machine: ServerCog,
@@ -32,12 +35,13 @@ export function WorkspaceSettingsPage({
   initialTab?: WorkspaceSettingsTab;
   onChanged: () => void;
   onClose: () => void;
-  onThemeChange: (theme: "brutal" | "paper") => void;
-  theme: "brutal" | "paper";
+  onThemeChange: (theme: WorkspaceTheme) => void;
+  theme: WorkspaceTheme;
 }) {
   const { locale, setLocale, t } = useWorkspaceI18n();
   const [tab, setTab] = useState<WorkspaceSettingsTab>(initialTab);
   const tabs: Array<{ description: string; key: WorkspaceSettingsTab; label: string }> = [
+    ...(initialGoalId ? [{ description: t("settings.capabilitiesTabDescription"), key: "capabilities" as const, label: t("capabilities.title") }] : []),
     { description: t("settings.machineTabDescription"), key: "machine", label: t("machine.title") },
     { description: t("settings.larkTabDescription"), key: "lark", label: "Lark" },
     { description: t("settings.appearanceTabDescription"), key: "appearance", label: t("settings.appearance") },
@@ -60,6 +64,11 @@ export function WorkspaceSettingsPage({
       description: t("settings.appearanceDescription"),
       eyebrow: t("settings.workspaceDisplay"),
       title: t("settings.appearance"),
+    },
+    capabilities: {
+      description: t("capabilities.description"),
+      eyebrow: t("capabilities.goalPolicy"),
+      title: t("capabilities.title"),
     },
     language: {
       description: t("settings.languageDescription"),
@@ -126,6 +135,7 @@ export function WorkspaceSettingsPage({
         ) : null}
 
         {tab === "machine" ? <MachineConfigurationSettings /> : null}
+        {tab === "capabilities" ? <GoalCapabilitySettings goalId={initialGoalId} /> : null}
 
         {tab === "appearance" ? (
           <section className="personal-detail-card personal-appearance-settings">
@@ -133,6 +143,11 @@ export function WorkspaceSettingsPage({
             <h3>{t("settings.appearance")}</h3>
             <p>{t("settings.themeDescription")}</p>
             <div className="personal-settings-choice-group" role="radiogroup" aria-label={t("settings.workspaceTheme")}>
+              <button aria-checked={theme === "loopx"} onClick={() => onThemeChange("loopx")} role="radio" type="button">
+                <span className="personal-settings-theme-swatch is-loopx" />
+                <strong>{t("settings.themeLoopx")}</strong>
+                <small>{t("settings.themeLoopxDescription")}</small>
+              </button>
               <button aria-checked={theme === "paper"} onClick={() => onThemeChange("paper")} role="radio" type="button">
                 <span className="personal-settings-theme-swatch is-paper" />
                 <strong>{t("settings.themeDefault")}</strong>

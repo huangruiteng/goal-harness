@@ -22,6 +22,7 @@ from loopx.capabilities.periodic_report.machine_store import (
     configure_periodic_report_machine_defaults,
 )
 from loopx.cli import main
+from loopx.configure_goal import configure_goal
 
 
 def _defaults(*, enabled: bool = True, route_ref: str = "loopx-concierge") -> dict:
@@ -157,6 +158,53 @@ def test_existing_goal_follows_live_machine_default_without_mutation() -> None:
     assert first["source_revision"] != second["source_revision"]
     assert first["effective_revision"] != second["effective_revision"]
     assert goal == original
+
+
+def test_clearing_goal_override_restores_live_machine_default(tmp_path: Path) -> None:
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps({"goals": [_goal("research")]}),
+        encoding="utf-8",
+    )
+    explicit = {
+        "enabled": True,
+        "profile_preset": "goal-weekly",
+        "route_ref": "existing-goal-binding",
+        "timezone": "UTC",
+    }
+
+    configured = configure_goal(
+        registry_path=registry,
+        goal_id="research",
+        periodic_report_configuration=explicit,
+        execute=True,
+    )
+    configured_goal = json.loads(registry.read_text(encoding="utf-8"))["goals"][0]
+    overridden = resolve_goal_periodic_report_subscription(
+        configured_goal,
+        _defaults(route_ref="machine-manager-binding"),
+    )
+
+    assert configured["after"]["periodic_report"] == explicit
+    assert overridden["source"] == "goal_override"
+    assert overridden["route_ref"] == "existing-goal-binding"
+
+    cleared = configure_goal(
+        registry_path=registry,
+        goal_id="research",
+        clear_periodic_report_configuration=True,
+        execute=True,
+    )
+    cleared_goal = json.loads(registry.read_text(encoding="utf-8"))["goals"][0]
+    inherited = resolve_goal_periodic_report_subscription(
+        cleared_goal,
+        _defaults(route_ref="machine-manager-binding"),
+    )
+
+    assert cleared["after"]["periodic_report"] is None
+    assert "periodic_report" not in cleared_goal.get("control_plane", {})
+    assert inherited["source"] == "machine_default"
+    assert inherited["route_ref"] == "machine-manager-binding"
 
 
 def test_periodic_report_provenance_ignores_unowned_machine_namespaces() -> None:

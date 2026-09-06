@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+import re
 from collections.abc import Mapping
+from contextlib import nullcontext
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, ParamSpec, TypeVar
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
 from ...registry import registry_goals
+from ...file_lock import exclusive_file_lock
 from .private_json import write_private_json_atomic
 
 
 GOAL_CHANNEL_BINDING_SCHEMA_VERSION = "loopx_goal_channel_lark_binding_v0"
 GOAL_CHANNEL_OPERATION_SCHEMA_VERSION = "loopx_goal_channel_operation_v0"
+GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION = "loopx_goal_channel_connection_set_v0"
+# Compatibility export for older callers. Scheduler-projected reminder windows
+# now own repeat-notification timing.
 DEFAULT_GATE_COOLDOWN_SECONDS = 3600
 HUMAN_GATE_AUTO_NOTIFY_SETTING = "human_gate_auto_notify_enabled"
 HUMAN_GATE_AUTO_NOTIFY_MARKER_SCHEMA_VERSION = (
@@ -29,6 +37,40 @@ PRIVATE_PACKET_KEYS = {
     "sender_profile",
     "table_id",
 }
+GATE_ACTION_PREFIX = re.compile(
+    r"^(?:(?:[-*•]|\d+[.)])\s*)?(?:\[[ xX]\]\s*)?(?:\[P\d+\]\s*)?"
+)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def serialize_goal_binding_mutation(function: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Serialize a complete binding read/effect/write transaction.
+
+    All public binding writers share this lock, including setup recovery and
+    notification receipts. Locking only the final rename cannot protect the
+    snapshot read before a provider call. Preview remains non-mutating.
+    Decorate entrypoints, not save helpers, to avoid nested kernel locks.
+    """
+    execute_parameter = inspect.signature(function).parameters.get("execute")
+    execute_default = execute_parameter.default if execute_parameter else True
+
+    @wraps(function)
+    def serialized(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        binding_path = kwargs["binding_path"]
+        if not isinstance(binding_path, Path):
+            raise TypeError("binding_path must be a Path")
+        lock = (
+            exclusive_file_lock(binding_path, operation="lark_goal_binding")
+            if kwargs.get("execute", execute_default)
+            else nullcontext()
+        )
+        with lock:
+            return function(*args, **kwargs)
+
+    return serialized
 
 
 def default_goal_channel_binding_path(registry_path: Path) -> Path:
@@ -52,8 +94,7 @@ def read_goal_channel_binding(path: Path) -> dict[str, Any]:
         raise ValueError("Goal Channel binding root must be a JSON object")
     if payload.get("schema_version") != GOAL_CHANNEL_BINDING_SCHEMA_VERSION:
         raise ValueError(
-            "Goal Channel binding must use "
-            f"{GOAL_CHANNEL_BINDING_SCHEMA_VERSION}"
+            f"Goal Channel binding must use {GOAL_CHANNEL_BINDING_SCHEMA_VERSION}"
         )
     bindings = payload.get("bindings")
     if not isinstance(bindings, dict):
@@ -87,16 +128,54 @@ def goal_from_registry(
     return match
 
 
-def binding_for_goal(
+def goal_channel_connection_id(goal_id: str, agent_id: str | None) -> str:
+    """Return a stable public-safe identity for one Goal recipient route."""
+    lane = str(agent_id or "notification-default").strip()
+    digest = hashlib.sha256(f"{goal_id}\0{lane}".encode()).hexdigest()[:20]
+    return f"lark_{digest}"
+
+
+def bindings_for_goal(
     payload: Mapping[str, Any],
     goal_id: str,
     *,
     provider_target: Mapping[str, Any] | None = None,
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     bindings = payload.get("bindings")
-    binding = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
-    if not isinstance(binding, Mapping):
-        return None
+    stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
+    if not isinstance(stored, Mapping):
+        return []
+    raw_connections = stored.get("connections")
+    if stored.get(
+        "schema_version"
+    ) == GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION and isinstance(
+        raw_connections, Mapping
+    ):
+        candidates = [
+            {**dict(item), "connection_id": str(connection_id)}
+            for connection_id, item in raw_connections.items()
+            if isinstance(item, Mapping)
+        ]
+    else:
+        candidates = [
+            {
+                **dict(stored),
+                "connection_id": goal_channel_connection_id(
+                    goal_id, str(stored.get("agent_id") or "") or None
+                ),
+            }
+        ]
+    return [
+        _resolve_goal_binding(candidate, provider_target=provider_target)
+        for candidate in candidates
+    ]
+
+
+def _resolve_goal_binding(
+    binding: Mapping[str, Any],
+    *,
+    provider_target: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     resolved = dict(binding)
     target_ref = str(resolved.get("target_ref") or "")
     if not target_ref or provider_target is None:
@@ -127,6 +206,46 @@ def binding_for_goal(
     }
     resolved["identity"] = dict(target_identity)
     return resolved
+
+
+def binding_for_goal(
+    payload: Mapping[str, Any],
+    goal_id: str,
+    *,
+    provider_target: Mapping[str, Any] | None = None,
+    agent_id: str | None = None,
+    connection_id: str | None = None,
+) -> dict[str, Any] | None:
+    candidates = bindings_for_goal(
+        payload,
+        goal_id,
+        provider_target=provider_target,
+    )
+    if connection_id:
+        return next(
+            (item for item in candidates if item.get("connection_id") == connection_id),
+            None,
+        )
+    if agent_id is not None:
+        return next(
+            (item for item in candidates if item.get("agent_id") == agent_id),
+            None,
+        )
+    bindings = payload.get("bindings")
+    stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
+    default_id = (
+        str(stored.get("default_connection_id") or "")
+        if isinstance(stored, Mapping)
+        else ""
+    )
+    if default_id:
+        selected = next(
+            (item for item in candidates if item.get("connection_id") == default_id),
+            None,
+        )
+        if selected is not None:
+            return selected
+    return candidates[0] if candidates else None
 
 
 def human_gate_auto_notify_enabled(binding: Mapping[str, Any] | None) -> bool:
@@ -206,7 +325,130 @@ def quota_human_gate_identity(quota_packet: Mapping[str, Any]) -> str:
     ).strip()
 
 
+def _quota_human_gate_items(
+    quota_packet: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    summary = quota_packet.get("user_todo_summary")
+    summary = summary if isinstance(summary, Mapping) else {}
+    for key in ("gate_open_items", "first_open_items"):
+        raw_items = summary.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        items = [dict(item) for item in raw_items if isinstance(item, Mapping)]
+        if items:
+            return items[:3]
+    return []
+
+
+def quota_human_gate_state_generation(
+    quota_packet: Mapping[str, Any],
+) -> str:
+    """Fingerprint the material state of the currently projected human gate."""
+
+    material_items = []
+    for item in _quota_human_gate_items(quota_packet):
+        material_items.append(
+            {
+                key: item.get(key)
+                for key in (
+                    "todo_id",
+                    "gate_id",
+                    "status",
+                    "task_class",
+                    "updated_at",
+                    "material_change_generation",
+                    "decision_scope",
+                    "decision_outcome",
+                    "blocks_agent",
+                    "global_gate",
+                    "unblocks_todo_id",
+                )
+                if item.get(key) is not None
+            }
+        )
+        text = public_safe_compact_text(
+            item.get("text") or item.get("title"),
+            limit=300,
+        )
+        if text:
+            material_items[-1]["text"] = text
+    material: dict[str, Any] = {
+        "gate_identity": quota_human_gate_identity(quota_packet),
+        "items": material_items,
+    }
+    if not material_items:
+        material["state"] = str(quota_packet.get("state") or "")
+        material["question"] = public_safe_compact_text(
+            quota_packet.get("gate_prompt")
+            or quota_packet.get("operator_question")
+            or quota_packet.get("reason"),
+            limit=900,
+        )
+    return semantic_key(
+        "human_gate_state_v0",
+        json.dumps(
+            material,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+
+
+def quota_human_gate_reminder_generation(
+    quota_packet: Mapping[str, Any],
+) -> str | None:
+    cooldown = quota_packet.get("user_gate_notification_cooldown")
+    if (
+        not isinstance(cooldown, Mapping)
+        or cooldown.get("notification_due") is not True
+    ):
+        return None
+    reminder_identity = {
+        key: cooldown.get(key)
+        for key in (
+            "policy",
+            "failed_at",
+            "next_reminder_at",
+            "cooldown_minutes",
+            "reminder_window_minutes",
+        )
+        if cooldown.get(key) is not None
+    }
+    return semantic_key(
+        "human_gate_reminder_v0",
+        json.dumps(
+            reminder_identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+
+
+def quota_human_gate_notification_suppressed(
+    quota_packet: Mapping[str, Any],
+) -> bool:
+    cooldown = quota_packet.get("user_gate_notification_cooldown")
+    return bool(
+        isinstance(cooldown, Mapping)
+        and cooldown.get("notification_suppressed") is True
+    )
+
+
 def quota_selects_human_gate(quota_packet: Mapping[str, Any]) -> bool:
+    if quota_human_gate_notification_suppressed(quota_packet):
+        return False
+    interaction = quota_packet.get("interaction_contract")
+    if isinstance(interaction, Mapping):
+        user_channel = interaction.get("user_channel")
+        if isinstance(user_channel, Mapping):
+            if user_channel.get("notify") != "NOTIFY":
+                return False
+            if user_channel.get("action_required") is True or bool(
+                user_channel.get("actions")
+            ):
+                return True
     return bool(
         quota_packet.get("state") == "operator_gate"
         or quota_packet.get("notify_user_on_gate") is True
@@ -221,7 +463,29 @@ def save_goal_binding(
     goal_id: str,
     binding: Mapping[str, Any],
 ) -> None:
+    """Compatibility writer for the Goal's explicit default connection.
+
+    Existing notification/setup callers intentionally address the default
+    route. Preserve peer Agent routes when the Goal has migrated to a
+    connection set instead of collapsing the set back to v0.
+    """
     bindings = payload.get("bindings")
+    stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
+    if (
+        isinstance(stored, Mapping)
+        and stored.get("schema_version") == GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION
+    ):
+        save_goal_connection(
+            binding_path=binding_path,
+            payload=payload,
+            goal_id=goal_id,
+            binding={
+                **dict(binding),
+                "connection_id": str(stored.get("default_connection_id") or ""),
+            },
+            make_default=True,
+        )
+        return
     mutable_bindings = dict(bindings) if isinstance(bindings, Mapping) else {}
     mutable_bindings[goal_id] = dict(binding)
     write_goal_channel_binding(
@@ -231,6 +495,62 @@ def save_goal_binding(
             "bindings": mutable_bindings,
         },
     )
+
+
+def save_goal_connection(
+    *,
+    binding_path: Path,
+    payload: Mapping[str, Any],
+    goal_id: str,
+    binding: Mapping[str, Any],
+    make_default: bool = False,
+) -> str:
+    """Upsert one Agent route while retaining v0 single-binding read compatibility."""
+    connection_id = str(
+        binding.get("connection_id") or ""
+    ) or goal_channel_connection_id(
+        goal_id,
+        str(binding.get("agent_id") or "") or None,
+    )
+    all_bindings = payload.get("bindings")
+    mutable_bindings = dict(all_bindings) if isinstance(all_bindings, Mapping) else {}
+    stored = mutable_bindings.get(goal_id)
+    if (
+        isinstance(stored, Mapping)
+        and stored.get("schema_version") == GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION
+        and isinstance(stored.get("connections"), Mapping)
+    ):
+        connections = dict(stored["connections"])
+        default_id = str(stored.get("default_connection_id") or "")
+    else:
+        connections = {}
+        default_id = ""
+        if isinstance(stored, Mapping):
+            legacy_id = goal_channel_connection_id(
+                goal_id,
+                str(stored.get("agent_id") or "") or None,
+            )
+            connections[legacy_id] = dict(stored)
+            default_id = legacy_id
+    connections[connection_id] = {
+        **dict(binding),
+        "connection_id": connection_id,
+    }
+    if make_default or not default_id:
+        default_id = connection_id
+    mutable_bindings[goal_id] = {
+        "schema_version": GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION,
+        "default_connection_id": default_id,
+        "connections": connections,
+    }
+    write_goal_channel_binding(
+        binding_path,
+        {
+            "schema_version": GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+            "bindings": mutable_bindings,
+        },
+    )
+    return connection_id
 
 
 def semantic_key(*parts: str) -> str:
@@ -354,35 +674,47 @@ def gate_message(
         or "A human decision is required.",
         limit=900,
     )
-    summary = quota_packet.get("user_todo_summary")
-    summary = summary if isinstance(summary, Mapping) else {}
-    raw_items = summary.get("first_executable_items") or summary.get(
-        "first_open_items"
+    interaction = quota_packet.get("interaction_contract")
+    interaction = interaction if isinstance(interaction, Mapping) else {}
+    user_channel = interaction.get("user_channel")
+    user_channel = user_channel if isinstance(user_channel, Mapping) else {}
+    raw_actions = user_channel.get("actions")
+    action_lines = (
+        [public_safe_compact_text(action, limit=300) for action in raw_actions[:3]]
+        if isinstance(raw_actions, list)
+        else []
     )
-    items = raw_items if isinstance(raw_items, list) else []
-    todo_lines = [
-        public_safe_compact_text(
-            item.get("text") or item.get("title"),
-            limit=300,
-        )
-        for item in items[:3]
-        if isinstance(item, Mapping)
-    ]
+    if not any(action_lines):
+        action_lines = [
+            public_safe_compact_text(
+                item.get("text") or item.get("title"),
+                limit=300,
+            )
+            for item in _quota_human_gate_items(quota_packet)
+        ]
+    unique_actions: list[str] = []
+    for action in action_lines or [question]:
+        cleaned = GATE_ACTION_PREFIX.sub("", action.strip()).strip()
+        if cleaned and cleaned not in unique_actions:
+            unique_actions.append(cleaned)
     lines = [
-        f"LoopX human gate for {goal_id}",
-        f"Objective: {objective}",
-        f"Action required: {question}",
+        "LoopX · Action required",
+        "",
+        f"Goal: {goal_id}",
     ]
-    if todo_lines:
-        lines.append("Open user actions:")
-        lines.extend(f"- {line}" for line in todo_lines if line)
-    lines.append("Reply with the requested decision or context; LoopX will validate it.")
-    next_action = public_safe_compact_text(
-        quota_packet.get("recommended_action"),
-        limit=300,
+    if objective and objective != goal_id:
+        lines.append(f"Objective: {objective}")
+    lines.extend(["", "Please confirm:"])
+    lines.extend(
+        f"{index}. {action}" for index, action in enumerate(unique_actions, start=1)
     )
-    if next_action:
-        lines.append(f"Next safe action while waiting: {next_action}")
+    lines.extend(
+        [
+            "",
+            "Reply: approve / reject / done / still pending, plus a one-sentence reason.",
+            "Unchanged gate state will stay quiet until an explicit reminder window.",
+        ]
+    )
     if kanban_url:
-        lines.append(f"Kanban: {kanban_url}")
+        lines.extend(["", f"Kanban: {kanban_url}"])
     return "\n".join(lines), question

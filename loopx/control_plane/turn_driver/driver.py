@@ -6,6 +6,14 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
+from .subagent_host_adapter import (
+    project_child_context_adapter,
+    supported_child_context_modes,
+)
+from .subagent_execution_topology import (
+    bind_child_operations_to_topology,
+    build_subagent_execution_topology,
+)
 from ..quota.turn_envelope import turn_envelope_action_signature_document
 from ..scheduler.execution_context import (
     scheduler_execution_context_for_turn,
@@ -19,15 +27,6 @@ LOOPX_CHILD_HOST_OPERATION_SCHEMA_VERSION = "loopx_child_host_operation_v0"
 TURN_ENVELOPE_SCHEMA_VERSION = "loopx_turn_envelope_v0"
 SUPPORTED_HOSTS = {"codex-cli", "claude-code", "dsh", "generic-cli"}
 SUPPORTED_EXECUTION_MODES = {"interactive-visible", "isolated-headless"}
-HOST_CHILD_CONTEXT_OPERATIONS = {
-    "codex-cli": {
-        "fresh": ("spawn_agent", False),
-        "resume": ("resume_agent", True),
-    },
-    "claude-code": {
-        "fresh": ("Task", False),
-    },
-}
 REPLAN_ACTIONS = {
     "autonomous_replan",
     "autonomous_replan_required",
@@ -268,7 +267,9 @@ def _child_host_operations(
     brief_defaults = _mapping(orchestration.get("child_brief_defaults"))
     if brief_defaults.get("schema_version") != "subagent_control_plane_handoff_v0":
         return []
-    operations = HOST_CHILD_CONTEXT_OPERATIONS.get(host, {})
+    supported_contexts = supported_child_context_modes(host)
+    if not supported_contexts:
+        return []
     child_operations: list[dict[str, Any]] = []
     for lane in lanes:
         if not isinstance(lane, Mapping):
@@ -285,18 +286,8 @@ def _child_host_operations(
         if not isinstance(allowed_contexts, list):
             allowed_contexts = [recommended]
         available_contexts = [
-            {
-                "context": context,
-                "native_operation": operations[context][0],
-                "requires_session": operations[context][1],
-            }
-            for context in allowed_contexts
-            if context in operations
+            context for context in allowed_contexts if context in supported_contexts
         ]
-        if not available_contexts:
-            continue
-        if recommended not in {item["context"] for item in available_contexts}:
-            recommended = str(available_contexts[0]["context"])
         child_operations.append(
             {
                 "schema_version": LOOPX_CHILD_HOST_OPERATION_SCHEMA_VERSION,
@@ -313,6 +304,27 @@ def _child_host_operations(
             }
         )
     return child_operations
+
+
+def _bind_host_child_operations(
+    child_operations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    bound: list[dict[str, Any]] = []
+    for operation in child_operations:
+        context_mode = str(operation.get("recommended_context") or "")
+        adapter = project_child_context_adapter(
+            host=str(operation.get("host") or ""),
+            context_mode=context_mode,
+        )
+        if adapter is None:
+            continue
+        bound.append(
+            {
+                **operation,
+                "host_adapter": adapter,
+            }
+        )
+    return bound
 
 
 def build_loopx_turn_plan(
@@ -356,10 +368,32 @@ def build_loopx_turn_plan(
         LoopXTurnRoute.REPAIR_REQUIRED,
         LoopXTurnRoute.REPLAN_REQUIRED,
     }
-    child_operations = (
+    raw_child_operations = (
         _child_host_operations(envelope, host=host) if would_invoke_host else []
     )
     context_projection = execution_context.projection()
+    transaction = build_loopx_turn_transaction_plan(
+        planned=would_invoke_host,
+        lineage=lineage,
+        host=host,
+        execution_mode=execution_mode,
+        scheduler_owner=str(context_projection.get("scheduler_owner") or ""),
+        session_action=str(session.get("action") or "none"),
+        turn_instance_id=turn_instance_id,
+    )
+    execution_topology = build_subagent_execution_topology(
+        turn_envelope=envelope,
+        child_operations=raw_child_operations,
+        turn_key=str(transaction.get("turn_key") or ""),
+        source_state_ref=str(
+            _mapping(envelope.get("action_signature")).get("source_hash") or ""
+        ),
+    )
+    child_operations = bind_child_operations_to_topology(
+        raw_child_operations,
+        execution_topology,
+    )
+    child_operations = _bind_host_child_operations(child_operations)
     payload = {
         "ok": route is not LoopXTurnRoute.CONTRACT_ERROR,
         "schema_version": LOOPX_TURN_PLAN_SCHEMA_VERSION,
@@ -381,15 +415,7 @@ def build_loopx_turn_plan(
             "selected_todo": selected_todo or None,
         },
         "turn_envelope": envelope,
-        "transaction": build_loopx_turn_transaction_plan(
-            planned=would_invoke_host,
-            lineage=lineage,
-            host=host,
-            execution_mode=execution_mode,
-            scheduler_owner=str(context_projection.get("scheduler_owner") or ""),
-            session_action=str(session.get("action") or "none"),
-            turn_instance_id=turn_instance_id,
-        ),
+        "transaction": transaction,
         "effects": {
             "host_invoked": False,
             "state_written": False,
@@ -410,4 +436,6 @@ def build_loopx_turn_plan(
     }
     if child_operations:
         payload["child_operations"] = child_operations
+    if execution_topology:
+        payload["subagent_execution_topology"] = execution_topology
     return payload

@@ -259,6 +259,8 @@ def main() -> None:
             "loopx.cli",
             "--registry",
             str(registry),
+            "--runtime-root",
+            str(root / "runtime"),
             "chat",
             "--goal-id",
             GOAL_ID,
@@ -274,6 +276,46 @@ def main() -> None:
             str(assets / "index.html"),
             "--no-open",
         ]
+        disabled_server = subprocess.Popen(
+            command,
+            cwd=root / "project",
+            env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            disabled_capabilities = wait_for_json(
+                f"{base_url}/api/chat/capabilities"
+            )
+            assert "goal_subagent_configuration" not in disabled_capabilities
+            disabled_status = wait_for_json(f"{base_url}/status.json")
+            assert all(
+                "spawn_policy" not in goal
+                for goal in disabled_status["run_history"]["goals"]
+            ), disabled_status
+            for route in (
+                "/api/chat/goal-subagents/dry-run",
+                "/api/chat/goal-subagents/apply",
+            ):
+                code, disabled_route = request_json(
+                    f"{base_url}{route}",
+                    method="POST",
+                    body={"goal_id": GOAL_ID, "enabled": False},
+                )
+                assert code == 404, disabled_route
+        finally:
+            disabled_server.terminate()
+            try:
+                disabled_server.wait(timeout=5)
+            except subprocess.TimeoutExpired:  # pragma: no cover - defensive cleanup.
+                disabled_server.kill()
+                disabled_server.wait(timeout=5)
+
+        port = free_port()
+        base_url = f"http://127.0.0.1:{port}"
+        command[command.index("--port") + 1] = str(port)
+        command.append("--enable-goal-subagent-configuration")
         server = subprocess.Popen(
             command,
             cwd=root / "project",
@@ -288,6 +330,7 @@ def main() -> None:
             assert capabilities["streaming"] is True, capabilities
             assert capabilities["resume"] is True, capabilities
             assert capabilities["interrupt"] is True, capabilities
+            assert capabilities["goal_subagent_configuration"] == "preview_locked", capabilities
             assert capabilities["adapters"][0]["agent_id"] == "codex", capabilities
             endpoints = wait_for_json(f"{base_url}/api/chat/endpoints")
             fixture_endpoint = next(
@@ -346,12 +389,179 @@ def main() -> None:
             assert code == 400, configure_invalid
             assert configure_invalid["error_code"] == "invalid_goal_channel_configure", configure_invalid
 
+            registry_before_subagent_preview = registry.read_text(encoding="utf-8")
+            code, invalid_domain = request_json(
+                f"{base_url}/api/chat/goal-subagents/dry-run",
+                method="POST",
+                body={
+                    "goal_id": GOAL_ID,
+                    "enabled": True,
+                    "max_children": 2,
+                    "allowed_domains": ["../private"],
+                },
+            )
+            assert code == 400, invalid_domain
+            assert (
+                invalid_domain["error_code"] == "invalid_goal_subagent_configuration"
+            ), invalid_domain
+
+            unrestricted_subagent_request = {
+                "goal_id": GOAL_ID,
+                "enabled": True,
+                "max_children": 2,
+            }
+            code, unrestricted_preview = request_json(
+                f"{base_url}/api/chat/goal-subagents/dry-run",
+                method="POST",
+                body=unrestricted_subagent_request,
+            )
+            assert code == 200 and unrestricted_preview["preview_id"], (
+                unrestricted_preview
+            )
+            assert unrestricted_preview["dry_run"] is True, unrestricted_preview
+            assert unrestricted_preview["written"] is False, unrestricted_preview
+            assert unrestricted_preview["after"]["orchestration"].get(
+                "allowed_domains", []
+            ) == [], unrestricted_preview
+            assert unrestricted_preview["feature_summary"]["multi_subagent"] == (
+                "enabled"
+            ), unrestricted_preview
+            assert (
+                registry.read_text(encoding="utf-8") == registry_before_subagent_preview
+            )
+
+            code, stale_subagent_apply = request_json(
+                f"{base_url}/api/chat/goal-subagents/apply",
+                method="POST",
+                body={**unrestricted_subagent_request, "preview_id": "stale-preview"},
+            )
+            assert code == 409, stale_subagent_apply
+            assert (
+                stale_subagent_apply["error_code"] == "stale_goal_subagent_preview"
+            ), stale_subagent_apply
+
+            code, unrestricted_applied = request_json(
+                f"{base_url}/api/chat/goal-subagents/apply",
+                method="POST",
+                body={
+                    **unrestricted_subagent_request,
+                    "preview_id": unrestricted_preview["preview_id"],
+                },
+            )
+            assert code == 200 and unrestricted_applied["written"] is True, (
+                unrestricted_applied
+            )
+            assert (
+                unrestricted_applied["global_sync"]["readback"]["verified"] is True
+            ), unrestricted_applied
+            unrestricted_goal = next(
+                item
+                for item in json.loads(registry.read_text(encoding="utf-8"))["goals"]
+                if item["id"] == GOAL_ID
+            )
+            assert unrestricted_goal["spawn_policy"] == {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+                "allowed_domains": [],
+            }, unrestricted_goal
+
+            unrestricted_status = wait_for_json(f"{base_url}/status.json")
+            unrestricted_projected_goal = next(
+                item
+                for item in unrestricted_status["run_history"]["goals"]
+                if item["id"] == GOAL_ID
+            )
+            assert unrestricted_projected_goal["spawn_policy"]["spawn_allowed"] is True
+            assert unrestricted_projected_goal["spawn_policy"]["max_children"] == 2
+            assert (
+                unrestricted_projected_goal["spawn_policy"].get("allowed_domains", []) == []
+            ), unrestricted_projected_goal
+
+            restricted_subagent_request = {
+                "goal_id": GOAL_ID,
+                "enabled": True,
+                "max_children": 2,
+                "allowed_domains": ["code", "validation"],
+            }
+            code, restricted_preview = request_json(
+                f"{base_url}/api/chat/goal-subagents/dry-run",
+                method="POST",
+                body=restricted_subagent_request,
+            )
+            assert code == 200 and restricted_preview["preview_id"], restricted_preview
+            assert restricted_preview["written"] is False, restricted_preview
+
+            code, subagent_applied = request_json(
+                f"{base_url}/api/chat/goal-subagents/apply",
+                method="POST",
+                body={
+                    **restricted_subagent_request,
+                    "preview_id": restricted_preview["preview_id"],
+                },
+            )
+            assert code == 200, subagent_applied
+            assert subagent_applied["written"] is True, subagent_applied
+            assert subagent_applied["global_sync"]["readback"]["verified"] is True, (
+                subagent_applied
+            )
+            configured_goal = next(
+                item
+                for item in json.loads(registry.read_text(encoding="utf-8"))["goals"]
+                if item["id"] == GOAL_ID
+            )
+            assert configured_goal["spawn_policy"] == {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+                "allowed_domains": ["code", "validation"],
+            }, configured_goal
+
             status_payload = wait_for_json(f"{base_url}/status.json")
             assert status_payload["ok"] is True, status_payload
             assert status_payload["goal_count"] == 1, status_payload
             assert status_payload["goal_filter"] == GOAL_ID, status_payload
             assert status_payload["global_registry"]["ok"] is True, status_payload
             assert str(root) not in json.dumps(status_payload), status_payload
+            projected_goal = next(
+                item
+                for item in status_payload["run_history"]["goals"]
+                if item["id"] == GOAL_ID
+            )
+            assert projected_goal["spawn_policy"]["spawn_allowed"] is True, projected_goal
+            assert projected_goal["spawn_policy"]["max_children"] == 2, projected_goal
+            assert projected_goal["spawn_policy"]["allowed_domains"] == [
+                "code",
+                "validation",
+            ], projected_goal
+
+            disable_subagents = {"goal_id": GOAL_ID, "enabled": False}
+            code, disable_preview = request_json(
+                f"{base_url}/api/chat/goal-subagents/dry-run",
+                method="POST",
+                body=disable_subagents,
+            )
+            assert code == 200 and disable_preview["preview_id"], disable_preview
+            code, disable_applied = request_json(
+                f"{base_url}/api/chat/goal-subagents/apply",
+                method="POST",
+                body={**disable_subagents, "preview_id": disable_preview["preview_id"]},
+            )
+            assert code == 200 and disable_applied["written"] is True, disable_applied
+            assert disable_applied["global_sync"]["readback"]["verified"] is True, (
+                disable_applied
+            )
+            disabled_status = wait_for_json(f"{base_url}/status.json")
+            disabled_goal = next(
+                item
+                for item in disabled_status["run_history"]["goals"]
+                if item["id"] == GOAL_ID
+            )
+            assert disabled_goal["spawn_policy"] == {
+                "mode": "default",
+                "spawn_allowed": False,
+                "max_children": 0,
+            }, disabled_goal
 
             code, created = request_json(
                 f"{base_url}/api/chat/sessions",

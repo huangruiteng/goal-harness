@@ -30,6 +30,7 @@ import type {
   WorkspaceDrawerSelection,
   WorkspaceGoal,
   WorkspaceGoalNotification,
+  WorkspaceGoalSubagentConfiguration,
   WorkspaceRun,
   WorkspaceTodo,
 } from "./personal-workspace-model";
@@ -49,6 +50,15 @@ const focusableSelector = [
 
 type TodoOperation = "block" | "complete" | "defer" | "successor_create";
 
+type GoalSubagentPreview = {
+  allowedDomains: string[];
+  changed: boolean;
+  enabled: boolean;
+  goalId: string;
+  maxChildren: number;
+  previewId: string;
+};
+
 const todoTransitions = [
   { key: "drawer.taskBlock", operation: "block" },
   { key: "drawer.taskSuccessor", operation: "successor_create" },
@@ -58,6 +68,24 @@ const decisionTransitions = [
   { key: "drawer.decisionReject", resolution: "reject" },
   { key: "drawer.decisionDefer", resolution: "defer" },
 ] as const;
+
+const subagentChildLimits = Array.from({ length: 32 }, (_, index) => index + 1);
+const subagentDomainPattern = /^[a-z][a-z0-9_.-]{0,63}$/u;
+
+function normalizeSubagentDomain(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return subagentDomainPattern.test(normalized) ? normalized : null;
+}
+
+function subagentConfigurationsMatch(
+  left: WorkspaceGoalSubagentConfiguration,
+  right: WorkspaceGoalSubagentConfiguration,
+) {
+  return left.enabled === right.enabled
+    && left.maxChildren === right.maxChildren
+    && [...left.allowedDomains].sort((a, b) => a.localeCompare(b)).join("\u0000")
+      === [...right.allowedDomains].sort((a, b) => a.localeCompare(b)).join("\u0000");
+}
 
 type ContextDrawerSelection = Exclude<WorkspaceDrawerSelection, { kind: "settings" }>;
 
@@ -79,6 +107,14 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [repositoryCopyState, setRepositoryCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [runDrawerTab, setRunDrawerTab] = useState<"record" | "details">("record");
+  const [subagentAllowedDomains, setSubagentAllowedDomains] = useState<string[]>([]);
+  const [subagentFeedback, setSubagentFeedback] = useState<string | null>(null);
+  const [subagentMaxChildren, setSubagentMaxChildren] = useState(2);
+  const [subagentMutationState, setSubagentMutationState] = useState<"idle" | "previewing" | "ready" | "applying" | "success" | "warning" | "error">("idle");
+  const [subagentPreview, setSubagentPreview] = useState<GoalSubagentPreview | null>(null);
+  const [verifiedSubagentConfiguration, setVerifiedSubagentConfiguration] = useState<WorkspaceGoalSubagentConfiguration | null>(null);
+  const lastAuthoritativeSubagentConfigurationRef = useRef<WorkspaceGoalSubagentConfiguration | null>(null);
+  const verifiedSubagentBaselineRef = useRef<WorkspaceGoalSubagentConfiguration | null>(null);
   const [todoAgentId, setTodoAgentId] = useState(agents.find((agent) => agent.available)?.agentId ?? "codex");
   const [todoResumeWhen, setTodoResumeWhen] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -98,7 +134,66 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     setDiagnosticsOpen(false);
     setRunDrawerTab("record");
     setTodoResumeWhen("");
+    const configuration = selection.kind === "goal" ? selection.item.subagentExecution : undefined;
+    setSubagentAllowedDomains(configuration?.allowedDomains ?? []);
+    setSubagentMaxChildren(configuration?.maxChildren ? Math.min(configuration.maxChildren, 32) : 2);
+    setSubagentFeedback(null);
+    setSubagentMutationState("idle");
+    setSubagentPreview(null);
+    setVerifiedSubagentConfiguration(null);
+    lastAuthoritativeSubagentConfigurationRef.current = configuration ?? null;
+    verifiedSubagentBaselineRef.current = null;
   }, [selectionIdentity]);
+
+  const authoritativeSubagentConfiguration = selection.kind === "goal"
+    ? selection.item.subagentExecution
+    : undefined;
+
+  useEffect(() => {
+    const previousAuthoritativeConfiguration = lastAuthoritativeSubagentConfigurationRef.current;
+    const authoritativeConfigurationChanged = authoritativeSubagentConfiguration
+      ? !previousAuthoritativeConfiguration
+        || !subagentConfigurationsMatch(
+          previousAuthoritativeConfiguration,
+          authoritativeSubagentConfiguration,
+        )
+      : previousAuthoritativeConfiguration !== null;
+    lastAuthoritativeSubagentConfigurationRef.current = authoritativeSubagentConfiguration
+      ?? null;
+    if (!verifiedSubagentConfiguration) {
+      if (authoritativeConfigurationChanged && authoritativeSubagentConfiguration) {
+        setSubagentAllowedDomains(authoritativeSubagentConfiguration.allowedDomains);
+        setSubagentMaxChildren(authoritativeSubagentConfiguration.maxChildren || 2);
+        setSubagentFeedback(null);
+        setSubagentMutationState("idle");
+        setSubagentPreview(null);
+      }
+      return;
+    }
+    const baseline = verifiedSubagentBaselineRef.current;
+    const authoritativeSupersedesReceipt = !authoritativeSubagentConfiguration
+      || subagentConfigurationsMatch(
+        verifiedSubagentConfiguration,
+        authoritativeSubagentConfiguration,
+      )
+      || Boolean(
+        baseline
+        && !subagentConfigurationsMatch(
+          baseline,
+          authoritativeSubagentConfiguration,
+        ),
+      );
+    if (authoritativeSupersedesReceipt) {
+      if (authoritativeSubagentConfiguration) {
+        setSubagentAllowedDomains(authoritativeSubagentConfiguration.allowedDomains);
+        setSubagentMaxChildren(
+          authoritativeSubagentConfiguration.maxChildren || 2,
+        );
+      }
+      verifiedSubagentBaselineRef.current = null;
+      setVerifiedSubagentConfiguration(null);
+    }
+  }, [authoritativeSubagentConfiguration, verifiedSubagentConfiguration]);
 
   useEffect(() => {
     const activeElement = document.activeElement;
@@ -216,6 +311,143 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
       },
       summary: `${label}：${attention.text}`,
     });
+  }
+
+  const currentSubagentConfiguration = selection.kind === "goal"
+    ? verifiedSubagentConfiguration
+      ?? selection.item.subagentExecution
+      ?? { allowedDomains: [], domainCandidates: [], enabled: false, maxChildren: 0 }
+    : { allowedDomains: [], domainCandidates: [], enabled: false, maxChildren: 0 };
+  const subagentBusy = subagentMutationState === "previewing" || subagentMutationState === "applying";
+  const subagentDomainOptions = (() => {
+    if (selection.kind !== "goal") return [];
+    const options = new Map<string, { matchingTodoCount: number; value: string }>();
+    for (const configuredDomain of currentSubagentConfiguration.allowedDomains) {
+      const value = normalizeSubagentDomain(configuredDomain);
+      if (value) options.set(value, { matchingTodoCount: 0, value });
+    }
+    if (currentSubagentConfiguration.domainCandidates) {
+      for (const candidate of currentSubagentConfiguration.domainCandidates) {
+        const value = normalizeSubagentDomain(candidate.domain);
+        if (!value) continue;
+        const existing = options.get(value);
+        options.set(value, {
+          matchingTodoCount: (existing?.matchingTodoCount ?? 0) + candidate.matchingTodoCount,
+          value,
+        });
+      }
+    } else {
+      for (const todo of selection.item.agentTodos) {
+        if (todo.done || todo.taskClass !== "advancement_task") continue;
+        const value = normalizeSubagentDomain(todo.taskDomain);
+        if (!value) continue;
+        const existing = options.get(value);
+        options.set(value, {
+          matchingTodoCount: (existing?.matchingTodoCount ?? 0) + 1,
+          value,
+        });
+      }
+    }
+    return [...options.values()];
+  })();
+
+  function resetSubagentDraft() {
+    setSubagentAllowedDomains(currentSubagentConfiguration.allowedDomains);
+    setSubagentMaxChildren(currentSubagentConfiguration.maxChildren || 2);
+    setSubagentFeedback(null);
+    setSubagentMutationState("idle");
+    setSubagentPreview(null);
+  }
+
+  function normalizedSubagentDomains() {
+    const domains = [...new Set(subagentAllowedDomains.map((value) => normalizeSubagentDomain(value)))];
+    return domains.every((domain): domain is string => Boolean(domain)) ? domains : null;
+  }
+
+  function toggleSubagentDomain(domain: string, selected: boolean) {
+    setSubagentAllowedDomains((current) => selected
+      ? [...current, domain].filter((value, index, values) => values.indexOf(value) === index)
+      : current.filter((value) => value !== domain));
+    setSubagentPreview(null);
+    setSubagentMutationState("idle");
+    setSubagentFeedback(null);
+  }
+
+  async function previewGoalSubagentConfiguration(enabled: boolean) {
+    if (selection.kind !== "goal" || !callbacks.onPreviewGoalSubagentConfiguration) return;
+    const allowedDomains = enabled ? normalizedSubagentDomains() : [];
+    if (enabled && !allowedDomains) {
+      setSubagentMutationState("error");
+      setSubagentFeedback(t("drawer.subagentDomainInvalid"));
+      setSubagentPreview(null);
+      return;
+    }
+    const request = {
+      allowedDomains: allowedDomains ?? [],
+      enabled,
+      goalId: selection.item.goalId,
+      maxChildren: enabled ? subagentMaxChildren : 0,
+    };
+    setSubagentMutationState("previewing");
+    setSubagentFeedback(t("drawer.subagentPreviewing"));
+    setSubagentPreview(null);
+    try {
+      const preview = await callbacks.onPreviewGoalSubagentConfiguration(request);
+      if (!preview.changed) {
+        verifiedSubagentBaselineRef.current = authoritativeSubagentConfiguration
+          ?? null;
+        setVerifiedSubagentConfiguration({
+          ...preview.configuration,
+          domainCandidates: currentSubagentConfiguration.domainCandidates,
+        });
+        setSubagentAllowedDomains(preview.configuration.allowedDomains);
+        setSubagentMaxChildren(preview.configuration.maxChildren || 2);
+        setSubagentMutationState("success");
+        setSubagentFeedback(t("drawer.subagentNoChange"));
+        return;
+      }
+      setSubagentPreview({ ...request, changed: preview.changed, previewId: preview.previewId });
+      setSubagentMutationState("ready");
+      setSubagentFeedback(t("drawer.subagentPreviewReady"));
+    } catch (error) {
+      setSubagentMutationState("error");
+      setSubagentFeedback(error instanceof Error ? error.message : t("drawer.subagentPreviewFailed"));
+    }
+  }
+
+  async function applyGoalSubagentConfiguration() {
+    if (!subagentPreview || !callbacks.onApplyGoalSubagentConfiguration) return;
+    setSubagentMutationState("applying");
+    setSubagentFeedback(t("drawer.subagentApplying"));
+    try {
+      const verifiedConfiguration = await callbacks.onApplyGoalSubagentConfiguration({
+        allowedDomains: subagentPreview.allowedDomains,
+        enabled: subagentPreview.enabled,
+        goalId: subagentPreview.goalId,
+        maxChildren: subagentPreview.maxChildren,
+        previewId: subagentPreview.previewId,
+      });
+      verifiedSubagentBaselineRef.current = authoritativeSubagentConfiguration
+        ?? null;
+      setVerifiedSubagentConfiguration({
+        ...verifiedConfiguration,
+        domainCandidates: currentSubagentConfiguration.domainCandidates,
+      });
+      setSubagentAllowedDomains(verifiedConfiguration.allowedDomains);
+      setSubagentMaxChildren(verifiedConfiguration.maxChildren || 2);
+      setSubagentMutationState("success");
+      setSubagentFeedback(t("drawer.subagentApplied"));
+      setSubagentPreview(null);
+      try {
+        await callbacks.onRefresh?.();
+      } catch {
+        setSubagentMutationState("warning");
+        setSubagentFeedback(t("drawer.subagentAppliedRefreshFailed"));
+      }
+    } catch (error) {
+      setSubagentMutationState("error");
+      setSubagentFeedback(error instanceof Error ? error.message : t("drawer.subagentApplyFailed"));
+    }
   }
 
   return (
@@ -418,6 +650,117 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("heartbeat", selection.item.goalId)} type="button"><Radio size={16} />{t("drawer.setupHeartbeat")}</button>
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("monitor", selection.item.goalId)} type="button"><CalendarClock size={16} />{t("drawer.scheduleAdd")}</button>
             </div> : null}
+            {selection.item.subagentExecution ? <section className="personal-detail-card personal-goal-subagents">
+              <div className="personal-subagent-heading">
+                <div>
+                  <small>{t("drawer.subagentLabel")}</small>
+                  <h3><Bot size={16} />{t("drawer.subagentTitle")}</h3>
+                </div>
+                <button
+                  aria-checked={currentSubagentConfiguration.enabled}
+                  aria-label={t(subagentPreview && subagentMutationState === "ready"
+                    ? "drawer.subagentPending"
+                    : currentSubagentConfiguration.enabled ? "drawer.subagentDisable" : "drawer.subagentEnable")}
+                  className="personal-subagent-switch"
+                  data-pending={subagentPreview && subagentMutationState === "ready" ? "true" : undefined}
+                  disabled={readOnly
+                    || subagentBusy
+                    || Boolean(subagentPreview)
+                    || !callbacks.onPreviewGoalSubagentConfiguration}
+                  onClick={() => void previewGoalSubagentConfiguration(!currentSubagentConfiguration.enabled)}
+                  role="switch"
+                  type="button"
+                >
+                  <span />
+                  {t(subagentPreview && subagentMutationState === "ready"
+                    ? "drawer.subagentPending"
+                    : currentSubagentConfiguration.enabled ? "common.on" : "common.off")}
+                </button>
+              </div>
+              <p>{t("drawer.subagentDescription")}</p>
+              {subagentPreview && subagentMutationState === "ready" ? (
+                <div className="personal-subagent-preview">
+                  <strong>{t(subagentPreview.enabled ? "drawer.subagentConfirmEnable" : "drawer.subagentConfirmDisable")}</strong>
+                  <p>{subagentPreview.enabled
+                    ? t("drawer.subagentPreviewSummary", {
+                        count: subagentPreview.maxChildren,
+                        domains: subagentPreview.allowedDomains.join(" · ") || t("drawer.subagentDomainsUnrestricted"),
+                      })
+                    : t("drawer.subagentDisableSummary")}</p>
+                  <div>
+                    <button className="personal-primary-action" onClick={() => void applyGoalSubagentConfiguration()} type="button">{t("common.confirm")}</button>
+                    <button className="personal-secondary-action" onClick={resetSubagentDraft} type="button">{t("common.cancel")}</button>
+                  </div>
+                </div>
+              ) : null}
+              {subagentFeedback ? (
+                <p className={`personal-subagent-feedback is-${subagentMutationState}`} role="status">
+                  {subagentMutationState === "previewing" || subagentMutationState === "applying" ? <RotateCcw className="personal-spin" size={13} /> : null}
+                  {subagentFeedback}
+                </p>
+              ) : null}
+              <dl>
+                <div><dt>{t("drawer.subagentCurrentBoundary")}</dt><dd>{currentSubagentConfiguration.allowedDomains.join(" · ") || t("drawer.subagentDomainsUnrestricted")}</dd></div>
+                <div><dt>{t("drawer.subagentChildLimit")}</dt><dd>{currentSubagentConfiguration.maxChildren || 0}</dd></div>
+              </dl>
+              {readOnly ? (
+                <p className="personal-subagent-read-only">{t("drawer.subagentRemoteReadOnly")}</p>
+              ) : (
+                <div className="personal-subagent-fields">
+                  <fieldset className="personal-subagent-domain-picker" disabled={subagentBusy}>
+                    <legend>{t("drawer.subagentDomains")}</legend>
+                    {subagentDomainOptions.length > 0 ? (
+                      <div className="personal-subagent-domain-options">
+                        {subagentDomainOptions.map((option) => {
+                          const selected = subagentAllowedDomains.includes(option.value);
+                          return (
+                            <label className={`personal-subagent-domain-option${selected ? " is-selected" : ""}`} key={option.value}>
+                              <input
+                                aria-label={option.value}
+                                checked={selected}
+                                onChange={(event) => toggleSubagentDomain(option.value, event.target.checked)}
+                                type="checkbox"
+                              />
+                              <span>
+                                <strong>{option.value}</strong>
+                                <small>{t("drawer.subagentDomainTodoCount", { count: option.matchingTodoCount })}</small>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="personal-subagent-domain-empty">{t("drawer.subagentDomainsEmpty")}</p>
+                    )}
+                    <small>{t("drawer.subagentDomainsHint")}</small>
+                  </fieldset>
+                  <label className="personal-subagent-limit-field">
+                    <span>{t("drawer.subagentMaxChildren")}</span>
+                    <select
+                      aria-label={t("drawer.subagentMaxChildren")}
+                      disabled={subagentBusy}
+                      onChange={(event) => {
+                        setSubagentMaxChildren(Number(event.target.value));
+                        setSubagentPreview(null);
+                        setSubagentMutationState("idle");
+                        setSubagentFeedback(null);
+                      }}
+                      value={subagentMaxChildren}
+                    >
+                      {subagentChildLimits.map((value) => <option key={value} value={value}>{value}</option>)}
+                    </select>
+                  </label>
+                  {currentSubagentConfiguration.enabled ? (
+                    <button
+                      className="personal-secondary-action"
+                      disabled={subagentBusy}
+                      onClick={() => void previewGoalSubagentConfiguration(true)}
+                      type="button"
+                    >{t("drawer.subagentPreviewBoundary")}</button>
+                  ) : null}
+                </div>
+              )}
+            </section> : null}
           </>
         ) : null}
 
@@ -554,8 +897,8 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
             ) : null}
             {selection.item.safePreview ? <pre aria-label={t("drawer.outputSafePreview")} className="personal-safe-preview">{selection.item.safePreview}</pre> : <p className="personal-preview-unavailable">{t("drawer.previewUnavailable")}</p>}
             <div className="personal-drawer-action-grid">
-              <button className="personal-primary-action" onClick={() => { callbacks.onOpenOutput?.(selection.item); onClose(); }} type="button"><ExternalLink size={16} />{t("common.open")}</button>
-              <button className="personal-secondary-action" disabled={!callbacks.onExportOutput} onClick={() => void callbacks.onExportOutput?.(selection.item)} type="button"><Download size={16} />{t("common.export")}</button>
+              <button className="personal-primary-action" disabled={!callbacks.onOpenOutput} onClick={() => { callbacks.onOpenOutput?.(selection.item); onClose(); }} type="button"><ExternalLink size={16} />{t("files.openConversation")}</button>
+              <button className="personal-secondary-action" disabled={!callbacks.onExportOutput} onClick={() => void callbacks.onExportOutput?.(selection.item)} type="button"><Download size={16} />{t("files.exportSummary")}</button>
             </div>
           </>
         ) : null}

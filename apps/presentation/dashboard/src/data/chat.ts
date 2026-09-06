@@ -103,6 +103,7 @@ export const chatCapabilitiesSchema = z.object({
   sandbox: z.string(),
   approval_policy: z.string(),
   todo_write: z.string(),
+  goal_subagent_configuration: z.string().optional(),
   goal_id: z.string().nullable(),
   streaming: z.boolean().optional(),
   resume: z.boolean().optional(),
@@ -197,6 +198,44 @@ export const todoApplyResultSchema = z.object({
     todo_id: z.string(),
   }),
 });
+
+const goalSubagentOrchestrationSchema = z.object({
+  mode: z.string(),
+  spawn_allowed: z.boolean(),
+  max_children: z.number().int().nonnegative(),
+  allowed_domains: z.array(z.string()).optional().default([]),
+}).passthrough();
+
+export const goalSubagentConfigurationResultSchema = z.object({
+  ok: z.literal(true),
+  dry_run: z.boolean(),
+  execute: z.boolean(),
+  written: z.boolean(),
+  changed: z.boolean(),
+  goal_id: z.string().min(1),
+  changed_fields: z.array(z.string()),
+  before: z.object({ orchestration: goalSubagentOrchestrationSchema }).passthrough(),
+  after: z.object({ orchestration: goalSubagentOrchestrationSchema }).passthrough(),
+  preview_id: z.string().min(1),
+  feature_summary: z.object({ multi_subagent: z.enum(["off", "enabled"]) }).passthrough(),
+  global_sync: z.object({
+    required: z.boolean(),
+    executed: z.boolean(),
+    readback: z.object({
+      status: z.string(),
+      verified: z.boolean(),
+    }).passthrough(),
+  }).passthrough(),
+});
+
+export type GoalSubagentConfigurationResult = z.infer<typeof goalSubagentConfigurationResultSchema>;
+
+export type GoalSubagentConfigurationRequest = {
+  allowedDomains: string[];
+  enabled: boolean;
+  goalId: string;
+  maxChildren: number;
+};
 
 export const storedDecisionHistoryItemSchema = z
   .object({
@@ -362,15 +401,34 @@ export async function transitionTypedAction(
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(chatApiUrl(url), {
-    cache: "no-store",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
-  const payload = (await response.json()) as Record<string, unknown>;
+  let response: Response;
+  try {
+    response = await fetch(chatApiUrl(url), {
+      cache: "no-store",
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...init?.headers,
+      },
+    });
+  } catch {
+    throw new ChatApiError(
+      "无法连接 LoopX Chat 服务。请确认 Dashboard 与 Chat 服务已启动且来自同一版本。",
+      { error_code: "chat_api_unavailable" },
+    );
+  }
+  const responseText = await response.text();
+  let parsedPayload: unknown = null;
+  if (responseText.trim()) {
+    try {
+      parsedPayload = JSON.parse(responseText);
+    } catch {
+      parsedPayload = null;
+    }
+  }
+  const payload = parsedPayload && typeof parsedPayload === "object" && !Array.isArray(parsedPayload)
+    ? parsedPayload as Record<string, unknown>
+    : {};
   if (!response.ok) {
     const proposal = payload.proposal && typeof payload.proposal === "object"
       ? payload.proposal as Record<string, unknown>
@@ -378,9 +436,20 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     const staleMessage = proposal?.status === "stale"
       ? "来源状态已变化，请重新生成预览。"
       : null;
-    throw new ChatApiError(staleMessage ?? String(payload.error || `HTTP ${response.status}`), payload);
+    const serviceMessage = response.status >= 500
+      ? `LoopX Chat 服务暂时不可用（HTTP ${response.status}）。请确认 Dashboard 与 Chat 服务已启动且来自同一版本。`
+      : `LoopX Chat 请求失败（HTTP ${response.status}）。`;
+    throw new ChatApiError(staleMessage ?? String(payload.error || serviceMessage), Object.keys(payload).length
+      ? payload
+      : { error_code: "chat_api_unavailable", http_status: response.status });
   }
-  return payload as T;
+  if (parsedPayload === null) {
+    throw new ChatApiError(
+      `LoopX Chat 服务返回了无法识别的响应（HTTP ${response.status}）。请确认 Dashboard 与 Chat 服务来自同一版本。`,
+      { error_code: "invalid_chat_api_response", http_status: response.status },
+    );
+  }
+  return parsedPayload as T;
 }
 
 export async function fetchChatStatus() {
@@ -793,6 +862,82 @@ export async function resumeChatSession(sessionId: string) {
   );
 }
 
+function goalSubagentConfigurationBody(request: GoalSubagentConfigurationRequest) {
+  return {
+    goal_id: request.goalId,
+    enabled: request.enabled,
+    ...(request.enabled ? {
+      max_children: request.maxChildren,
+      allowed_domains: request.allowedDomains,
+    } : {}),
+  };
+}
+
+function verifyGoalSubagentConfigurationResult(
+  result: GoalSubagentConfigurationResult,
+  request: GoalSubagentConfigurationRequest,
+) {
+  const orchestration = result.after.orchestration;
+  const expectedDomains = [...new Set(request.allowedDomains)];
+  const enabled = result.feature_summary.multi_subagent === "enabled";
+  const matchesRequest = result.goal_id === request.goalId
+    && enabled === request.enabled
+    && (request.enabled
+      ? orchestration.max_children === request.maxChildren
+        && JSON.stringify(orchestration.allowed_domains) === JSON.stringify(expectedDomains)
+      : orchestration.spawn_allowed === false && orchestration.max_children === 0);
+  if (!matchesRequest) {
+    throw new ChatApiError("Goal 子代理配置回执与本次请求不一致，界面已停止更新。", {
+      after: result.after,
+      goal_id: result.goal_id,
+    });
+  }
+  return result;
+}
+
+export async function previewGoalSubagentConfiguration(
+  request: GoalSubagentConfigurationRequest,
+) {
+  const result = goalSubagentConfigurationResultSchema.parse(
+    await requestJson<unknown>("/api/chat/goal-subagents/dry-run", {
+      method: "POST",
+      body: JSON.stringify(goalSubagentConfigurationBody(request)),
+    }),
+  );
+  if (!result.dry_run || result.execute || result.written) {
+    throw new ChatApiError("Goal 子代理预览返回了非预览回执，已停止进入确认状态。", {
+      result,
+    });
+  }
+  return verifyGoalSubagentConfigurationResult(result, request);
+}
+
+export async function applyGoalSubagentConfiguration(
+  request: GoalSubagentConfigurationRequest,
+  previewId: string,
+) {
+  const result = goalSubagentConfigurationResultSchema.parse(
+    await requestJson<unknown>("/api/chat/goal-subagents/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        ...goalSubagentConfigurationBody(request),
+        preview_id: previewId,
+      }),
+    }),
+  );
+  if (result.preview_id !== previewId || result.dry_run || !result.execute) {
+    throw new ChatApiError("Goal 子代理写入回执与本次确认不一致，界面已停止更新。", {
+      result,
+    });
+  }
+  if (result.changed && (!result.written
+    || !result.global_sync.executed
+    || !result.global_sync.readback.verified)) {
+    throw new ChatApiError("Goal 子代理设置未通过共享状态读回验证。", { result });
+  }
+  return verifyGoalSubagentConfigurationResult(result, request);
+}
+
 export async function previewTodo(goalId: string, text: string) {
   const preview = todoPreviewSchema.parse(
     await requestJson<unknown>("/api/chat/todo/dry-run", {
@@ -933,6 +1078,116 @@ export const machineConfigurationCatalogSchema = z.object({
   namespaces: z.array(machineConfigurationNamespaceDescriptorSchema),
 });
 
+export const capabilityConfigurationFieldSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  description: z.string(),
+  input_kind: z.enum(["boolean", "number", "select", "string_list", "text"]),
+  required: z.boolean(),
+  minimum: z.number().int().optional(),
+  maximum: z.number().int().optional(),
+  options: z.array(z.string()).optional(),
+});
+
+export const capabilityConfigurationEditorSchema = z.object({
+  schema_version: z.literal("capability_configuration_editor_v0"),
+  editable: z.boolean(),
+  supported_scopes: z.array(z.enum(["goal", "machine"])),
+  writable_scopes: z.array(z.enum(["goal", "machine"])),
+  fields: z.array(capabilityConfigurationFieldSchema),
+  read_only_reason: z.string().optional(),
+});
+
+export const capabilityConfigurationCatalogSchema = z.object({
+  schema_version: z.literal("capability_configuration_catalog_v0"),
+  capabilities: z.array(z.object({
+    capability_id: z.string(),
+    display_name: z.string(),
+    description: z.string(),
+    available_scopes: z.array(z.enum(["goal", "machine"])),
+    machine_namespace: z.string().optional(),
+    goal_feature_id: z.string().optional(),
+    effective_value_policy: z.literal("goal_override_over_live_machine_default").optional(),
+    availability: z.string().optional(),
+    default: z.record(z.string(), z.unknown()).optional(),
+    current: z.record(z.string(), z.unknown()).optional(),
+    machine_current: z.record(z.string(), z.unknown()).optional(),
+    effective_configuration: z.object({
+      schema_version: z.literal("capability_configuration_resolution_v0"),
+      capability_id: z.string(),
+      source: z.enum(["goal_override", "machine_default", "capability_default", "not_configured"]),
+      configuration: z.record(z.string(), z.unknown()).nullable(),
+      inherited: z.boolean(),
+      goal_override_present: z.boolean(),
+      machine_default_present: z.boolean(),
+      effective_revision: z.string(),
+    }).optional(),
+    documentation: z.record(z.string(), z.unknown()).optional(),
+    configuration_editor: capabilityConfigurationEditorSchema,
+  })),
+});
+
+export const goalConfigurationInspectionSchema = z.object({
+  ok: z.literal(true),
+  schema_version: z.literal("goal_configuration_inspection_v0"),
+  status: z.literal("configured"),
+  goal_id: z.string(),
+  revision: z.string(),
+  available_capabilities: z.array(z.string()),
+  capability_catalog: capabilityConfigurationCatalogSchema,
+});
+
+const goalConfigurationMutationBaseSchema = z.object({
+  ok: z.literal(true),
+  goal_id: z.string(),
+  capability_id: z.string(),
+  changed_fields: z.array(z.string()),
+  goal_configuration: z.record(z.string(), z.unknown()).nullable(),
+  capability_catalog: capabilityConfigurationCatalogSchema,
+});
+
+export const goalConfigurationPreviewSchema = goalConfigurationMutationBaseSchema.extend({
+  schema_version: z.literal("goal_configuration_update_plan_v0"),
+  status: z.literal("preview"),
+  action: z.enum(["create", "update", "delete", "unchanged"]),
+  current_revision: z.string(),
+  desired_revision: z.string(),
+  base_revision: z.string(),
+  plan_revision: z.string(),
+  writes_required: z.number().int().nonnegative(),
+});
+
+export const goalConfigurationTransactionSchema = goalConfigurationMutationBaseSchema.extend({
+  schema_version: z.literal("goal_configuration_transaction_v0"),
+  status: z.enum(["applied", "unchanged"]),
+  plan_revision: z.string(),
+  applied_revision: z.string(),
+  readback_verified: z.literal(true),
+});
+
+export const goalConfigurationPartialWriteSchema = z.object({
+  ok: z.literal(false),
+  schema_version: z.literal("goal_configuration_transaction_v0"),
+  status: z.literal("partial_write"),
+  goal_id: z.string(),
+  capability_id: z.string(),
+  plan_revision: z.string(),
+  applied_revision: z.string().nullable(),
+  source_written: z.literal(true),
+  shared_sync_pending: z.literal(true),
+  readback_verified: z.boolean(),
+  changed_fields: z.array(z.string()),
+  goal_configuration: z.record(z.string(), z.unknown()).nullable(),
+  capability_catalog: capabilityConfigurationCatalogSchema,
+  error: z.string(),
+  recommended_action: z.string(),
+});
+
+export const goalConfigurationApplyResultSchema = z.union([
+  goalConfigurationTransactionSchema,
+  goalConfigurationPartialWriteSchema,
+]);
+
 const machineConfigurationBaseSchema = z.object({
   ok: z.literal(true),
   available_namespaces: z.array(z.string()),
@@ -940,6 +1195,7 @@ const machineConfigurationBaseSchema = z.object({
     schema_version: "machine_configuration_catalog_v0",
     namespaces: [],
   }),
+  capability_catalog: capabilityConfigurationCatalogSchema,
   changed_namespaces: z.array(z.string()).optional().default([]),
   machine_configuration: machineConfigurationSchema.nullable().optional(),
 });
@@ -994,6 +1250,13 @@ export const machineConfigurationRollbackReceiptSchema = machineConfigurationBas
 
 export type MachineConfiguration = z.infer<typeof machineConfigurationSchema>;
 export type MachineConfigurationNamespaceDescriptor = z.infer<typeof machineConfigurationNamespaceDescriptorSchema>;
+export type CapabilityConfigurationCatalog = z.infer<typeof capabilityConfigurationCatalogSchema>;
+export type CapabilityConfigurationEditor = z.infer<typeof capabilityConfigurationEditorSchema>;
+export type GoalConfigurationInspection = z.infer<typeof goalConfigurationInspectionSchema>;
+export type GoalConfigurationPreview = z.infer<typeof goalConfigurationPreviewSchema>;
+export type GoalConfigurationTransaction = z.infer<typeof goalConfigurationTransactionSchema>;
+export type GoalConfigurationPartialWrite = z.infer<typeof goalConfigurationPartialWriteSchema>;
+export type GoalConfigurationApplyResult = z.infer<typeof goalConfigurationApplyResultSchema>;
 export type MachineConfigurationInspection = z.infer<typeof machineConfigurationInspectionSchema>;
 export type MachineConfigurationPreview = z.infer<typeof machineConfigurationPreviewSchema>;
 export type MachineConfigurationTransaction = z.infer<typeof machineConfigurationTransactionSchema>;
@@ -1002,6 +1265,49 @@ export type MachineConfigurationRollbackPlan = z.infer<typeof machineConfigurati
 export async function fetchMachineConfiguration() {
   return machineConfigurationInspectionSchema.parse(
     await requestJson<unknown>("/api/chat/machine-configuration"),
+  );
+}
+
+export async function fetchGoalConfiguration(goalId: string) {
+  const query = new URLSearchParams({ goal_id: goalId });
+  return goalConfigurationInspectionSchema.parse(
+    await requestJson<unknown>(`/api/chat/goal-configuration?${query.toString()}`),
+  );
+}
+
+export async function previewGoalConfiguration(
+  goalId: string,
+  capabilityId: string,
+  configuration: Record<string, unknown> | null,
+) {
+  return goalConfigurationPreviewSchema.parse(
+    await requestJson<unknown>("/api/chat/goal-configuration/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        goal_id: goalId,
+        capability_id: capabilityId,
+        configuration,
+      }),
+    }),
+  );
+}
+
+export async function applyGoalConfiguration(
+  goalId: string,
+  capabilityId: string,
+  configuration: Record<string, unknown> | null,
+  expectedPlanRevision: string,
+) {
+  return goalConfigurationApplyResultSchema.parse(
+    await requestJson<unknown>("/api/chat/goal-configuration/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        goal_id: goalId,
+        capability_id: capabilityId,
+        configuration,
+        expected_plan_revision: expectedPlanRevision,
+      }),
+    }),
   );
 }
 
@@ -1221,6 +1527,7 @@ export async function fetchLarkGroupChats(appRef: string, query?: string) {
 
 export type LarkGoalConnection = {
   agent_id: string | null;
+  connection_id: string;
   app_label: string;
   app_ref: string;
   capture_scope: LarkCaptureScope;
@@ -1250,6 +1557,7 @@ const larkConnectionsSchema = z.object({
   ok: z.literal(true),
   connections: z.array(z.object({
     agent_id: z.string().nullable().default(null),
+    connection_id: z.string(),
     app_label: z.string(),
     app_ref: z.string(),
     capture_scope: z.enum(["addressed_only", "configured_chat_all"]).default("addressed_only"),
@@ -1323,9 +1631,10 @@ export async function connectLarkGoalTopic(options: {
   );
 }
 
-export async function disconnectLarkGoalTopic(goalId: string) {
+export async function disconnectLarkGoalTopic(goalId: string, connectionId: string) {
+  const params = new URLSearchParams({ goal_id: goalId, connection_id: connectionId });
   return goalChannelOperationSchema.parse(
-    await requestJson<unknown>(`/api/chat/lark/connections?goal_id=${encodeURIComponent(goalId)}`, {
+    await requestJson<unknown>(`/api/chat/lark/connections?${params.toString()}`, {
       method: "DELETE",
     }),
   );

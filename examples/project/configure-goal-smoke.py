@@ -208,6 +208,7 @@ def main() -> int:
         assert catalog["disclosure_policy"]["first_run_configuration_required"] is False
         features = {item["feature_id"]: item for item in catalog["features"]}
         assert set(features) == {
+            "local_authority_shadow",
             "multi_subagent",
             "peer_task_coordination",
             "explore_graph",
@@ -216,8 +217,31 @@ def main() -> int:
             "reward_memory",
             "lark_event_inbox",
             "lark_kanban_heartbeat_sync",
+            "periodic_report",
         }
+        assert features["local_authority_shadow"]["availability"] == "experimental_opt_in"
+        assert features["local_authority_shadow"]["default"] == {"enabled": False}
+        assert features["local_authority_shadow"]["current"] == {
+            "enabled": False,
+            "mode": None,
+            "status": "disabled",
+        }
+        assert "--local-authority-shadow-file" in features[
+            "local_authority_shadow"
+        ]["commands"]["preview_enable"]
+        assert "--execute" not in features["local_authority_shadow"]["commands"]["preview_enable"]
+        assert "--execute" in features["local_authority_shadow"]["commands"]["apply_enable"]
+        assert features["periodic_report"]["availability"] == "supported_explicit_override"
+        assert features["periodic_report"]["default"] == {"enabled": False, "timezone": "UTC"}
+        # A Goal without an explicit override follows the machine default, so the
+        # catalog reports no Goal-scoped current value instead of a synthetic one.
+        assert "current" not in features["periodic_report"], features["periodic_report"]
+        assert set(features["periodic_report"]["commands"]) == {"verify"}
         assert features["multi_subagent"]["current"]["enabled"] is True
+        assert features["multi_subagent"]["required_inputs"] == {}
+        assert "--allowed-domain" not in features["multi_subagent"]["commands"][
+            "preview_enable"
+        ]
         assert features["peer_task_coordination"]["current"] == {
             "enabled": False,
             "coordinator_agent_id": None,

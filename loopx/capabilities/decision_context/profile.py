@@ -53,7 +53,13 @@ _CONTEXT_PROVIDER_FIELDS = {
     "timeout_seconds",
     "config",
 }
-_AUTOMATION_FIELDS = {"automatic_capture", "fail_open"}
+_AUTOMATION_FIELDS = {
+    "automatic_capture",
+    "fail_open",
+    "source_ids",
+    "interval_seconds",
+    "max_pending_batches",
+}
 
 
 def _strict_mapping(
@@ -163,6 +169,9 @@ class DecisionContextProfile:
     context_provider: Mapping[str, Any] | None = field(default=None, repr=False)
     automatic_capture: bool = False
     fail_open: bool = True
+    capture_source_ids: tuple[str, ...] = ()
+    capture_interval_seconds: int = 900
+    capture_max_pending_batches: int = 1000
 
     def provider_binding_map(self) -> dict[str, Mapping[str, Any]]:
         return {
@@ -286,9 +295,6 @@ def normalize_decision_context_profile(
             raise ValueError("every source must reference a declared provider binding")
         sources.append(spec)
         source_ids.add(spec.source_id)
-    if enabled and not sources:
-        raise ValueError("an enabled profile requires at least one source")
-
     context_provider: Mapping[str, Any] | None = None
     raw_context_provider = config.get("context_provider")
     if raw_context_provider is not None:
@@ -303,7 +309,7 @@ def normalize_decision_context_profile(
         context_provider = {
             "provider": _token(context.get("provider"), field_name="context provider"),
             "namespace": _token(context.get("namespace"), field_name="namespace"),
-            "scope_ref": str(context.get("scope_ref") or "").strip(),
+            "scope_ref": str(context.get("scope_ref") or "").strip() or None,
             "max_results": _positive_int(
                 context.get("max_results", 4),
                 field_name="max_results",
@@ -316,8 +322,11 @@ def normalize_decision_context_profile(
             ),
             "config": dict(private_config),
         }
-        if not context_provider["scope_ref"]:
-            raise ValueError("context provider scope_ref is required")
+
+    if enabled and not sources and context_provider is None:
+        raise ValueError(
+            "an enabled profile requires at least one source or context provider"
+        )
 
     automation = _strict_mapping(
         config.get("automation"),
@@ -329,8 +338,35 @@ def normalize_decision_context_profile(
         field_name="automatic_capture",
     )
     fail_open = _boolean(automation.get("fail_open"), field_name="fail_open")
-    if automatic_capture:
-        raise ValueError("decision-context automatic capture must stay disabled")
+    capture_ids = automation.get("source_ids", [])
+    if not isinstance(capture_ids, list) or any(
+        not isinstance(value, str) for value in capture_ids
+    ):
+        raise ValueError("automation source_ids must be a list of source ids")
+    eligible_ids = {
+        source.source_id
+        for source in sources
+        if source.enabled
+        and source.scan_mode == "incremental"
+        and source.exact_read_policy != "never"
+    }
+    if (
+        len(capture_ids) != len(set(capture_ids))
+        or not set(capture_ids) <= eligible_ids
+    ):
+        raise ValueError("capture sources must be unique enabled incremental sources")
+    if automatic_capture and not capture_ids:
+        raise ValueError("automatic capture requires an explicit source_ids allowlist")
+    capture_interval = _positive_int(
+        automation.get("interval_seconds", 900),
+        field_name="interval_seconds",
+        maximum=86400,
+    )
+    capture_capacity = _positive_int(
+        automation.get("max_pending_batches", 1000),
+        field_name="max_pending_batches",
+        maximum=10000,
+    )
     if not fail_open:
         raise ValueError("decision-context providers must fail open")
 
@@ -341,8 +377,11 @@ def normalize_decision_context_profile(
         provider_bindings=tuple(bindings),
         sources=tuple(sources),
         context_provider=context_provider,
-        automatic_capture=False,
+        automatic_capture=automatic_capture,
         fail_open=True,
+        capture_source_ids=tuple(capture_ids),
+        capture_interval_seconds=capture_interval,
+        capture_max_pending_batches=capture_capacity,
     )
 
 
@@ -439,6 +478,9 @@ def resolve_decision_context_activation(
         "runtime_bound_provider_count": len(runtime_provider_ids),
         "source_providers": provider_records,
         "context_provider_configured": config.context_provider is not None,
+        "automatic_capture": config.automatic_capture,
+        "capture_source_count": len(config.capture_source_ids),
+        "capture_interval_seconds": config.capture_interval_seconds,
     }
     if not config.enabled:
         return status | {"status": "disabled"}, config

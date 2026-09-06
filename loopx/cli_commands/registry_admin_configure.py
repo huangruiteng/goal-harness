@@ -252,6 +252,22 @@ def register_configure_goal_command(subparsers: argparse._SubParsersAction) -> N
         help="Clear coordination.write_scope.",
     )
     configure_goal_parser.add_argument(
+        "--local-authority-shadow-file",
+        action="store_true",
+        help=(
+            "Enable default-off, one-way capture of post-commit local snapshots "
+            "in FileAuthorityStore. This does not compare source and candidate."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-local-authority-shadow",
+        action="store_true",
+        help=(
+            "Disable the local authority shadow. This does not delete retained "
+            "candidate observations."
+        ),
+    )
+    configure_goal_parser.add_argument(
         "--waiting-on",
         choices=["codex", "user_or_controller", "controller", "external_evidence"],
         help="Override registry waiting owner for status/quota routing.",

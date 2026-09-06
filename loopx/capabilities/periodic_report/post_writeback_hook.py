@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,11 @@ from ...control_plane.goals.goal_frontier import (
 )
 from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from ...control_plane.todos.quota_summary import summarize_user_todos_for_quota
+from ...control_plane.todos.todo_index import MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL
 from ...history import collect_history, load_registry
 from ...paths import resolve_runtime_root
 from ...registry import registry_goals
+from ...rollout_event_log import load_rollout_events, rollout_event_log_path
 from .stage_completion import STAGE_COMPLETION_RECEIPT_SCHEMA
 from .stage_completion import derive_periodic_report_stage_completion_from_runs
 from .presets import build_periodic_report_preset_activation
@@ -65,7 +68,15 @@ def _goal_config(registry_path: Path, goal_id: str) -> Mapping[str, Any]:
 def periodic_report_post_writeback_hooks_for_goal(
     *, registry_path: Path, goal_id: str, runtime_root: Path | None = None
 ) -> tuple[PostWritebackHookRegistration, ...]:
-    """Resolve a Goal override or live machine-default profile at composition."""
+    """Resolve a Goal override or live machine-default profile at composition.
+
+    Both branches resolve through the canonical subscription resolver, so an
+    invalid Goal override is reported here the same way the delivery paths
+    report it. Store read and subscription validation failures degrade to no
+    hooks with one warning: composition happens outside the dispatch
+    isolation boundary, so optional hooks never alter the primary truth of
+    the CLI command that composes them.
+    """
 
     registry = load_registry(registry_path)
     effective_runtime_root = runtime_root or resolve_runtime_root(
@@ -83,18 +94,26 @@ def periodic_report_post_writeback_hooks_for_goal(
     if not isinstance(goal, Mapping):
         return ()
     goal_override = _goal_config(registry_path, goal_id)
-    if goal_override:
-        if goal_override.get("enabled") is not True:
-            return ()
-        preset = str(goal_override.get("profile_preset") or "").strip()
-    else:
+    try:
         subscription = resolve_goal_periodic_report_subscription(
             goal,
-            read_periodic_report_machine_defaults(effective_runtime_root),
+            (
+                None
+                if goal_override
+                else read_periodic_report_machine_defaults(effective_runtime_root)
+            ),
         )
-        if subscription.get("enabled") is not True:
-            return ()
-        preset = str(subscription.get("profile_preset") or "").strip()
+    except (TypeError, ValueError) as exc:
+        warnings.warn(
+            f"periodic-report subscription for goal {goal_id} failed to resolve; "
+            f"post-writeback hooks are disabled: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
+        return ()
+    if subscription.get("enabled") is not True:
+        return ()
+    preset = str(subscription.get("profile_preset") or "").strip()
     if not preset:
         return ()
     activation = build_periodic_report_preset_activation(preset)
@@ -267,6 +286,9 @@ def build_periodic_report_post_writeback_projection(
         goal_id=goal_id,
         agent_id=normalized_agent_id,
     )
+    available_capabilities = payload.get("available_capabilities")
+    if available_capabilities is None and isinstance(payload.get("turn"), Mapping):
+        available_capabilities = payload["turn"].get("available_capabilities")
     project_progress = build_project_progress_snapshot_from_state(
         state_text=state_text,
         goal=goal,
@@ -275,6 +297,11 @@ def build_periodic_report_post_writeback_projection(
         agent_id=normalized_agent_id,
         completed_at=str(receipt["completed_at"]),
         publication_cursor=publication_cursor,
+        available_capabilities=available_capabilities,
+        rollout_events=load_rollout_events(
+            rollout_event_log_path(runtime_root, goal_id),
+            limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+        ),
     )
     if publication_cursor is not None and project_progress is None:
         return {}
@@ -285,6 +312,8 @@ def build_periodic_report_post_writeback_projection(
         }
     if project_progress is not None:
         result["project_progress"] = project_progress
+    if isinstance(available_capabilities, list) and available_capabilities:
+        result["available_capabilities"] = list(available_capabilities)
     return result
 
 
@@ -335,6 +364,13 @@ def periodic_report_post_writeback_hook(
             intent_payload["project_progress"] = dict(project_progress)
         if isinstance(last_report, Mapping):
             intent_payload["last_report"] = dict(last_report)
+        observed_capabilities = (
+            projection.get("available_capabilities")
+            if isinstance(projection, Mapping)
+            else None
+        )
+        if isinstance(observed_capabilities, list) and observed_capabilities:
+            intent_payload["available_capabilities"] = list(observed_capabilities)
         return _result(
             status="intent",
             intent={
@@ -352,7 +388,12 @@ def periodic_report_post_writeback_hook(
         capability_id="periodic-report",
         event_kinds=("refresh_state", "todo_complete"),
         intent_kinds=(PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,),
-        requested_read_scope=("stage_completion", "project_progress"),
+        requested_read_scope=(
+            "stage_completion",
+            "project_progress",
+            "last_report",
+            "available_capabilities",
+        ),
         producer=producer,
         policy_version=policy_version,
     )

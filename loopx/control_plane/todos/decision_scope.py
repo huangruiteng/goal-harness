@@ -380,7 +380,8 @@ def build_required_decision_scope_repair_hint(
 ) -> dict[str, Any] | None:
     if consistency.get("ok") is not False:
         return None
-    errors = consistency.get("errors") if isinstance(consistency.get("errors"), list) else []
+    raw_errors = consistency.get("errors")
+    errors = raw_errors if isinstance(raw_errors, list) else []
     missing_gate_scope = any(
         isinstance(error, dict)
         and error.get("reason_code") == "multi_agent_user_gate_missing_scope"

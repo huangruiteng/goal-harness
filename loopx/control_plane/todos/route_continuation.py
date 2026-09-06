@@ -124,7 +124,8 @@ def todo_summary_route_continuation_candidates(
         "route_continuation_replan_candidates",
         "route_continuation_candidates",
     ):
-        raw_items = value.get(key) if isinstance(value.get(key), list) else []
+        source = value.get(key)
+        raw_items = source if isinstance(source, list) else []
         source_items.extend(item for item in raw_items if isinstance(item, dict))
 
     source_items.extend(

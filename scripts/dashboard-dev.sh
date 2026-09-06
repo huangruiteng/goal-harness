@@ -12,6 +12,10 @@ CODEX_BIN="codex"
 CLAUDE_BIN="claude"
 LARK_CLI_BIN=""
 LARK_CLI_ARGS=()
+GOAL_SUBAGENT_ARGS=()
+if [[ "${LOOPX_ENABLE_GOAL_SUBAGENT_CONFIGURATION:-0}" = "1" ]]; then
+  GOAL_SUBAGENT_ARGS=(--enable-goal-subagent-configuration)
+fi
 
 node_is_supported() {
   "$1" -e '
@@ -221,6 +225,7 @@ cd "${REPO_ROOT}"
   --global-registry \
   --host 127.0.0.1 \
   --port 8766 \
+  ${GOAL_SUBAGENT_ARGS[@]+"${GOAL_SUBAGENT_ARGS[@]}"} \
   --limit 80 &
 STATUS_PID=$!
 
@@ -230,6 +235,7 @@ STATUS_PID=$!
   --port 8767 \
   --codex-bin "${CODEX_BIN}" \
   --claude-bin "${CLAUDE_BIN}" \
+  ${GOAL_SUBAGENT_ARGS[@]+"${GOAL_SUBAGENT_ARGS[@]}"} \
   ${LARK_CLI_ARGS[@]+"${LARK_CLI_ARGS[@]}"} \
   --no-open &
 CHAT_PID=$!

@@ -20,6 +20,7 @@ from .projection_repair import write_scope_allowed
 
 
 SUBAGENT_SPAWN_CAPABILITY = "subagent_spawn"
+SUBAGENT_CONTEXT_FORK_CAPABILITY = "subagent_context_fork"
 SUBAGENT_RESUME_CAPABILITY = "subagent_resume"
 READ_ONLY_ACTION_KINDS = frozenset(
     {
@@ -390,6 +391,8 @@ def _child_brief_defaults(
     available_capabilities: list[str],
 ) -> dict[str, Any]:
     allowed_contexts = ["fresh"]
+    if SUBAGENT_CONTEXT_FORK_CAPABILITY in available_capabilities:
+        allowed_contexts.append("forked_snapshot")
     if SUBAGENT_RESUME_CAPABILITY in available_capabilities:
         allowed_contexts.append("resume")
     return {
@@ -404,14 +407,12 @@ def _child_brief_defaults(
             "allowed": allowed_contexts,
         },
         "expected_output": "public_safe_evidence",
-        "child_decision": "continue",
         "execution_policy": {
             "timeout": "bounded_by_host_turn",
             "cancel": "task_coordinator_or_host_timeout",
         },
-        "validation_policy": (
-            "run todo-scoped validation when applicable and report commands/results"
-        ),
+        "child_guard_policy": "prevention_first_v0",
+        "validation_policy": "child reports evidence; parent runs declared todo gate",
         "acceptance": [
             "report completed scope and evidence",
             "report validation result and residual risk",
@@ -430,6 +431,11 @@ def _eligible_child_lane(lane: _NormalizedAdmissionLane) -> dict[str, Any]:
         item.get("required_capabilities")
     )
     required_write_scopes = list(lane.required_write_scopes)
+    validation_declared = bool(
+        item.get("validation_command") is not None
+        or item.get("validation_command_argv") is not None
+        or item.get("completion_validation_required") is True
+    )
     child_brief = {
         "todo_id": lane.todo_id,
         "objective": protocol_action_text(
@@ -449,6 +455,11 @@ def _eligible_child_lane(lane: _NormalizedAdmissionLane) -> dict[str, Any]:
         ),
         "target_key": str(item.get("target_key") or "").strip() or None,
     }
+    if validation_declared:
+        child_brief["validation_declared"] = True
+        child_brief["validation_label"] = (
+            str(item.get("validation_label") or "").strip() or None
+        )
     return {
         "todo_id": child_brief["todo_id"],
         "task_domain": lane.task_domain,

@@ -73,6 +73,66 @@ PrintPayload = Callable[
 FormatSelector = Callable[..., str]
 
 
+def write_turn_repair_update(
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    goal_id: str,
+    todo_id: str,
+    note: str,
+    evidence: str,
+    agent_id: str | None,
+) -> None:
+    """Record one repair-required Todo note under the effective runtime root.
+
+    ``runtime_root_arg`` is required on purpose: the Turn settlement must
+    hand down the same ``--runtime-root`` override the dispatch resolved, so
+    the legacy writer fence and the todo mutex of a promotion cannot split
+    from the Turn writeback path.
+    """
+
+    update_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        role="agent",
+        note=note,
+        evidence=evidence,
+        agent_id=agent_id,
+        project=None,
+        dry_run=False,
+        runtime_root_arg=runtime_root_arg,
+    )
+
+
+def write_turn_validated_completion(
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    goal_id: str,
+    todo_id: str,
+    completion_turn_key: str,
+    evidence: str,
+    note: str,
+    agent_id: str | None,
+) -> dict[str, Any]:
+    """Complete one validated Todo under the effective runtime root."""
+
+    return complete_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        role="agent",
+        completion_turn_key=completion_turn_key,
+        evidence=evidence,
+        note=note,
+        agent_id=agent_id,
+        project=None,
+        dry_run=False,
+        runtime_root_arg=runtime_root_arg,
+    )
+
+
 def handle_turn_command(
     args: argparse.Namespace,
     *,
@@ -406,16 +466,14 @@ def handle_turn_command(
                         raise ValueError(
                             f"{result_kind} requires one selected todo for typed writeback"
                         )
-                    update_goal_todo(
+                    write_turn_repair_update(
                         registry_path=registry_path,
+                        runtime_root_arg=runtime_root_arg,
                         goal_id=args.goal_id,
                         todo_id=todo_id,
-                        role="agent",
                         note=str(result.get("summary") or result["classification"]),
                         evidence=f"LoopX Turn {result_kind}: {result['next_action']}",
                         agent_id=args.agent_id,
-                        project=state_project,
-                        dry_run=False,
                     )
                 refresh = refresh_state_run(
                     registry_path=registry_path,
@@ -494,11 +552,11 @@ def handle_turn_command(
                     raise ValueError(
                         "validated_completion requires one selected todo for lifecycle writeback"
                     )
-                completion = complete_goal_todo(
+                completion = write_turn_validated_completion(
                     registry_path=registry_path,
+                    runtime_root_arg=runtime_root_arg,
                     goal_id=args.goal_id,
                     todo_id=todo_id,
-                    role="agent",
                     completion_turn_key=settlement_identity.turn_instance_id,
                     evidence=(
                         "LoopX Turn validated completion: "
@@ -506,8 +564,6 @@ def handle_turn_command(
                     ),
                     note=str(result["next_action"]),
                     agent_id=args.agent_id,
-                    project=None,
-                    dry_run=False,
                 )
                 # Project the continuation the Todo lifecycle durably recorded,
                 # never a host-normalized continuation. Contradictory or

@@ -261,6 +261,30 @@ def test_semantic_ack_is_bound_to_the_exact_rotated_obligation() -> None:
     ) is True
 
 
+def test_nonperiodic_obligation_identity_ignores_incidental_run_timestamps() -> None:
+    first = _obligation(
+        [
+            {
+                "kind": "typed_progress_repeat",
+                "progress_fingerprint": "fingerprint-repeat",
+                "latest_generated_at": "2026-08-27T00:00:00Z",
+                "oldest_counted_generated_at": "2026-08-26T23:59:00Z",
+            }
+        ]
+    )
+    replay = _obligation(
+        [
+            {
+                **first["triggers"][0],
+                "latest_generated_at": "2026-08-27T01:00:00Z",
+                "oldest_counted_generated_at": "2026-08-27T00:59:00Z",
+            }
+        ]
+    )
+
+    assert replay["obligation_id"] == first["obligation_id"]
+
+
 def test_semantic_terminal_ack_cannot_close_an_open_todo_succession_gap() -> None:
     obligation = _obligation(
         [{"kind": "completed_advancement_without_successor", "todo_id": "todo-1"}]

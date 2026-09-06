@@ -148,7 +148,8 @@ def test_status_server_serves_only_exact_published_report_ref(tmp_path: Path) ->
             == DEFAULT_PERIODIC_REPORT_INDEX_PATH
         )
         status, index_response = _request(
-            f"{base}{DEFAULT_PERIODIC_REPORT_INDEX_PATH}?goal_id=synthetic-goal",
+            f"{base}{DEFAULT_PERIODIC_REPORT_INDEX_PATH}"
+            "?goal_id=synthetic-goal&limit=100&offset=0",
             origin="http://127.0.0.1:5173",
         )
         assert status == 200
@@ -166,6 +167,19 @@ def test_status_server_serves_only_exact_published_report_ref(tmp_path: Path) ->
 
     assert status == 200
     assert detail["projection"]["content_sha256"] == projection["content_sha256"]
+
+
+def test_status_server_preserves_legacy_index_shape_without_window_request(
+    tmp_path: Path,
+) -> None:
+    with _server(tmp_path) as (base, _projection):
+        status, payload = _request(
+            f"{base}{DEFAULT_PERIODIC_REPORT_INDEX_PATH}?goal_id=synthetic-goal",
+            origin="http://127.0.0.1:5173",
+        )
+
+    assert status == 200
+    assert set(payload["periodic_reports"]) == {"schema_version", "count", "items"}
 
 
 def test_status_server_rejects_public_origin_and_mismatched_digest(

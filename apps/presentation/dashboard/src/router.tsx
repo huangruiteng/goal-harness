@@ -72,6 +72,11 @@ function DeprecatedFrontstageOpsRoutePage() {
 
 export const rootRoute = createRootRoute({
   component: () => <Outlet />,
+  errorComponent: () => <main role="alert" className="p-8">
+    <h1>页面暂时无法显示 / Page unavailable</h1>
+    <p>请重新加载页面；这不会执行任务。 / Reloading does not execute tasks.</p>
+    <button type="button" onClick={() => window.location.reload()}>重新加载 / Reload</button>
+  </main>,
 });
 
 export const dashboardRoute = createRoute({
@@ -127,6 +132,7 @@ function routerBasepathFromViteBase(baseUrl: string) {
 export const router = createRouter({
   routeTree,
   basepath: routerBasepathFromViteBase(import.meta.env.BASE_URL),
+  trailingSlash: "preserve",
 });
 
 declare module "@tanstack/react-router" {

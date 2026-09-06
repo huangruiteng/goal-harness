@@ -41,3 +41,62 @@ def test_recent_run_limit_is_separate_from_display_limit() -> None:
 
     assert len(default["recent_runs"]) == 1
     assert len(extended["recent_runs"]) == 3
+
+
+def test_goal_subagent_configuration_projection_is_explicitly_opt_in() -> None:
+    history = _history()
+    history["goals"] = [
+        {
+            "id": "goal-one",
+            "registry_member": True,
+            "spawn_policy": {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+            },
+        }
+    ]
+
+    base = build_run_history(
+        history,
+        latest_run=lambda _goal: None,
+        goal_lifecycle_fields=lambda _goal, _run: {
+            "lifecycle_phase": "registered",
+            "lifecycle_flags": [],
+        },
+        subagent_activity_for_goal=lambda _goal: None,
+        compact_run=lambda run: dict(run),
+        quota_status=lambda _goal: {},
+    )
+    disabled = build_run_history(
+        history,
+        latest_run=lambda _goal: None,
+        goal_lifecycle_fields=lambda _goal, _run: {
+            "lifecycle_phase": "registered",
+            "lifecycle_flags": [],
+        },
+        subagent_activity_for_goal=lambda _goal: None,
+        compact_run=lambda run: dict(run),
+        quota_status=lambda _goal: {},
+        include_goal_subagent_configuration=False,
+    )
+    enabled = build_run_history(
+        history,
+        latest_run=lambda _goal: None,
+        goal_lifecycle_fields=lambda _goal, _run: {
+            "lifecycle_phase": "registered",
+            "lifecycle_flags": [],
+        },
+        subagent_activity_for_goal=lambda _goal: None,
+        compact_run=lambda run: dict(run),
+        quota_status=lambda _goal: {},
+        include_goal_subagent_configuration=True,
+    )
+
+    assert "spawn_policy" not in base["goals"][0]
+    assert "spawn_policy" not in disabled["goals"][0]
+    assert enabled["goals"][0]["spawn_policy"] == {
+        "mode": "multi_subagent",
+        "spawn_allowed": True,
+        "max_children": 2,
+    }

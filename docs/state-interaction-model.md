@@ -758,6 +758,39 @@ Dashboard effect: latest dashboard state catches up with active state changes.
 This prevents a project from looking stale after the user or executor updated
 the goal document, ledger, or next action.
 
+For an accountable, Turn-bound refresh, a successful writeback and a satisfied
+vision checkpoint are separate facts. `ok=true` does not imply that an omitted
+vision decision was supplied. Inspect `vision_checkpoint.satisfied`.
+
+If the checkpoint is `missing_required`, retry the original refresh command
+with the **same** Goal, Agent, Todo/obligation, Turn, and delivery fields, adding
+only one vision decision:
+
+- `--vision-unchanged-reason 'Existing scope and acceptance still apply.'` when
+  a persisted vision genuinely remains applicable;
+- a valid `--agent-vision-json` packet, or the inline `--vision-*` patch fields,
+  when the vision needs an update. File inputs must be visible to the CLI
+  process; a remote/sandbox bridge owns transporting their contents.
+
+`refresh_recovery.decision=supplement_checkpoint` appends a validated checkpoint
+under the original settlement identity without rewriting the original artifact
+or reattributing its delivery workspace. An identical retry returns `replay`
+with the saved checkpoint; it does not append again. A changed satisfied
+decision, changed delivery payload, or a missing checkpoint superseded by a
+later same-Agent vision is rejected with no write. Dry-run previews do not
+repair receipts or append history. A receipt-bound material monitor poll with
+no prior refresh/checkpoint may complete its missing workspace writeback with
+next-action and vision together, through the normal vision/replan validation.
+This first-closeout compatibility path preserves the poll outcome and rejects
+unrelated mutations; subsequent retries use the same strict replay/conflict
+rules. Other missing-workspace repairs precede checkpoint supplementation.
+
+Do not repeat implementation, manufacture a successor, or open another Turn
+just to repair this checkpoint. Keep the ordinary one-spend settlement order.
+This recovery does not certify acceptance, close other Todos, or bypass replan,
+identity, or terminal gates. A substantive new vision can still create a real
+planning obligation.
+
 ### Compute Quota
 
 Purpose: decide how much automatic agent compute a goal may consume.

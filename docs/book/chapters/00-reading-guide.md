@@ -131,8 +131,9 @@ node --version
 
 `v0.5.4` 不是“已经把 LoopX 全部重写成 TypeScript”。当前发布基线是：
 
-- TypeScript 已拥有 Effect Program、Turn settlement、Todo completion、quota delivery routing、
-  workspace causality、scheduler transition/state 等迁移切片的 canonical semantics；
+- TypeScript 已拥有 Effect Program、Turn/Host Todo settlement、Todo completion、quota
+  delivery/spend/void/monitor-poll、本地 task-lease lifecycle、Vision refresh、governed capability
+  validation，以及 scheduler heartbeat/state 等迁移切片的 canonical semantics；
 - Python CLI 仍负责迁移期 transport、legacy response projection、明确的外部 Provider 调用和部分
   Markdown/event 写回；
 - 同一条迁移后的规则只能有一个 semantic owner。Python facade 适配 TypeScript transaction，
@@ -142,7 +143,8 @@ node --version
 
 发布态以 `v0.5.4` tag 和 release notes 为准；迁移阶段、下一批 cutover 与最终 CLI/App 收敛以
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)
-的当前状态为准。RFC 中的 Stage 3/4 仍是后续方向，不应写成已经发布。
+的当前状态为准。`v0.5.4` 只交付了 Stage 3 的第一个 receipt-bound scheduler follow-up 切片；更广的
+CLI/App convergence 与 Stage 4 distribution cleanup 仍是后续方向。
 
 ### 从 `v0.4.4` 阅读基线升级到 `v0.5.4`
 
@@ -150,10 +152,11 @@ node --version
 
 | 主题 | `v0.5.4` 已发布事实 | 深入入口 |
 | --- | --- | --- |
-| Control Plane | 多个高风险 decision/effect 已迁入 typed TypeScript transaction owner；Python facade 仍承担迁移期边界 | [迁移 RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/) |
+| Control Plane | Turn/Host Todo settlement、quota commit、task-lease lifecycle、Vision refresh 与 scheduler heartbeat 等完整事务已迁入 typed TypeScript owner；Python facade 仍承担迁移期边界 | [迁移 RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/) |
 | Operator surface | Personal Workspace 已提供 Goal、Task、Chat 和 read-only status source 入口；界面不是新的事实源 | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v0.5.4/apps/presentation/dashboard/README.md) |
 | Host runtime | Codex、Claude Code、OpenCode、Pi、KunlunCode、DeepSeek Harness 与 custom runner 具有不同 activation/stop contract | [Runtime Connector Catalog](/loopx/docs/integrations/runtime-connector-catalog/) |
 | Capability / Provider | Capability 由 package-owned catalog entry、真实 command 和 durable validation 共同定义；Provider/Extension 不继承 Kernel authority | [Capability Catalog](/loopx/docs/capabilities/) |
+| Shared authority | file、NoKV 与 PostgreSQL provider 仍是 staged candidate；安装 Provider 不会改变默认本地 authority | [Shared Authority RFC](/loopx/docs/architecture/rfcs/shared-goal-authority-state-provider-v0/) |
 
 这张表是阅读导航，不是 release notes 的副本。某个 surface 是否可用，仍应从当前安装版本的
 `doctor`、`capability show`、对应 Host readback 和 versioned 文档判断。

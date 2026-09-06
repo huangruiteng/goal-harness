@@ -2,80 +2,64 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import tempfile
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
+import time
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..file_lock import LockAcquireTimeoutError, exclusive_file_lock
+from ..file_lock import (
+    LOCK_POLICIES,
+    LockAcquisitionPolicy,
+    LockAcquireTimeoutError,
+    exclusive_file_lock,
+)
 from .effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from .coordination.coordination_state_contract_generated import (
+    CAPABILITY_HOOK_INTERACTION_RESULT_SCHEMA,
+    CAPABILITY_HOOK_POST_WRITEBACK_INPUT_SCHEMA,
+    CAPABILITY_HOOK_POST_WRITEBACK_RECEIPT_SCHEMA,
+    CAPABILITY_HOOK_POST_WRITEBACK_REGISTRATION_SCHEMA,
+    CAPABILITY_HOOK_POST_WRITEBACK_RESULT_SCHEMA,
+    CAPABILITY_HOOK_REGISTRATION_SCHEMA,
+    CAPABILITY_HOOK_TURN_START_REGISTRATION_SCHEMA,
+    CAPABILITY_HOOK_TURN_START_RESULT_SCHEMA,
+)
 
 
-CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION = "loopx_capability_hook_registration_v0"
+CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION = CAPABILITY_HOOK_REGISTRATION_SCHEMA
 INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION = (
-    "loopx_interaction_projection_hook_result_v0"
+    CAPABILITY_HOOK_INTERACTION_RESULT_SCHEMA
 )
 INTERACTION_PROJECTION_HOOK_DISPATCH_SCHEMA_VERSION = (
     "loopx_interaction_projection_hook_dispatch_v0"
 )
 TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION = (
-    "loopx_turn_start_capability_hook_registration_v1"
+    CAPABILITY_HOOK_TURN_START_REGISTRATION_SCHEMA
 )
-TURN_START_HOOK_RESULT_SCHEMA_VERSION = "loopx_turn_start_capability_hook_result_v0"
+TURN_START_HOOK_RESULT_SCHEMA_VERSION = CAPABILITY_HOOK_TURN_START_RESULT_SCHEMA
 TURN_START_HOOK_DISPATCH_SCHEMA_VERSION = "loopx_turn_start_capability_hook_dispatch_v1"
 POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION = (
-    "loopx_post_writeback_capability_hook_registration_v0"
+    CAPABILITY_HOOK_POST_WRITEBACK_REGISTRATION_SCHEMA
 )
-POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION = (
-    "loopx_post_writeback_capability_hook_input_v0"
-)
-POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION = (
-    "loopx_post_writeback_capability_hook_result_v0"
-)
+POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION = CAPABILITY_HOOK_POST_WRITEBACK_INPUT_SCHEMA
+POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION = CAPABILITY_HOOK_POST_WRITEBACK_RESULT_SCHEMA
 POST_WRITEBACK_HOOK_DISPATCH_SCHEMA_VERSION = (
     "loopx_post_writeback_capability_hook_dispatch_v0"
 )
 POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION = (
-    "loopx_post_writeback_capability_hook_receipt_v0"
+    CAPABILITY_HOOK_POST_WRITEBACK_RECEIPT_SCHEMA
 )
+_LEGACY_LOCK_SAFE_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}")
+_POST_WRITEBACK_DISPATCH_ID_RE = re.compile(r"pwh_[0-9a-f]{64}")
+_POST_WRITEBACK_RECEIPT_SNAPSHOT_RE = re.compile(r"(?:missing|sha256:[0-9a-f]{64})")
+_POST_WRITEBACK_TRANSACTION_PARAMS_MAX_BYTES = 1_750_000
 
 InteractionProjectionProducer = Callable[[], Mapping[str, Any]]
 TurnStartProducer = Callable[[], Mapping[str, Any]]
 PostWritebackProducer = Callable[[Mapping[str, Any]], Mapping[str, Any]]
-_SAFE_PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
-
-
-def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(
-                dict(payload),
-                handle,
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-                allow_nan=False,
-            )
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        if os.name == "posix":
-            directory = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,363 +153,6 @@ class PostWritebackHookRegistration:
             "requested_read_scope": list(self.requested_read_scope),
             "requested_write_scope": [],
         }
-
-
-@dataclass(frozen=True, slots=True)
-class PostWritebackHookReceiptJournal:
-    """Core-owned sidecar checkpoint for replay-safe hook dispatch."""
-
-    runtime_root: Path
-    goal_id: str
-
-    def __post_init__(self) -> None:
-        if not _SAFE_PATH_SEGMENT_RE.fullmatch(self.goal_id):
-            raise ValueError(
-                "post-writeback journal goal_id is not a safe path segment"
-            )
-
-    def _path(self, dispatch_id: str) -> Path:
-        if not re.fullmatch(r"pwh_[0-9a-f]{64}", dispatch_id):
-            raise ValueError("post-writeback dispatch_id is invalid")
-        return (
-            self.runtime_root
-            / "goals"
-            / self.goal_id
-            / "post_writeback_hooks"
-            / f"{dispatch_id}.json"
-        )
-
-    def _read_receipt(self, path: Path, dispatch_id: str) -> dict[str, Any] | None:
-        if not path.exists():
-            return None
-        value = json.loads(path.read_text(encoding="utf-8"))
-        if (
-            not isinstance(value, dict)
-            or value.get("schema_version") != POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION
-            or value.get("dispatch_id") != dispatch_id
-        ):
-            raise ValueError("post-writeback hook receipt is invalid")
-        return value
-
-    def _write_receipt(self, path: Path, receipt: Mapping[str, Any]) -> dict[str, Any]:
-        normalized = dict(receipt)
-        if (
-            normalized.get("schema_version")
-            != POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION
-        ):
-            raise ValueError("post-writeback hook receipt schema is invalid")
-        if path.exists():
-            existing = json.loads(path.read_text(encoding="utf-8"))
-            if existing == normalized:
-                return existing
-            stable_fields = {
-                "schema_version",
-                "dispatch_id",
-                "hook_id",
-                "capability_id",
-                "source_receipt_id",
-                "recorded_at",
-            }
-            stable_identity_matches = all(
-                existing.get(field) == normalized.get(field)
-                for field in stable_fields
-            )
-            previous_attempt = existing.get("attempt_count")
-            next_attempt = normalized.get("attempt_count")
-            retry_transition = bool(
-                existing.get("status") == "retryable_failure"
-                and stable_identity_matches
-                and type(previous_attempt) is int
-                and type(next_attempt) is int
-                and next_attempt == previous_attempt + 1
-            )
-            if not retry_transition:
-                raise ValueError(
-                    "post-writeback dispatch receipt conflicts with replay"
-                )
-        _atomic_write_json(path, normalized)
-        return normalized
-
-    def load(self, dispatch_id: str) -> dict[str, Any] | None:
-        path = self._path(dispatch_id)
-        with exclusive_file_lock(path, operation="post_writeback_hook_read"):
-            return self._read_receipt(path, dispatch_id)
-
-    def store(self, receipt: Mapping[str, Any]) -> dict[str, Any]:
-        dispatch_id = str(receipt.get("dispatch_id") or "").strip()
-        path = self._path(dispatch_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with exclusive_file_lock(path, operation="post_writeback_hook_write"):
-            return self._write_receipt(path, receipt)
-
-    @contextmanager
-    def execution_lease(
-        self,
-        dispatch_id: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> Iterator[Path]:
-        path = self._path(dispatch_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with exclusive_file_lock(
-            path,
-            operation="post_writeback_hook_dispatch",
-            timeout_seconds=timeout_seconds,
-        ):
-            yield path
-
-
-def _post_writeback_dispatch_id(
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-) -> str:
-    receipt = hook_input.get("receipt")
-    if not isinstance(receipt, Mapping):
-        raise ValueError("post-writeback hook input has no receipt")
-    identity = {
-        "source_receipt_id": str(receipt.get("event_id") or "").strip(),
-        "event_kind": str(receipt.get("event_kind") or "").strip(),
-        "hook_id": registration.hook_id,
-        "capability_id": registration.capability_id,
-        "registration_schema": POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION,
-        "policy_version": registration.policy_version,
-    }
-    if not all(identity.values()):
-        raise ValueError("post-writeback dispatch identity is incomplete")
-    digest = hashlib.sha256(
-        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    return f"pwh_{digest}"
-
-
-def _validated_post_writeback_receipt(
-    *,
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-    receipt: Mapping[str, Any],
-) -> dict[str, Any]:
-    normalized = effect_runtime_result(
-        "capability_hook.post_writeback.validate_receipt",
-        {
-            "registration": registration.contract(),
-            "hook_input": dict(hook_input),
-            "receipt": dict(receipt),
-        },
-    )
-    if not isinstance(normalized, Mapping):
-        raise ValueError("post-writeback receipt runtime result is invalid")
-    return dict(normalized)
-
-
-def _post_writeback_sidecar_receipt(
-    *,
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-    dispatch_id: str,
-    status: str,
-    intent: Mapping[str, Any] | None,
-    error_code: str | None,
-    attempt_count: int,
-) -> dict[str, Any]:
-    source_receipt = hook_input.get("receipt")
-    if not isinstance(source_receipt, Mapping):
-        raise ValueError("post-writeback hook input has no source receipt")
-    return {
-        "schema_version": POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION,
-        "dispatch_id": dispatch_id,
-        "hook_id": registration.hook_id,
-        "capability_id": registration.capability_id,
-        "source_receipt_id": str(source_receipt.get("event_id") or ""),
-        "status": status,
-        "intent": dict(intent) if intent is not None else None,
-        "error_code": error_code,
-        "attempt_count": attempt_count,
-        "recorded_at": str(source_receipt.get("recorded_at") or ""),
-    }
-
-
-def _store_post_writeback_sidecar_unlocked(
-    *,
-    journal: PostWritebackHookReceiptJournal,
-    receipt_path: Path,
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-    dispatch_id: str,
-    status: str,
-    intent: Mapping[str, Any] | None,
-    error_code: str | None,
-    attempt_count: int,
-) -> dict[str, Any]:
-    receipt = _post_writeback_sidecar_receipt(
-        registration=registration,
-        hook_input=hook_input,
-        dispatch_id=dispatch_id,
-        status=status,
-        intent=intent,
-        error_code=error_code,
-        attempt_count=attempt_count,
-    )
-    validated = _validated_post_writeback_receipt(
-        registration=registration,
-        hook_input=hook_input,
-        receipt=receipt,
-    )
-    return journal._write_receipt(receipt_path, validated)
-
-
-def _store_post_writeback_sidecar(
-    *,
-    journal: PostWritebackHookReceiptJournal,
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-    dispatch_id: str,
-    status: str,
-    intent: Mapping[str, Any] | None,
-    error_code: str | None,
-    attempt_count: int,
-) -> dict[str, Any]:
-    receipt = _post_writeback_sidecar_receipt(
-        registration=registration,
-        hook_input=hook_input,
-        dispatch_id=dispatch_id,
-        status=status,
-        intent=intent,
-        error_code=error_code,
-        attempt_count=attempt_count,
-    )
-    validated = _validated_post_writeback_receipt(
-        registration=registration,
-        hook_input=hook_input,
-        receipt=receipt,
-    )
-    return journal.store(validated)
-
-
-def _record_retryable_post_writeback_failure_unlocked(
-    *,
-    journal: PostWritebackHookReceiptJournal | None,
-    receipt_path: Path | None,
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-    dispatch_id: str,
-    error_code: str,
-    attempt_count: int,
-) -> dict[str, str]:
-    if journal is None or receipt_path is None:
-        return _hook_failure(registration, error_code=error_code)
-    try:
-        _store_post_writeback_sidecar_unlocked(
-            journal=journal,
-            receipt_path=receipt_path,
-            registration=registration,
-            hook_input=hook_input,
-            dispatch_id=dispatch_id,
-            status="retryable_failure",
-            intent=None,
-            error_code=error_code,
-            attempt_count=attempt_count,
-        )
-    except (EffectRuntimeRejected, OSError, RuntimeError, TypeError, ValueError):
-        return _hook_failure(registration, error_code="journal_write_failed")
-    return _hook_failure(
-        registration,
-        error_code=error_code,
-        durable_receipt_ref=f"post-writeback-hook:{dispatch_id}",
-    )
-
-
-def _record_retryable_post_writeback_failure(
-    *,
-    journal: PostWritebackHookReceiptJournal | None,
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-    dispatch_id: str,
-    error_code: str,
-    attempt_count: int,
-) -> dict[str, str]:
-    if journal is None:
-        return _hook_failure(registration, error_code=error_code)
-    try:
-        _store_post_writeback_sidecar(
-            journal=journal,
-            registration=registration,
-            hook_input=hook_input,
-            dispatch_id=dispatch_id,
-            status="retryable_failure",
-            intent=None,
-            error_code=error_code,
-            attempt_count=attempt_count,
-        )
-    except (EffectRuntimeRejected, OSError, RuntimeError, TypeError, ValueError):
-        return _hook_failure(registration, error_code="journal_write_failed")
-    return _hook_failure(
-        registration,
-        error_code=error_code,
-        durable_receipt_ref=f"post-writeback-hook:{dispatch_id}",
-    )
-
-
-def build_post_writeback_hook_input(
-    *,
-    event_kind: str,
-    goal_id: str,
-    agent_id: str,
-    todo_id: str,
-    turn_instance_id: str,
-    effect_id: str,
-    state_version: str,
-    committed_at: str,
-    projection: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Build the compact source packet from a committed primary writeback.
-
-    This packet deliberately does not use the best-effort rollout-event log as
-    authority. Its identity is reconstructible from the durable state-refresh
-    receipt facts and contains no task prose, paths, logs, or provider data.
-    """
-
-    identity = {
-        "goal_id": str(goal_id or "").strip(),
-        "agent_id": str(agent_id or "").strip(),
-        "todo_id": str(todo_id or "").strip(),
-        "turn_instance_id": str(turn_instance_id or "").strip(),
-        "effect_id": str(effect_id or "").strip(),
-    }
-    normalized_event_kind = str(event_kind or "").strip()
-    normalized_state_version = str(state_version or "").strip()
-    normalized_committed_at = str(committed_at or "").strip()
-    if (
-        not all(identity.values())
-        or not normalized_event_kind
-        or not normalized_state_version
-        or not normalized_committed_at
-    ):
-        raise ValueError(
-            "post-writeback hooks require committed goal/agent/todo/turn/effect identity"
-        )
-    receipt_facts = {
-        "event_kind": normalized_event_kind,
-        "identity": identity,
-        "state_version": normalized_state_version,
-        "committed_at": normalized_committed_at,
-    }
-    digest = hashlib.sha256(
-        json.dumps(receipt_facts, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:24]
-    return {
-        "schema_version": POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION,
-        "receipt": {
-            "schema_version": "loopx_primary_writeback_receipt_v0",
-            "event_id": f"pwr_{digest}",
-            "event_kind": normalized_event_kind,
-            "status": "committed",
-            "recorded_at": normalized_committed_at,
-            "durable": True,
-        },
-        "identity": identity,
-        "state_version": normalized_state_version,
-        "projection": dict(projection),
-    }
 
 
 def dispatch_interaction_projection_hooks(
@@ -669,299 +296,468 @@ def dispatch_turn_start_hooks(
     }
 
 
-def _invoke_post_writeback_hook_producer(
+def _post_writeback_failure_dispatch(
+    registrations: Sequence[PostWritebackHookRegistration],
     *,
-    registration: PostWritebackHookRegistration,
-    hook_input: Mapping[str, Any],
-    dispatch_id: str,
-    journal: PostWritebackHookReceiptJournal | None,
-    receipt_path: Path | None,
-    attempt_count: int,
-    seen_intent_keys: set[str],
-) -> tuple[dict[str, Any] | None, dict[str, str] | None, bool]:
-    try:
-        effect_runtime_result(
-            "capability_hook.post_writeback.validate_registration",
-            {"registration": registration.contract()},
-        )
-        admitted_input = effect_runtime_result(
-            "capability_hook.post_writeback.validate_input",
-            {
-                "registration": registration.contract(),
-                "hook_input": dict(hook_input),
-            },
-        )
-    except (EffectRuntimeRejected, RuntimeError, TypeError, ValueError):
-        return (
-            None,
-            _hook_failure(registration, error_code="registration_or_input_rejected"),
-            False,
-        )
-    if not isinstance(admitted_input, Mapping):
-        return (
-            None,
-            _hook_failure(registration, error_code="runtime_input_invalid"),
-            False,
-        )
+    error_code: str,
+    invoked_count: int = 0,
+) -> dict[str, Any]:
+    return {
+        "schema_version": POST_WRITEBACK_HOOK_DISPATCH_SCHEMA_VERSION,
+        "phase": "post_writeback",
+        "registered_count": len(registrations),
+        "invoked_count": invoked_count,
+        "replayed_hooks": [],
+        "retried_hooks": [],
+        "intent_count": 0,
+        "intents": [],
+        "failures": [
+            _hook_failure(registration, error_code=error_code)
+            for registration in registrations
+        ],
+        "primary_writeback_preserved": True,
+        "external_writes_performed": False,
+    }
+
+
+def _legacy_post_writeback_lock_target(
+    runtime_root: Path,
+    plan: Mapping[str, Any],
+) -> Path:
+    """Bridge the retired Python journal lock during rolling upgrades."""
+
+    dispatch_id = str(plan.get("dispatch_id") or "")
+    hook_input = plan.get("hook_input")
+    identity = hook_input.get("identity") if isinstance(hook_input, Mapping) else None
+    raw_goal_id = identity.get("goal_id") if isinstance(identity, Mapping) else None
+    goal_id = raw_goal_id.strip() if isinstance(raw_goal_id, str) else ""
+    if not _POST_WRITEBACK_DISPATCH_ID_RE.fullmatch(dispatch_id):
+        raise ValueError("post-writeback provider dispatch_id is invalid")
+    if not _LEGACY_LOCK_SAFE_SEGMENT_RE.fullmatch(goal_id):
+        raise ValueError("post-writeback provider goal_id is invalid")
+    return (
+        runtime_root
+        / "goals"
+        / goal_id
+        / "post_writeback_hooks"
+        / f"{dispatch_id}.json"
+    )
+
+
+def _enter_legacy_post_writeback_guard(
+    guards: ExitStack,
+    *,
+    runtime_root: Path,
+    raw_plan: Mapping[str, Any],
+    lease_timeout_seconds: float | None,
+) -> str | None:
+    """Acquire one legacy writer guard immediately before its provider."""
 
     try:
-        result = dict(registration.producer(dict(admitted_input)))
-    except Exception:  # noqa: BLE001 - optional capability failures are isolated.
-        return (
-            None,
-            _record_retryable_post_writeback_failure_unlocked(
-                journal=journal,
-                receipt_path=receipt_path,
-                registration=registration,
-                hook_input=admitted_input,
-                dispatch_id=dispatch_id,
-                error_code="producer_failed",
-                attempt_count=attempt_count,
-            ),
-            True,
-        )
-
+        target = _legacy_post_writeback_lock_target(runtime_root, raw_plan)
+    except (TypeError, ValueError):
+        return "lock_failed"
+    plan_guard = ExitStack()
     try:
-        normalized = effect_runtime_result(
-            "capability_hook.post_writeback.validate",
-            {
-                "registration": registration.contract(),
-                "hook_input": dict(admitted_input),
-                "result": result,
-            },
+        plan_guard.enter_context(
+            exclusive_file_lock(
+                target,
+                operation="post_writeback_hook_dispatch",
+                timeout_seconds=lease_timeout_seconds,
+            )
         )
-    except (EffectRuntimeRejected, RuntimeError, TypeError, ValueError):
-        return (
-            None,
-            _record_retryable_post_writeback_failure_unlocked(
-                journal=journal,
-                receipt_path=receipt_path,
-                registration=registration,
-                hook_input=admitted_input,
-                dispatch_id=dispatch_id,
-                error_code="contract_rejected",
-                attempt_count=attempt_count,
-            ),
-            True,
-        )
+    except LockAcquireTimeoutError:
+        plan_guard.close()
+        return "lock_unavailable"
+    except OSError:
+        plan_guard.close()
+        return "lock_failed"
 
-    if not isinstance(normalized, Mapping):
-        return (
-            None,
-            _record_retryable_post_writeback_failure_unlocked(
-                journal=journal,
-                receipt_path=receipt_path,
-                registration=registration,
-                hook_input=admitted_input,
-                dispatch_id=dispatch_id,
-                error_code="runtime_result_invalid",
-                attempt_count=attempt_count,
-            ),
-            True,
-        )
+    expected_snapshot = raw_plan.get("receipt_snapshot")
+    if not isinstance(
+        expected_snapshot, str
+    ) or not _POST_WRITEBACK_RECEIPT_SNAPSHOT_RE.fullmatch(expected_snapshot):
+        plan_guard.close()
+        return "lock_failed"
+    try:
+        current_snapshot = _post_writeback_receipt_snapshot(target)
+    except OSError:
+        plan_guard.close()
+        return "lock_failed"
+    if current_snapshot != expected_snapshot:
+        plan_guard.close()
+        return "receipt_changed"
 
-    if normalized.get("status") != "intent":
-        if journal is not None and receipt_path is not None:
-            try:
-                _store_post_writeback_sidecar_unlocked(
-                    journal=journal,
-                    receipt_path=receipt_path,
-                    registration=registration,
-                    hook_input=admitted_input,
-                    dispatch_id=dispatch_id,
-                    status="not_applicable",
-                    intent=None,
-                    error_code=None,
-                    attempt_count=attempt_count,
-                )
-            except (
-                EffectRuntimeRejected,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-            ):
-                return (
-                    None,
-                    _hook_failure(registration, error_code="journal_write_failed"),
-                    True,
-                )
-        return None, None, True
+    guards.callback(plan_guard.close)
+    return None
 
-    intent = normalized.get("intent")
-    if not isinstance(intent, Mapping):
-        return (
-            None,
-            _hook_failure(registration, error_code="runtime_result_invalid"),
-            True,
-        )
-    idempotency_key = str(intent.get("idempotency_key") or "")
-    if idempotency_key in seen_intent_keys:
-        return (
-            None,
-            _record_retryable_post_writeback_failure_unlocked(
-                journal=journal,
-                receipt_path=receipt_path,
-                registration=registration,
-                hook_input=admitted_input,
-                dispatch_id=dispatch_id,
-                error_code="intent_key_conflict",
-                attempt_count=attempt_count,
-            ),
-            True,
-        )
-    seen_intent_keys.add(idempotency_key)
-    normalized_intent = dict(intent)
-    if journal is not None and receipt_path is not None:
+
+def _post_writeback_receipt_snapshot(path: Path) -> str:
+    try:
+        encoded = path.read_bytes()
+    except FileNotFoundError:
+        return "missing"
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _post_writeback_finalize_params(
+    base_request: Mapping[str, Any],
+    *,
+    transaction_id: object,
+    outcomes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        **base_request,
+        "phase": "finalize",
+        "transaction_id": transaction_id,
+        "provider_outcomes": [dict(outcome) for outcome in outcomes],
+    }
+
+
+def _post_writeback_transport_rejected_outcome(
+    outcome: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "dispatch_id": outcome.get("dispatch_id"),
+        "hook_id": outcome.get("hook_id"),
+        "capability_id": outcome.get("capability_id"),
+        "attempt_count": outcome.get("attempt_count"),
+        "status": "contract_rejected",
+        "result": None,
+    }
+
+
+def _bounded_post_writeback_transport_outcomes(
+    base_request: Mapping[str, Any],
+    *,
+    transaction_id: object,
+    outcomes: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Admit the smallest JSON-safe results into the real Python wire budget."""
+
+    bounded: list[dict[str, Any]] = []
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for index, raw_outcome in enumerate(outcomes):
+        outcome = dict(raw_outcome)
+        if outcome.get("status") != "returned":
+            bounded.append(outcome)
+            continue
+        rejected = _post_writeback_transport_rejected_outcome(outcome)
+        bounded.append(rejected)
         try:
-            _store_post_writeback_sidecar_unlocked(
-                journal=journal,
-                receipt_path=receipt_path,
-                registration=registration,
-                hook_input=admitted_input,
-                dispatch_id=dispatch_id,
-                status="intent_recorded",
-                intent=normalized_intent,
-                error_code=None,
-                attempt_count=attempt_count,
+            rejected_size = len(json.dumps(rejected, separators=(",", ":")).encode())
+            outcome_size = len(json.dumps(outcome, separators=(",", ":")).encode())
+        except (OverflowError, RecursionError, TypeError, ValueError):
+            continue
+        candidates.append((outcome_size - rejected_size, index, outcome))
+
+    baseline = _post_writeback_finalize_params(
+        base_request,
+        transaction_id=transaction_id,
+        outcomes=bounded,
+    )
+    admitted_size = len(json.dumps(baseline, separators=(",", ":")).encode())
+    if admitted_size > _POST_WRITEBACK_TRANSACTION_PARAMS_MAX_BYTES:
+        raise ValueError("post-writeback finalize transport baseline is oversized")
+
+    for delta, index, outcome in sorted(candidates):
+        if admitted_size + delta > _POST_WRITEBACK_TRANSACTION_PARAMS_MAX_BYTES:
+            continue
+        bounded[index] = outcome
+        admitted_size += delta
+
+    finalized = _post_writeback_finalize_params(
+        base_request,
+        transaction_id=transaction_id,
+        outcomes=bounded,
+    )
+    if (
+        len(json.dumps(finalized, separators=(",", ":")).encode())
+        > _POST_WRITEBACK_TRANSACTION_PARAMS_MAX_BYTES
+    ):
+        raise ValueError("post-writeback finalize transport admission drifted")
+    return bounded
+
+
+def _decode_post_writeback_preflight(
+    value: object,
+) -> tuple[dict[str, Any] | None, list[Mapping[str, Any]]]:
+    if not isinstance(value, Mapping):
+        raise ValueError("post-writeback transaction preflight is invalid")
+    terminal_dispatch = value.get("dispatch")
+    if isinstance(terminal_dispatch, Mapping):
+        return dict(terminal_dispatch), []
+    provider_plan = value.get("provider_plan")
+    if not isinstance(provider_plan, list):
+        raise ValueError("post-writeback provider plan is invalid")
+    typed_provider_plan: list[Mapping[str, Any]] = []
+    for raw_plan in provider_plan:
+        if not isinstance(raw_plan, Mapping):
+            raise ValueError("post-writeback provider step is invalid")
+        typed_provider_plan.append(raw_plan)
+    return None, typed_provider_plan
+
+
+def _post_writeback_provider_outcome(
+    raw_plan: Mapping[str, Any],
+    *,
+    registration: PostWritebackHookRegistration | None,
+    unavailable_status: str | None,
+) -> tuple[dict[str, Any], bool]:
+    """Invoke one effect-free provider and isolate its JSON transport boundary."""
+
+    admitted_input = raw_plan.get("hook_input")
+    if registration is None or not isinstance(admitted_input, Mapping):
+        raise ValueError("post-writeback provider step is unbound")
+    invoked = unavailable_status is None
+    if unavailable_status is not None:
+        result = None
+        status = unavailable_status
+    else:
+        try:
+            produced = dict(registration.producer(dict(admitted_input)))
+        except Exception:  # noqa: BLE001 - provider failures isolate.
+            result = None
+            status = "producer_failed"
+        else:
+            try:
+                encoded_result = json.dumps(
+                    produced,
+                    allow_nan=False,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                result = json.loads(encoded_result)
+            except (OverflowError, RecursionError, TypeError, ValueError):
+                result = None
+                status = "contract_rejected"
+            else:
+                status = "returned"
+    return (
+        {
+            "dispatch_id": raw_plan.get("dispatch_id"),
+            "hook_id": raw_plan.get("hook_id"),
+            "capability_id": raw_plan.get("capability_id"),
+            "attempt_count": raw_plan.get("attempt_count"),
+            "status": status,
+            "result": result,
+        },
+        invoked,
+    )
+
+
+def _post_writeback_contract_placeholder(
+    registration: PostWritebackHookRegistration,
+) -> dict[str, object]:
+    hook_id = registration.hook_id
+    capability_id = registration.capability_id
+    return {
+        "hook_id": (
+            hook_id if isinstance(hook_id, str) and len(hook_id) <= 200 else ""
+        ),
+        "capability_id": (
+            capability_id
+            if isinstance(capability_id, str) and len(capability_id) <= 200
+            else ""
+        ),
+    }
+
+
+def _bounded_post_writeback_transport_contracts(
+    registrations: Sequence[PostWritebackHookRegistration],
+    *,
+    shared_request: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Keep one malformed registration from making the shared JSON wire unusable."""
+
+    bounded: list[dict[str, Any]] = []
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for index, registration in enumerate(registrations):
+        placeholder = _post_writeback_contract_placeholder(registration)
+        bounded.append(placeholder)
+        try:
+            encoded = json.dumps(
+                registration.contract(),
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode()
+            contract = json.loads(encoded)
+            if not isinstance(contract, dict):
+                continue
+            placeholder_size = len(
+                json.dumps(placeholder, separators=(",", ":")).encode()
             )
         except (
-            EffectRuntimeRejected,
-            OSError,
-            RuntimeError,
+            AttributeError,
+            OverflowError,
+            RecursionError,
             TypeError,
             ValueError,
         ):
-            return (
-                None,
-                _hook_failure(registration, error_code="journal_write_failed"),
-                True,
-            )
-    return normalized_intent, None, True
+            continue
+        candidates.append((len(encoded) - placeholder_size, index, contract))
+
+    request = {**shared_request, "registrations": bounded}
+    admitted_size = len(json.dumps(request, separators=(",", ":")).encode())
+    if admitted_size > _POST_WRITEBACK_TRANSACTION_PARAMS_MAX_BYTES:
+        raise ValueError("post-writeback preflight transport baseline is oversized")
+    for delta, index, contract in sorted(candidates):
+        if admitted_size + delta > _POST_WRITEBACK_TRANSACTION_PARAMS_MAX_BYTES:
+            continue
+        bounded[index] = contract
+        admitted_size += delta
+    return bounded
 
 
 def dispatch_post_writeback_hooks(
     registrations: Sequence[PostWritebackHookRegistration] | None,
     *,
-    hook_input: Mapping[str, Any],
-    journal: PostWritebackHookReceiptJournal | None = None,
+    source: Mapping[str, Any] | None = None,
+    hook_input: Mapping[str, Any] | None = None,
+    runtime_root: Path | None = None,
     lease_timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """Dispatch typed intents after, never inside, the primary writeback."""
+    """Run one TS-owned hook transaction around effect-free Python providers.
 
-    intents: list[dict[str, Any]] = []
-    failures: list[dict[str, str]] = []
-    seen_hook_ids: set[str] = set()
-    seen_intent_keys: set[str] = set()
-    replayed_hooks: list[str] = []
-    retried_hooks: list[str] = []
-    invoked_count = 0
-    ordered = sorted(registrations or (), key=lambda item: item.hook_id)
-    for registration in ordered:
-        if registration.hook_id in seen_hook_ids:
-            failures.append(_hook_failure(registration, error_code="duplicate_hook_id"))
-            continue
-        seen_hook_ids.add(registration.hook_id)
-        try:
-            dispatch_id = _post_writeback_dispatch_id(registration, hook_input)
-        except (TypeError, ValueError):
-            failures.append(
-                _hook_failure(registration, error_code="journal_read_failed")
-            )
-            continue
+    The Python adapter exits when providers and the committed-writeback caller
+    run in TypeScript. Its legacy-writer guard exits earlier only when TypeScript
+    owns an execution claim spanning provider invocation and receipt commit.
+    """
 
-        lease_ctx = (
-            journal.execution_lease(
-                dispatch_id,
-                timeout_seconds=lease_timeout_seconds,
-            )
-            if journal is not None
-            else nullcontext(None)
+    ordered_registrations = tuple(registrations or ())
+    if not ordered_registrations:
+        return _post_writeback_failure_dispatch(
+            ordered_registrations,
+            error_code="registration_or_input_rejected",
         )
-        try:
-            with lease_ctx as receipt_path:
-                existing = None
-                if journal is not None and receipt_path is not None:
-                    try:
-                        existing = journal._read_receipt(receipt_path, dispatch_id)
-                    except (OSError, TypeError, ValueError):
-                        failures.append(
-                            _hook_failure(registration, error_code="journal_read_failed")
-                        )
-                        continue
+    if (source is None) == (hook_input is None):
+        return _post_writeback_failure_dispatch(
+            ordered_registrations,
+            error_code="registration_or_input_rejected",
+        )
+    invoked_count = 0
+    try:
+        source_packet = dict(source) if source is not None else None
+        legacy_hook_input = dict(hook_input) if hook_input is not None else None
+        runtime_root_text = str(runtime_root.resolve()) if runtime_root else None
+        shared_request = {
+            "schema_version": "loopx_post_writeback_hook_transaction_request_v0",
+            "runtime_root": runtime_root_text,
+            "source": source_packet,
+            "hook_input": legacy_hook_input,
+        }
+        contracts = _bounded_post_writeback_transport_contracts(
+            ordered_registrations,
+            shared_request={
+                **shared_request,
+                "phase": "preflight",
+                "transaction_id": None,
+                "provider_outcomes": [],
+            },
+        )
+        base_request = {**shared_request, "registrations": contracts}
+        providers: dict[tuple[str, str], PostWritebackHookRegistration] = {}
+        for registration in ordered_registrations:
+            if not isinstance(registration.hook_id, str) or not isinstance(
+                registration.capability_id, str
+            ):
+                continue
+            key = (registration.hook_id, registration.capability_id)
+            providers.setdefault(key, registration)
 
-                previous_attempt_count = 0
-                if existing is not None:
-                    try:
-                        existing = _validated_post_writeback_receipt(
-                            registration=registration,
-                            hook_input=hook_input,
-                            receipt=existing,
-                        )
-                    except (EffectRuntimeRejected, RuntimeError, TypeError, ValueError):
-                        failures.append(
-                            _hook_failure(registration, error_code="receipt_conflict")
-                        )
-                        continue
-                    if existing.get("status") == "retryable_failure":
-                        previous_attempt_count = int(existing["attempt_count"])
-                        retried_hooks.append(registration.hook_id)
-                    else:
-                        existing_intent = existing.get("intent")
-                        if isinstance(existing_intent, Mapping):
-                            idempotency_key = str(existing_intent.get("idempotency_key") or "")
-                            if idempotency_key in seen_intent_keys:
-                                failures.append(
-                                    _hook_failure(
-                                        registration, error_code="intent_key_conflict"
-                                    )
-                                )
-                                continue
-                            seen_intent_keys.add(idempotency_key)
-                            intents.append(dict(existing_intent))
-                        replayed_hooks.append(registration.hook_id)
-                        continue
+        preflight_request = {
+            **base_request,
+            "phase": "preflight",
+            "transaction_id": None,
+            "provider_outcomes": [],
+        }
+        preflight = effect_runtime_result(
+            "capability_hook.post_writeback.transaction",
+            preflight_request,
+        )
+        terminal_dispatch, typed_provider_plan = _decode_post_writeback_preflight(
+            preflight
+        )
+        if terminal_dispatch is not None:
+            return terminal_dispatch
+        transaction_id = preflight.get("transaction_id")
+        if not isinstance(transaction_id, str):
+            raise ValueError("post-writeback transaction_id is invalid")
 
-                attempt_count = previous_attempt_count + 1
-                intent, failure, did_invoke = _invoke_post_writeback_hook_producer(
-                    registration=registration,
-                    hook_input=hook_input,
-                    dispatch_id=dispatch_id,
-                    journal=journal,
-                    receipt_path=receipt_path,
-                    attempt_count=attempt_count,
-                    seen_intent_keys=seen_intent_keys,
+        sizing_outcomes = [
+            {
+                "dispatch_id": raw_plan.get("dispatch_id"),
+                "hook_id": raw_plan.get("hook_id"),
+                "capability_id": raw_plan.get("capability_id"),
+                "attempt_count": raw_plan.get("attempt_count"),
+                "status": "contract_rejected",
+                "result": None,
+            }
+            for raw_plan in typed_provider_plan
+        ]
+        _bounded_post_writeback_transport_outcomes(
+            base_request,
+            transaction_id=transaction_id,
+            outcomes=sizing_outcomes,
+        )
+
+        compatibility_timeout = (
+            LOCK_POLICIES[LockAcquisitionPolicy.MUTATION].timeout_seconds
+            if lease_timeout_seconds is None
+            else max(0.0, lease_timeout_seconds)
+        )
+        compatibility_deadline = time.monotonic() + compatibility_timeout
+        with ExitStack() as legacy_writer_guards:
+            outcomes: list[dict[str, Any]] = []
+            for raw_plan in typed_provider_plan:
+                key = (
+                    str(raw_plan.get("hook_id") or ""),
+                    str(raw_plan.get("capability_id") or ""),
                 )
-                if did_invoke:
-                    invoked_count += 1
-                if failure is not None:
-                    failures.append(failure)
-                elif intent is not None:
-                    intents.append(intent)
-        except LockAcquireTimeoutError:
-            failures.append(
-                _hook_failure(registration, error_code="lock_acquire_timeout")
+                registration = providers.get(key)
+                unavailable_status = (
+                    _enter_legacy_post_writeback_guard(
+                        legacy_writer_guards,
+                        runtime_root=runtime_root,
+                        raw_plan=raw_plan,
+                        lease_timeout_seconds=max(
+                            0.0, compatibility_deadline - time.monotonic()
+                        ),
+                    )
+                    if runtime_root is not None
+                    else None
+                )
+                outcome, invoked = _post_writeback_provider_outcome(
+                    raw_plan,
+                    registration=registration,
+                    unavailable_status=unavailable_status,
+                )
+                invoked_count += int(invoked)
+                outcomes.append(outcome)
+            bounded_outcomes = _bounded_post_writeback_transport_outcomes(
+                base_request,
+                transaction_id=transaction_id,
+                outcomes=outcomes,
             )
-            continue
-        except OSError:
-            failures.append(
-                _hook_failure(registration, error_code="journal_read_failed")
+            finalized = effect_runtime_result(
+                "capability_hook.post_writeback.transaction",
+                _post_writeback_finalize_params(
+                    base_request,
+                    transaction_id=transaction_id,
+                    outcomes=bounded_outcomes,
+                ),
             )
-            continue
-
-    return {
-        "schema_version": POST_WRITEBACK_HOOK_DISPATCH_SCHEMA_VERSION,
-        "phase": "post_writeback",
-        "registered_count": len(registrations or ()),
-        "invoked_count": invoked_count,
-        "replayed_hooks": replayed_hooks,
-        "retried_hooks": retried_hooks,
-        "intent_count": len(intents),
-        "intents": intents,
-        "failures": failures,
-        "primary_writeback_preserved": True,
-        "external_writes_performed": False,
-    }
+            if not isinstance(finalized, Mapping) or not isinstance(
+                finalized.get("dispatch"), Mapping
+            ):
+                raise ValueError("post-writeback transaction result is invalid")
+            return dict(finalized["dispatch"])
+    except (EffectRuntimeRejected, OSError, RuntimeError, TypeError, ValueError):
+        return _post_writeback_failure_dispatch(
+            ordered_registrations,
+            error_code="runtime_result_invalid",
+            invoked_count=invoked_count,
+        )
 
 
 def _hook_failure(

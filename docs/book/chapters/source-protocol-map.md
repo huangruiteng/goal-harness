@@ -250,10 +250,11 @@ proof。
 | `handoff` | 跨 runtime handoff、review packet 与 owner route |
 | `work_items` | attention、selection 与 operator-facing work read model |
 
-在 `v0.5.2` 的迁移基线上，bounded context 和实现语言是两个维度。部分
-`goals`、`todos`、`quota`、`scheduler`、`work_items` 与 `turn_driver` 规则已经由同目录下的
-TypeScript module 拥有语义，Python facade/module 可能只是 CLI transport、legacy projection
-或外部 Provider adapter。定位 owner 时应先读
+在 `v0.5.4` 的迁移基线上，bounded context 和实现语言是两个维度。`goals`、`todos`、`quota`、
+`scheduler`、`work_items` 与 `turn_driver` 已有完整 transaction 由 TypeScript module 拥有语义；
+典型例子包括 Vision refresh、本地 task-lease lifecycle、quota spend/void/monitor-poll commit 和
+receipt-bound scheduler follow-up。旁边的 Python facade/module 可能只负责 CLI transport、legacy
+projection、明确的外部 Provider/Host effect 或尚未迁移的写回。定位 owner 时应先读
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)
 的 shipped baseline，再沿真实 request handler 和 caller 判断；不要因为入口仍是 Python，就默认
 Python 仍拥有该 decision。

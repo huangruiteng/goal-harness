@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
+from functools import wraps
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -20,11 +22,11 @@ from .control_plane.work_items.delivery_outcome import (
 )
 from .control_plane.agents.workspace_guard import (
     capture_delivery_workspace,
-    delivery_workspace_identity,
 )
 from .control_plane.quota.settlement import (
     SettlementIdentity,
     read_heartbeat_settlement,
+    render_refresh_recovery_markdown,
     settlement_result_payload,
 )
 from .control_plane.quota.settlement_workspace_causality import resolve_settlement_workspace_requirement
@@ -103,33 +105,30 @@ BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 CHECKBOX_PREFIX_RE = re.compile(r"^\[(?P<mark>[ xX])\]\s+")
 ACTIVE_STATE_NEXT_ACTION_UPDATE_SCHEMA_VERSION = "active_state_next_action_update_v0"
 REPAIR_NOOP_SCHEMA_VERSION = "repair_noop_v0"
-def _delivery_workspace_supplement_required(
-    *,
-    prior_writeback: dict[str, Any],
-    delivery_workspace_path: Path | None,
-    delivery_workspace_causality: dict[str, str] | None,
-) -> bool:
-    """Return whether an idempotent writeback still lacks required causality.
 
-    A material monitor poll is already an accountable writeback. Its matching
-    refresh-state call may therefore arrive after the durable-writeback receipt
-    exists, while the monitor run itself has no delivery workspace snapshot.
-    Keep ordinary replays idempotent, but let an explicit workspace path append
-    one causal refresh record unless the original Todo explicitly declared a
-    non-delivery settlement. This also repairs legacy monitor Todos whose
-    workspace requirement was left unknown.
+
+def _serialized_refresh(
+    function: Callable[..., dict[str, Any]],
+) -> Callable[..., dict[str, Any]]:
+    """Keep admission and the legacy index append in one cross-writer lock.
+
+    Transitional Python persistence adapter; remove with the native refresh
+    writer. No external provider runs while this lock is held.
     """
 
-    if delivery_workspace_path is None:
-        return False
-    if (
-        str((delivery_workspace_causality or {}).get("requirement") or "")
-        == "not_required"
-    ):
-        return False
-    return delivery_workspace_identity(
-        prior_writeback.get("delivery_workspace")
-    ) is None
+    @wraps(function)
+    def run(**kwargs: Any) -> dict[str, Any]:
+        goal_id = validate_goal_id_path_segment(kwargs["goal_id"])
+        registry = load_registry(kwargs["registry_path"])
+        root = resolve_runtime_root(registry, kwargs["runtime_root_override"])
+        if kwargs["dry_run"]:
+            return function(**kwargs)
+        with exclusive_file_lock(
+            root / "goals" / goal_id / "runs" / "index.jsonl", operation="refresh-state"
+        ):
+            return function(**kwargs)
+
+    return run
 
 
 def now_local() -> str:
@@ -517,6 +516,7 @@ def _build_state_refresh_output_projections(
         "delivery_outcome",
         "delivery_workspace",
         "settlement_identity",
+        "refresh_recovery",
         "turn_instance_id",
         "todo_id",
         "replan_obligation_id",
@@ -585,6 +585,9 @@ def _build_state_refresh_output_projections(
 
 
 def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
+    recovery_markdown = render_refresh_recovery_markdown(payload)
+    if recovery_markdown is not None:
+        return recovery_markdown
     state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
     frontmatter = state.get("frontmatter") if isinstance(state.get("frontmatter"), dict) else {}
     lines = [
@@ -778,6 +781,7 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+@_serialized_refresh
 def refresh_state_run(
     *,
     registry_path: Path,
@@ -864,6 +868,8 @@ def refresh_state_run(
     delivery_workspace_causality = None
     settlement_workspace_requirement = None
     settlement_readback = None
+    refresh_recovery = None
+    prior_writeback_run = None
     if todo_id or normalized_replan_obligation_id or turn_instance_id:
         if not turn_scoped_settlement_qualified:
             raise ValueError(
@@ -877,6 +883,25 @@ def refresh_state_run(
             todo_id=todo_id,
             turn_instance_id=turn_instance_id,
             replan_obligation_id=normalized_replan_obligation_id,
+            refresh_retry={
+                "vision": agent_vision_packet,
+                "unchanged_reason": vision_unchanged_reason,
+                "merge_patch": bool(merge_agent_vision_patch),
+                "workspace_requested": delivery_workspace_path is not None,
+                "mutation": {
+                    "next_action": next_action,
+                    "autonomous_replan_recorded": autonomous_replan_recorded,
+                    "repair_delta_kinds": repair_delta_kinds,
+                    "usage_measurement": usage_measurement,
+                    "usage_codex_session": str(usage_codex_session)
+                    if usage_codex_session
+                    else None,
+                },
+                "delivery_outcome": normalized_delivery_outcome,
+                "delivery_batch_scale": normalized_delivery_batch_scale,
+                "delivery_boundary": delivery_boundary,
+                "progress_observation": normalized_progress_observation,
+            },
         )
         if settlement_readback is None:
             raise RuntimeError("exact settlement readback unexpectedly returned not-found")
@@ -887,69 +912,39 @@ def refresh_state_run(
         if settlement_identity is None:
             raise ValueError("turn-scoped refresh-state has no settlement identity")
         delivery_workspace_causality = settlement_readback.workspace_causality
+        refresh_recovery = settlement_readback.refresh_recovery
+        if not refresh_recovery:
+            raise RuntimeError("settlement readback omitted refresh recovery admission")
+        decision = refresh_recovery["decision"]
+        prior_writeback_run = settlement_readback.writeback_run
+        if decision in {"replay", "repair_receipt", "reject"}:
+            payload = {
+                **(prior_writeback_run or {}),
+                "ok": decision != "reject",
+                "dry_run": dry_run,
+                "appended": False,
+                "idempotent_replay": decision == "replay",
+                "receipt_repair_required": decision == "repair_receipt" and not dry_run,
+                "registry": str(registry_path),
+                "runtime_root": str(runtime_root),
+                "goal_id": safe_goal_id,
+                "refresh_recovery": refresh_recovery,
+                "settlement_identity": settlement_identity.as_dict(),
+                "settlement_result": settlement_result_payload(
+                    settlement_readback.delivery
+                ),
+            }
+            if decision == "reject":
+                payload["error"] = (
+                    f"{refresh_recovery['reason']}: committed writeback is unchanged; "
+                    "do not begin a new Turn or repeat spend to repair it. "
+                    "Retry the original delivery fields with only the missing vision decision; "
+                    "if a newer vision already exists, inspect current quota instead."
+                )
+            return payload
         settlement_workspace_requirement = resolve_settlement_workspace_requirement(
             delivery_workspace_causality, settlement_binding_kind=settlement_identity.binding_kind.value
         )
-        if not dry_run:
-            prior_writeback = settlement_readback.writeback
-            if prior_writeback.failure is None and prior_writeback.value is not None:
-                if not _delivery_workspace_supplement_required(
-                    prior_writeback=prior_writeback.value,
-                    delivery_workspace_path=delivery_workspace_path,
-                    delivery_workspace_causality=delivery_workspace_causality,
-                ):
-                    return {
-                        "ok": True,
-                        "dry_run": False,
-                        "appended": False,
-                        "idempotent_replay": True,
-                        "registry": str(registry_path),
-                        "runtime_root": str(runtime_root),
-                        "goal_id": safe_goal_id,
-                        "classification": prior_writeback.value.get("classification"),
-                        "delivery_batch_scale": prior_writeback.value.get(
-                            "delivery_batch_scale"
-                        ),
-                        "delivery_outcome": prior_writeback.value.get(
-                            "delivery_outcome"
-                        ),
-                        "settlement_identity": settlement_identity.as_dict(),
-                        "settlement_result": settlement_result_payload(
-                            settlement_result.bind(
-                                lambda _identity: prior_writeback
-                            )
-                        ),
-                    }
-            prior_writeback_run = settlement_readback.writeback_run
-            if prior_writeback_run is not None and not (
-                _delivery_workspace_supplement_required(
-                    prior_writeback=prior_writeback_run,
-                    delivery_workspace_path=delivery_workspace_path,
-                    delivery_workspace_causality=delivery_workspace_causality,
-                )
-            ):
-                return {
-                    "ok": True,
-                    "dry_run": False,
-                    "appended": False,
-                    "receipt_repair_required": True,
-                    "registry": str(registry_path),
-                    "runtime_root": str(runtime_root),
-                    "goal_id": safe_goal_id,
-                    "classification": prior_writeback_run.get("classification"),
-                    "delivery_batch_scale": prior_writeback_run.get(
-                        "delivery_batch_scale"
-                    ),
-                    "delivery_outcome": prior_writeback_run.get(
-                        "delivery_outcome"
-                    ),
-                    "settlement_identity": settlement_identity.as_dict(),
-                    "settlement_result": settlement_result_payload(
-                        settlement_result.bind(
-                            lambda _identity: prior_writeback
-                        )
-                    ),
-                }
     runtime_projection_route = resolve_runtime_projection_route(
         registry_path=registry_path,
         goal_id=safe_goal_id,
@@ -1153,6 +1148,15 @@ def refresh_state_run(
         completion_todo_id=completion_todo_id,
         autonomous_replan_recorded=effective_autonomous_replan_recorded,
     )
+    checkpoint_supplement = bool(
+        refresh_recovery and refresh_recovery["decision"] == "supplement_checkpoint"
+    )
+    if checkpoint_supplement and not vision_checkpoint.get("satisfied"):
+        raise ValueError(
+            "checkpoint supplement did not satisfy the missing decision; "
+            "an unchanged reason requires an existing vision. Supply a valid vision "
+            "patch on the same Turn; the original writeback and quota are unchanged."
+        )
     delivery_workspace = None
     workspace_requirement = str(
         (settlement_workspace_requirement or {}).get("requirement") or "unknown"
@@ -1165,6 +1169,7 @@ def refresh_state_run(
     if (
         turn_scoped_settlement_qualified
         and workspace_requirement != "not_required"
+        and not checkpoint_supplement
     ):
         delivery_workspace = capture_delivery_workspace(
             current_path=delivery_workspace_path,
@@ -1195,6 +1200,19 @@ def refresh_state_run(
                 "--delivery-workspace-path must identify the registered local goal "
                 "workspace or a git checkout with a credential-free origin repository"
             )
+    if checkpoint_supplement:
+        # The supplemental row must not reattribute the original delivery to
+        # the recovery caller's current directory or change its accounting.
+        assert prior_writeback_run is not None
+        delivery_workspace = prior_writeback_run.get("delivery_workspace")
+        normalized_delivery_outcome = prior_writeback_run.get("delivery_outcome")
+        normalized_delivery_batch_scale = prior_writeback_run.get(
+            "delivery_batch_scale"
+        )
+        normalized_progress_observation = prior_writeback_run.get(
+            "progress_observation"
+        )
+        classification = prior_writeback_run["classification"]
     if (
         active_state_next_action_update
         and active_state_next_action_update.get("would_update")
@@ -1234,6 +1252,8 @@ def refresh_state_run(
     )
     if delivery_workspace_causality:
         record["delivery_workspace_causality"] = delivery_workspace_causality
+    if refresh_recovery:
+        record["refresh_recovery"] = refresh_recovery
     if settlement_workspace_requirement:
         record["settlement_workspace_requirement"] = (
             settlement_workspace_requirement

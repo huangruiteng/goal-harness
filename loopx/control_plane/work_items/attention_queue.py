@@ -129,7 +129,15 @@ def build_attention_queue(
     runtime_root: Path | None = None,
     include_task_graph: bool = False,
     goal_id_filter: str | None = None,
+    include_stopped_goal_context: bool = False,
 ) -> dict[str, Any]:
+    """Build the executable attention queue or a stopped-Goal archive view.
+
+    Normal callers omit stopped Goals because they must never become runnable
+    attention. The scoped Dashboard archive opts into their already-persisted
+    Todo and run context so opening a stopped Goal remains informative; that
+    opt-in does not change lifecycle authority or make the Goal executable.
+    """
     health_items: list[dict[str, Any]] = []
     history_items: list[dict[str, Any]] = []
     if contract.get("ok") is False:
@@ -147,7 +155,10 @@ def build_attention_queue(
     for goal in history.get("goals") or []:
         if not isinstance(goal, dict):
             continue
-        if goal.get("activation_state") == "stopped":
+        if (
+            goal.get("activation_state") == "stopped"
+            and not include_stopped_goal_context
+        ):
             continue
         active_state_fields: dict[str, Any] | None = None
         active_state_item: dict[str, Any] | None = None

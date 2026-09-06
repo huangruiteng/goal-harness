@@ -48,6 +48,7 @@
         "qualify_desktop_patch",
         "qualify_heartbeat_transport",
         "qualify_host_control_recovery",
+        "qualify_outage_recovery",
         "qualify_quota_recovery",
         "qualify_snapshot",
         "qualify_tool_transport",

@@ -69,8 +69,12 @@ contract and provider identity on the extension side.
 The shipped execution path is `loopx periodic-report deliver-goal-channel`.
 Its delivery intent must contain exactly two ordered HTTPS announcements: the
 hosted report entry, then the Lark document entry. They are sent as two
-independently idempotent messages and each one must pass exact readback. The
-command does not accept a chat, profile, App identity, or sender override. Instead,
+independently idempotent messages and each one must pass exact readback. Before
+each write, the provider scans the complete Goal Channel history from the frozen
+generation time and reuses an exact card, chat, and Bot-sender match. An incomplete
+history read fails closed; the provider's stable one-hour idempotency key covers
+the remaining concurrent-send race. The command does not accept a chat, profile,
+App identity, or sender override. Instead,
 the Lark extension resolves the current Goal's local-private Goal Channel
 binding and requires `mode=project_bot`, Bot sender identity, a non-default
 profile, exact Bot App id and display name, and an enabled Lark channel.
@@ -83,12 +87,19 @@ Missing bindings, local-user mode, identity drift, or incomplete readback fail
 closed; no environment-default or user-identity fallback exists.
 
 The governed pending-intent consumer persists the normalized generation bundle
-and writes one blocked, agent-owned delivery successor before creating the
-approval gate. The gate links to that successor and covers its exact decision
-scope. Approval removes only that scope and resumes the successor, making the
-external action visible to quota; rejection or cancellation keeps it blocked.
-This prevents an approved report from disappearing into a quiet terminal or
-monitor-only projection.
+and writes one runnable, agent-owned delivery successor. The current effective
+`periodic_report` subscription is re-read before consumption; `enabled: true`
+with an explicit `route_ref` is the standing authority for this automatic
+stage-boundary delivery. Its Goal, source, effective revision, and route are
+frozen into `periodic_report_delivery_authority_v0` and must still match before
+each external message write. Disabling the subscription or changing its effective
+revision/route suppresses the queued action even when a separate explicit Goal
+Channel binding still exists.
+The successor remains bound to the frozen generation digest, current Goal,
+required provider capabilities, configured Goal Channel, project Bot identity,
+and exact readback. This makes the external action visible to quota without a
+second per-report approval while still failing closed on route or identity
+drift.
 
 `periodic_report_project_progress_projection_v0` is the built-in,
 domain-neutral source input. It groups typed project facts into progress,
@@ -159,10 +170,16 @@ binds its exact SHA-256, and the Goal Channel sink may advance that binding into
 publication cursor only after delivery readback succeeds. The compact
 `periodic_report_workspace_index_v0` hot path contains identity, delivery time,
 predecessor lineage, and an exact content-addressed detail reference, but no
-report prose. It returns the newest 100 items by default, accepts a bounded
-`limit` (0..200) and non-negative `offset`, and reports `total_count` and
-`truncated` so callers can page without receiving an unbounded response. The
-full projection is a loopback-only cold read and must match
+report prose. A request that explicitly supplies `limit` or `offset` opts into
+the bounded window response; this keeps an old strict v0 reader compatible with
+a newer service, while a new reader accepts both the legacy and windowed v0
+shapes during staggered upgrades. The window returns the newest 100 items by
+default, accepts `limit` in 0..200 and `offset` in 0..10000, and reports
+`returned_count`, `total_count`, and `truncated`. `count` means the number of
+items returned in this window. Items sort by `delivered_at` newest-first using
+chronological timestamp comparison, then by cursor path descending for a stable
+tie-break. The 10000 offset cap makes this a finite browsing window, not an
+unbounded historical traversal. The full projection is a loopback-only cold read and must match
 the current publication cursor. Approval-pending, generation-only, stale, or
 digest-mismatched projections therefore fail closed instead of appearing as
 published.
@@ -283,9 +300,10 @@ optional hook failures remain isolated and cannot roll back the primary
 writeback or alter quota-spend eligibility.
 
 Recorded trigger intent means neither report generation nor publication. A
-later governed executor must evaluate the intent, and composition, rendering,
-content checks, owner approval, and external sink delivery remain separately
-authorized steps.
+later governed executor must evaluate the intent. Composition, rendering, and
+content checks remain separate from external delivery; an enabled effective
+subscription supplies standing delivery authority, while the extension and
+exact sink readback retain effect authority.
 
 ## Request and identity
 

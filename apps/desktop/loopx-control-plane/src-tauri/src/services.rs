@@ -167,6 +167,34 @@ impl ServiceSet {
             }
         }
 
+        if request_platform_managed_start(kind) {
+            let deadline = Instant::now() + STARTUP_TIMEOUT;
+            while Instant::now() < deadline {
+                match probe(kind, expected_runtime_identity.as_ref()) {
+                    Probe::Matching => return Ok(()),
+                    Probe::Foreign => {
+                        return Err(ServiceError(format!(
+                            "LoopX {} startup reached an unexpected service on port {}",
+                            kind.label(),
+                            kind.port()
+                        )));
+                    }
+                    Probe::Stale => {
+                        terminate_stale_listener(kind, &executable, kind.port())?;
+                        self.healed = true;
+                        request_platform_managed_start(kind);
+                    }
+                    Probe::Unavailable => {}
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            return Err(ServiceError(format!(
+                "system-managed LoopX {} did not become ready on port {}",
+                kind.label(),
+                kind.port()
+            )));
+        }
+
         let mut command = Command::new(&executable);
         command
             .args(kind.command_args())
@@ -213,6 +241,51 @@ impl ServiceSet {
         }
         self.owned.clear();
     }
+}
+
+#[cfg(target_os = "macos")]
+fn request_platform_managed_start(kind: ServiceKind) -> bool {
+    let label = platform_managed_service_label(kind);
+    let uid = match Command::new("id").arg("-u").output() {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+        _ => return false,
+    };
+    if uid.is_empty() {
+        return false;
+    }
+    let target = format!("gui/{uid}/{label}");
+    let loaded = Command::new("launchctl")
+        .args(["print", target.as_str()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !loaded {
+        return false;
+    }
+    // Keep one service owner. A loaded KeepAlive LaunchAgent may be inside its
+    // throttle interval after stale-runtime replacement; ask launchd to wake
+    // it and wait instead of racing it with a Desktop-owned child process.
+    let _ = Command::new("launchctl")
+        .args(["kickstart", target.as_str()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    true
+}
+
+fn platform_managed_service_label(kind: ServiceKind) -> &'static str {
+    match kind {
+        ServiceKind::Status => "com.loopx.status",
+        ServiceKind::Chat => "com.loopx.chat",
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_platform_managed_start(_kind: ServiceKind) -> bool {
+    false
 }
 
 impl Drop for ServiceSet {

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import pytest
@@ -21,7 +23,12 @@ from loopx.extensions.lark.goal_channel import (
 from loopx.extensions.lark.goal_channel_runtime import (
     auto_notify_lark_goal_channel_gate,
 )
-from loopx.extensions.lark.goal_channel_contracts import write_goal_channel_binding
+from loopx.extensions.lark.goal_channel_contracts import (
+    goal_channel_connection_id,
+    write_goal_channel_binding,
+)
+from loopx.extensions.lark.goal_topic_connections import disconnect_lark_goal_topic
+from loopx.file_lock import exclusive_file_lock, LockAcquireTimeoutError
 from loopx.extensions.lark.presentation.kanban import (
     lark_kanban_schema_payload,
     save_lark_kanban_board_config,
@@ -154,7 +161,7 @@ def _fake_runner(
             text = args[args.index("--text") + 1]
             message_id = (
                 GATE_MESSAGE_ID
-                if text.startswith("LoopX human gate")
+                if text.startswith("LoopX · Action required")
                 else CONTROL_MESSAGE_ID
             )
             sent_texts[message_id] = text
@@ -225,6 +232,30 @@ def _write_binding(binding_path: Path, kanban_path: Path) -> None:
         )
         + "\n",
         encoding="utf-8",
+    )
+
+
+def _gate_test_binding(tmp_path: Path) -> Path:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    binding_path.parent.mkdir(parents=True)
+    _write_binding(binding_path, tmp_path / ".loopx" / "lark-kanban.json")
+    return binding_path
+
+
+def _notify_test_gate(
+    *,
+    tmp_path: Path,
+    binding_path: Path,
+    quota_packet: dict[str, Any],
+    runner: Any,
+) -> dict[str, Any]:
+    return notify_lark_goal_channel_gate(
+        registry=_registry(tmp_path),
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        execute=True,
+        runner=runner,
     )
 
 
@@ -415,6 +446,67 @@ def test_private_binding_atomic_failure_preserves_existing_file(
     assert binding_path.read_bytes() == original_bytes
     assert binding_path.stat().st_mode & 0o777 == 0o600
     assert list(binding_path.parent.glob(f".{binding_path.name}.*.tmp")) == []
+
+
+def test_setup_and_disconnect_share_a_complete_file_transaction(tmp_path: Path) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    entered, release, disconnect_started = Event(), Event(), Event()
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+
+    def delayed_runner(args, cwd, timeout):
+        if "+chat-create" in args:
+            entered.set()
+            assert release.wait(3)
+        return runner(args, cwd, timeout)
+
+    def disconnect():
+        disconnect_started.set()
+        return disconnect_lark_goal_topic(
+            binding_path=binding_path,
+            goal_id=GOAL_ID,
+            connection_id=goal_channel_connection_id(GOAL_ID, None),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        setup = pool.submit(
+            setup_lark_goal_channel,
+            registry=_registry(tmp_path),
+            registry_path=tmp_path / ".loopx" / "registry.json",
+            goal_id=GOAL_ID,
+            binding_path=binding_path,
+            kanban_config_path=tmp_path / ".loopx" / "lark-kanban.json",
+            bot_app_id="cli_public_fixture",
+            execute=True,
+            runner=delayed_runner,
+        )
+        try:
+            assert entered.wait(3)
+            # Real kernel lock must cover provider effects, not only final save.
+            with pytest.raises(LockAcquireTimeoutError):
+                with exclusive_file_lock(binding_path, timeout_seconds=0):
+                    pass
+            removed = pool.submit(disconnect)
+            assert disconnect_started.wait(3)
+        finally:
+            release.set()
+        assert setup.result()["ok"]
+        assert removed.result()["status"] == "disconnected"
+    assert GOAL_ID not in read_goal_channel_binding(binding_path)["bindings"]
+
+
+def test_default_setup_preview_does_not_create_a_lock(tmp_path: Path) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    result = setup_lark_goal_channel(
+        registry=_registry(tmp_path),
+        registry_path=tmp_path / ".loopx" / "registry.json",
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        runner=_fake_runner([]),
+    )
+    assert result["status"] == "preview_ready"
+    assert not binding_path.exists()
+    assert not binding_path.with_name(binding_path.name + ".lock").exists()
 
 
 def test_setup_execute_persists_private_binding_after_verified_pin(
@@ -1006,16 +1098,7 @@ def test_notify_gate_is_idempotent_after_verified_send(tmp_path: Path) -> None:
 def test_notify_gate_distinguishes_different_gate_ids_with_same_question(
     tmp_path: Path,
 ) -> None:
-    binding_path = tmp_path / ".loopx" / "goal-channel.json"
-    binding_path.parent.mkdir(parents=True)
-    kanban_path = tmp_path / ".loopx" / "lark-kanban.json"
-    save_lark_kanban_board_config(
-        kanban_path,
-        base_token="base_public_fixture",
-        table_id="tbl_public_fixture",
-        base_url="https://example.invalid/base/public-fixture",
-    )
-    _write_binding(binding_path, kanban_path)
+    binding_path = _gate_test_binding(tmp_path)
     calls: list[list[str]] = []
     runner = _fake_runner(calls)
 
@@ -1035,20 +1118,16 @@ def test_notify_gate_distinguishes_different_gate_ids_with_same_question(
             },
         }
 
-    first = notify_lark_goal_channel_gate(
-        registry=_registry(tmp_path),
-        goal_id=GOAL_ID,
+    first = _notify_test_gate(
+        tmp_path=tmp_path,
         binding_path=binding_path,
         quota_packet=quota("todo_gate_one"),
-        execute=True,
         runner=runner,
     )
-    second = notify_lark_goal_channel_gate(
-        registry=_registry(tmp_path),
-        goal_id=GOAL_ID,
+    second = _notify_test_gate(
+        tmp_path=tmp_path,
         binding_path=binding_path,
         quota_packet=quota("todo_gate_two"),
-        execute=True,
         runner=runner,
     )
 
@@ -1056,6 +1135,364 @@ def test_notify_gate_distinguishes_different_gate_ids_with_same_question(
     assert second["status"] == "sent_verified"
     assert first["idempotency_key"] != second["idempotency_key"]
     assert sum("+messages-send" in args for args in calls) == 2
+
+
+def test_notify_gate_uses_material_state_generation_not_projection_copy(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+    item = {
+        "todo_id": "todo_gate_fixture",
+        "status": "open",
+        "task_class": "user_gate",
+        "updated_at": "2026-08-08T00:00:00Z",
+        "text": "Approve the bounded external write.",
+    }
+
+    def packet(
+        *,
+        prompt: str,
+        recommended_action: str,
+        projected_action: str,
+    ) -> dict[str, Any]:
+        return {
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": prompt,
+            "recommended_action": recommended_action,
+            "user_todo_summary": {"gate_open_items": [item]},
+            "interaction_contract": {
+                "user_channel": {
+                    "action_required": True,
+                    "notify": "NOTIFY",
+                    "actions": [projected_action],
+                }
+            },
+        }
+
+    first = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=packet(
+            prompt="Approve the bounded external write.",
+            recommended_action="Wait for the owner decision.",
+            projected_action="- [ ] [P0] Approve the bounded external write.",
+        ),
+        runner=runner,
+    )
+    second = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=packet(
+            prompt="Current recommendation: approve the bounded external write.",
+            recommended_action="Keep waiting for the same owner decision.",
+            projected_action="1. Approve the bounded external write.",
+        ),
+        runner=runner,
+    )
+
+    assert first["status"] == "sent_verified"
+    assert second["status"] == "already_sent"
+    assert first["idempotency_key"] == second["idempotency_key"]
+    assert sum("+messages-send" in args for args in calls) == 1
+
+
+def test_notify_gate_does_not_apply_legacy_receipt_to_unknown_material_state(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["receipts"] = {
+        "sha256:legacy": {
+            "kind": "gate_notification",
+            "gate_identity": "todo_gate_fixture",
+            "message_id": GATE_MESSAGE_ID,
+            "verified_at": "2026-08-08T00:00:00+00:00",
+        }
+    }
+    write_goal_channel_binding(binding_path, binding)
+    calls: list[list[str]] = []
+    result = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet={
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": "Approve the changed bounded external write.",
+            "user_todo_summary": {
+                "gate_open_items": [
+                    {
+                        "todo_id": "todo_gate_fixture",
+                        "status": "open",
+                        "task_class": "user_gate",
+                        "updated_at": "2026-08-08T01:00:00Z",
+                        "text": "Approve the changed bounded external write.",
+                    }
+                ]
+            },
+        },
+        runner=_fake_runner(calls),
+    )
+
+    assert result["status"] == "sent_verified"
+    assert sum("+messages-send" in args for args in calls) == 1
+
+
+def test_notify_gate_preserves_exact_legacy_delivery_for_same_target(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    quota_packet = {
+        "state": "operator_gate",
+        "notify_user_on_gate": True,
+        "gate_prompt": "Approve the bounded external write.",
+        "user_todo_summary": {
+            "gate_open_items": [
+                {
+                    "todo_id": "todo_gate_fixture",
+                    "task_class": "user_gate",
+                    "text": "Approve the bounded external write.",
+                }
+            ]
+        },
+    }
+    legacy_key = goal_channel_contracts.semantic_key(
+        GOAL_ID,
+        "lark",
+        "notify_gate",
+        "todo_gate_fixture",
+        "Approve the bounded external write.",
+        CHAT_ID,
+    )
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["receipts"] = {
+        legacy_key: {
+            "kind": "gate_notification",
+            "gate_identity": "todo_gate_fixture",
+            "message_id": GATE_MESSAGE_ID,
+            "verified_at": "2026-08-08T00:00:00+00:00",
+        }
+    }
+    write_goal_channel_binding(binding_path, binding)
+    calls: list[list[str]] = []
+    result = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=_fake_runner(calls),
+    )
+
+    assert result["status"] == "already_sent"
+    assert sum("+messages-send" in args for args in calls) == 0
+
+
+def test_notify_gate_sends_same_generation_once_to_replacement_channel(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+    quota_packet = {
+        "state": "operator_gate",
+        "notify_user_on_gate": True,
+        "gate_prompt": "Approve the bounded external write.",
+        "user_todo_summary": {
+            "gate_open_items": [
+                {
+                    "todo_id": "todo_gate_fixture",
+                    "status": "open",
+                    "task_class": "user_gate",
+                    "updated_at": "2026-08-08T00:00:00Z",
+                    "text": "Approve the bounded external write.",
+                }
+            ]
+        },
+    }
+    first = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=runner,
+    )
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["channel"]["chat_id"] = "oc_second_fixture"
+    write_goal_channel_binding(binding_path, binding)
+    second = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=runner,
+    )
+
+    assert first["status"] == "sent_verified"
+    assert second["status"] == "sent_verified"
+    assert first["idempotency_key"] != second["idempotency_key"]
+    assert sum("+messages-send" in args for args in calls) == 2
+
+
+def test_notify_gate_resends_for_material_transition_or_one_reminder_window(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+
+    def packet(
+        *,
+        updated_at: str,
+        text: str,
+        reminder: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        item = {
+            "todo_id": "todo_gate_fixture",
+            "status": "open",
+            "task_class": "user_gate",
+            "updated_at": updated_at,
+            "text": text,
+        }
+        result: dict[str, Any] = {
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": text,
+            "user_todo_summary": {"gate_open_items": [item]},
+            "interaction_contract": {
+                "user_channel": {
+                    "action_required": True,
+                    "notify": "NOTIFY",
+                    "actions": [text],
+                }
+            },
+        }
+        if reminder is not None:
+            result["user_gate_notification_cooldown"] = reminder
+        return result
+
+    initial = packet(
+        updated_at="2026-08-08T00:00:00Z",
+        text="Approve the bounded external write.",
+    )
+    changed = packet(
+        updated_at="2026-08-08T01:00:00Z",
+        text="Approve the bounded external write after reviewing the diff.",
+    )
+    reminder = {
+        "notification_due": True,
+        "notification_suppressed": False,
+        "policy": "failed_host_update_bounded_reminder_window",
+        "failed_at": "2026-08-08T00:00:00Z",
+        "next_reminder_at": "2026-08-08T03:00:00Z",
+        "cooldown_minutes": 60,
+        "reminder_window_minutes": 5,
+    }
+
+    first = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=initial,
+        runner=runner,
+    )
+    material = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=changed,
+        runner=runner,
+    )
+    reminded = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=packet(
+            updated_at="2026-08-08T01:00:00Z",
+            text="Approve the bounded external write after reviewing the diff.",
+            reminder=reminder,
+        ),
+        runner=runner,
+    )
+    reminder_replay = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=packet(
+            updated_at="2026-08-08T01:00:00Z",
+            text="Approve the bounded external write after reviewing the diff.",
+            reminder=reminder,
+        ),
+        runner=runner,
+    )
+
+    assert first["status"] == "sent_verified"
+    assert material["status"] == "sent_verified"
+    assert reminded["status"] == "sent_verified"
+    assert reminder_replay["status"] == "already_sent"
+    assert (
+        len(
+            {
+                first["idempotency_key"],
+                material["idempotency_key"],
+                reminded["idempotency_key"],
+            }
+        )
+        == 3
+    )
+    assert sum("+messages-send" in args for args in calls) == 3
+
+
+def test_notify_gate_honors_interaction_contract_and_renders_one_clear_action_list(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    calls: list[list[str]] = []
+    quota_packet = {
+        "state": "operator_gate",
+        "notify_user_on_gate": True,
+        "gate_prompt": "- Current recommendation: approve. - User todo: revoke key.",
+        "recommended_action": "Approve the same gate again.",
+        "interaction_contract": {
+            "user_channel": {
+                "action_required": False,
+                "notify": "DONT_NOTIFY",
+                "actions": [
+                    "- [ ] [P0] Approve the bounded change.",
+                    "12. Revoke the test key.",
+                ],
+            }
+        },
+    }
+
+    rejected = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=_fake_runner(calls),
+    )
+    message, _question = goal_channel_contracts.gate_message(
+        goal_id=GOAL_ID,
+        objective="Deliver one bounded change.",
+        quota_packet={
+            **quota_packet,
+            "interaction_contract": {
+                "user_channel": {
+                    "action_required": True,
+                    "notify": "NOTIFY",
+                    "actions": [
+                        "- [ ] [P0] Approve the bounded change.",
+                        "12. Revoke the test key.",
+                    ],
+                }
+            },
+        },
+        kanban_url="https://example.invalid/kanban",
+    )
+
+    assert rejected["status"] == "rejected"
+    assert rejected["blocker"] == "state_transition_rejected"
+    assert calls == []
+    assert message.startswith("LoopX · Action required\n\nGoal:")
+    assert "\n1. Approve the bounded change." in message
+    assert "\n2. Revoke the test key." in message
+    assert "Current recommendation" not in message
+    assert "Next safe action" not in message
+    assert "\n- " not in message
 
 
 def test_notify_gate_reports_missing_shared_target_for_direct_caller(
@@ -1090,7 +1527,7 @@ def test_notify_gate_reports_missing_shared_target_for_direct_caller(
     _assert_public_packet(payload)
 
 
-def test_notify_gate_resends_when_existing_receipt_readback_is_stale(
+def test_notify_gate_does_not_resend_unchanged_generation_when_readback_is_stale(
     tmp_path: Path,
 ) -> None:
     binding_path = tmp_path / ".loopx" / "goal-channel.json"
@@ -1144,11 +1581,55 @@ def test_notify_gate_resends_when_existing_receipt_readback_is_stale(
     )
 
     assert first["status"] == "sent_verified"
-    assert second["status"] == "sent_verified"
+    assert second["status"] == "already_sent"
     assert second["readback_verified"] is True
-    assert sum("+messages-send" in args for args in calls) == first_send_count + 1
+    assert sum("+messages-send" in args for args in calls) == first_send_count
+    assert mget_count == 1
     _assert_public_packet(first)
     _assert_public_packet(second)
+
+
+def test_notify_gate_records_sent_unverified_generation_before_returning(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    calls: list[list[str]] = []
+    base_runner = _fake_runner(calls)
+
+    def runner(
+        args: list[str],
+        cwd: Path | None,
+        timeout: float | None,
+    ) -> dict[str, object]:
+        if "+messages-mget" in args:
+            calls.append(args)
+            return _result({"ok": True, "data": {"items": []}})
+        return base_runner(args, cwd, timeout)
+
+    quota_packet = {
+        "state": "operator_gate",
+        "notify_user_on_gate": True,
+        "gate_prompt": "Approve the bounded external write.",
+    }
+    first = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=runner,
+    )
+    second = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=runner,
+    )
+
+    assert first["status"] == "sent_unverified"
+    assert first["external_write_performed"] is True
+    assert second["status"] == "already_sent"
+    assert second["readback_verified"] is False
+    assert sum("+messages-send" in args for args in calls) == 1
+    assert sum("+messages-mget" in args for args in calls) == 1
 
 
 def test_notify_gate_respects_quota_cooldown_without_external_call(
@@ -1537,9 +2018,7 @@ def test_cli_rejects_custom_binding_path_for_auto_notify(
     assert result == 1
     assert captured["blocker"] == "noncanonical_binding_path"
     assert (
-        read_goal_channel_binding(custom_binding)["bindings"][GOAL_ID].get(
-            "automation"
-        )
+        read_goal_channel_binding(custom_binding)["bindings"][GOAL_ID].get("automation")
         is None
     )
 

@@ -933,14 +933,16 @@ async function captureHomeVisualAcceptance(page, url, label) {
       throw new Error(`Manager projection answer exposed a raw Goal id: ${projectedAnswerText}`);
     }
 
-    const agentSelect = page.getByLabel("选择 Agent");
-    const agentOptions = await agentSelect.locator("option").allTextContents();
+    const agentSelect = page.getByRole("combobox", { name: "选择聊天 Runtime" });
+    await agentSelect.click();
+    const agentListbox = page.getByRole("listbox", { name: "选择聊天 Runtime" });
+    const agentOptions = await agentListbox.getByRole("option").allTextContents();
     for (const text of ["Codex", "仅查状态"]) {
       if (!agentOptions.some((option) => option.includes(text))) {
         throw new Error(`${label} Agent selector missing: ${text}`);
       }
     }
-    await agentSelect.selectOption("status-only");
+    await agentListbox.getByRole("option", { name: "仅查状态", exact: true }).click();
     await composer.fill("当前健康状态");
     await sendButton.click();
     const statusOnlyAnswer = page.locator(".personal-manager-conversation-tray .is-assistant").last();
@@ -951,11 +953,12 @@ async function captureHomeVisualAcceptance(page, url, label) {
       }
     }
     await page.reload({ waitUntil: "networkidle" });
-    const persistedAgent = await page.getByLabel("选择 Agent").inputValue();
+    const persistedAgent = await page.getByRole("combobox", { name: "选择聊天 Runtime" }).getAttribute("data-value");
     if (persistedAgent !== "status-only") {
       throw new Error(`Manager Agent selection did not persist per Chat: ${persistedAgent}`);
     }
-    await page.getByLabel("选择 Agent").selectOption("codex");
+    await page.getByRole("combobox", { name: "选择聊天 Runtime" }).click();
+    await page.getByRole("listbox", { name: "选择聊天 Runtime" }).getByRole("option", { name: "Codex", exact: true }).click();
   }
 
   const goalList = page.locator(".personal-goal-list");
@@ -1092,9 +1095,10 @@ async function captureHomeVisualAcceptance(page, url, label) {
     throw new Error(`${label} Goal Chat does not expose the owning Agent.`);
   }
 
-  const agentTrigger = page.getByLabel("选择 Agent");
-  const agentMenu = agentTrigger.locator("option");
-  const agentMenuText = (await agentMenu.allTextContents()).join("\n");
+  const agentTrigger = page.getByRole("combobox", { name: "选择聊天 Runtime" });
+  await agentTrigger.click();
+  const agentMenu = page.getByRole("listbox", { name: "选择聊天 Runtime" });
+  const agentMenuText = (await agentMenu.getByRole("option").allTextContents()).join("\n");
   for (const text of ["Codex", "仅查状态"]) {
     if (!agentMenuText.includes(text)) {
       throw new Error(`${label} Agent selector missing: ${text}`);
@@ -1103,12 +1107,13 @@ async function captureHomeVisualAcceptance(page, url, label) {
   if (/token|secret|key|密钥/iu.test(agentMenuText)) {
     throw new Error(`${label} Agent selector leaked credential-oriented text: ${agentMenuText}`);
   }
-  const unavailableOptions = agentMenu.filter({ hasText: "不可用" });
+  const unavailableOptions = agentMenu.getByRole("option").filter({ hasText: "不可用" });
   for (let index = 0; index < await unavailableOptions.count(); index += 1) {
     if (!await unavailableOptions.nth(index).isDisabled()) {
       throw new Error(`${label} unavailable Agent option remained selectable.`);
     }
   }
+  await page.keyboard.press("Escape");
   if (isMobile) {
     const menuBox = await agentTrigger.boundingBox();
     if (!menuBox || menuBox.x < 0 || menuBox.x + menuBox.width > await page.evaluate(() => window.innerWidth)) {

@@ -19,6 +19,7 @@ from ..effect_program import (
 from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
+from . import subagent_execution_topology as subagent
 from .driver import selected_turn_todo
 from .host_failure import BuiltInHostError, project_host_failure, record_host_failure
 from .journal_store import (
@@ -99,6 +100,7 @@ HOST_RESULT_FIELDS = {
     "summary",
 }
 
+
 Writeback = Callable[..., dict[str, Any]]
 CompletionWriteback = Callable[..., dict[str, Any]]
 CompletionIntent = Callable[[dict[str, Any]], dict[str, Any]]
@@ -156,9 +158,7 @@ def build_loopx_turn_host_request(plan: Mapping[str, Any]) -> dict[str, Any]:
             "stdout": "one public-safe JSON object",
         },
     }
-    child_operations = plan.get("child_operations")
-    if isinstance(child_operations, list) and child_operations:
-        request["child_operations"] = child_operations
+    request.update(subagent.subagent_host_request_projection(plan))
     return request
 
 
@@ -266,7 +266,8 @@ def validate_loopx_turn_host_result(
 ) -> dict[str, Any]:
     result = dict(value)
     errors: list[str] = []
-    unknown = sorted(set(result) - HOST_RESULT_FIELDS)
+    allowed_fields = HOST_RESULT_FIELDS | subagent.subagent_host_result_fields(plan)
+    unknown = sorted(set(result) - allowed_fields)
     if unknown:
         errors.append("unsupported host result fields: " + ", ".join(unknown))
     if result.get("schema_version") != LOOPX_TURN_RESULT_SCHEMA_VERSION:
@@ -355,6 +356,8 @@ def validate_loopx_turn_host_result(
         errors.append(
             "wait and user_action_required results cannot declare a path delta"
         )
+    if subagent.subagent_execution_topology(plan) is not None:
+        subagent.observe_subagent_host_result(plan, result, normalized, errors)
     return {
         "ok": not errors,
         "result": normalized,
@@ -813,6 +816,7 @@ def _execution_payload(
         "validation": journal.get("task_validation"),
         "receipt": journal.get("receipt"),
         "scheduler": journal.get("scheduler"),
+        **subagent.subagent_execution_payload_projection(journal),
         "effects": dict(effects),
         "quota_slot_spend_count": 1 if quota_spent else 0,
         **(

@@ -330,13 +330,14 @@ Codex App heartbeat、Codex CLI visible Goal 或其他 Host 不必都用同一�
 
 !!! info "当前成熟度"
     TurnEnvelope 目前是显式启用的 bounded projection，不是默认 quota 输出；LoopX Turn 是
-    experimental protocol，但 `v0.5.2` 已有可执行的 `turn plan` / `turn run-once` 路径和
+    experimental protocol，但 `v0.5.4` 仍提供可执行的 `turn plan` / `turn run-once` 路径和
     Host adapter。它们适合贡献者理解边界和做显式 opt-in 集成，不应被描述成所有 Host 都默认采用的
     recurring runtime。
 
 ### TypeScript Effect Program 在这一轮中的位置
 
-`v0.5.2` 已把 Effect Program 与若干高风险事务的 canonical semantics 迁到 TypeScript：
+`v0.5.4` 在 Effect Program 基础上，进一步把完整 transaction 的 canonical semantics 迁到
+TypeScript：
 
 ```text
 Python CLI / Host adapter
@@ -346,9 +347,12 @@ Python CLI / Host adapter
   -> Python compatibility projection / explicit external Provider
 ```
 
-其中 Turn settlement、Todo completion、quota delivery routing、workspace causality 与 scheduler
-state 已有 TypeScript owner。Python 仍是当前 CLI、外部 Provider adapter 和部分持久化写回的
-重要组成，不应把迁移理解成“Python 已被移除”，也不能在 Python facade 中重新实现同一条规则。
+已发布的 typed owner 包括 Turn settlement、Todo completion 与 Host Todo settlement，quota
+delivery routing、spend/void/monitor-poll commit，本地 task-lease 完整生命周期，Vision refresh、
+governed capability-lifecycle validation，以及 scheduler heartbeat/state 与 receipt-bound scheduler
+follow-up。Python 仍负责当前 CLI transport、明确的外部 Provider/Host effect、legacy projection 和
+尚未迁移的 Markdown/event 写回；不应把迁移理解成“Python 已被移除”，也不能在 Python facade 中
+重新实现同一条规则。
 
 当前 `main` 的
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)

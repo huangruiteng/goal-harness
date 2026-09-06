@@ -6,6 +6,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from ..coordination.coordination_state_contract_generated import (
+    DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA,
+    DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA,
+    DELIVERY_WORKSPACE_CAUSALITY_SCHEMA,
+    DELIVERY_WORKSPACE_LEGACY_RECEIPT_EVIDENCE_SCHEMA,
+    DELIVERY_WORKSPACE_RESOLUTION_SCHEMA,
+    DELIVERY_WORKSPACE_SETTLEMENT_REQUIREMENT_SCHEMA,
+)
 from ..todos.contract import (
     normalize_required_write_scopes,
     normalize_todo_continuation_policy,
@@ -13,19 +21,13 @@ from ..todos.contract import (
     normalize_todo_task_repository,
 )
 
-DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION = "delivery_workspace_causality_v0"
-DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA = (
-    "loopx_delivery_workspace_causality_request_v0"
-)
-DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA = (
-    "loopx_delivery_workspace_causality_result_v0"
-)
-DELIVERY_WORKSPACE_RESOLUTION_SCHEMA_VERSION = "delivery_workspace_resolution_v0"
+DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION = DELIVERY_WORKSPACE_CAUSALITY_SCHEMA
+DELIVERY_WORKSPACE_RESOLUTION_SCHEMA_VERSION = DELIVERY_WORKSPACE_RESOLUTION_SCHEMA
 SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION = (
-    "settlement_workspace_requirement_v0"
+    DELIVERY_WORKSPACE_SETTLEMENT_REQUIREMENT_SCHEMA
 )
 LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION = (
-    "legacy_settlement_receipt_evidence_v0"
+    DELIVERY_WORKSPACE_LEGACY_RECEIPT_EVIDENCE_SCHEMA
 )
 DELIVERY_WORKSPACE_REQUIREMENTS = frozenset({"required", "not_required", "unknown"})
 

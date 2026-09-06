@@ -1,0 +1,215 @@
+"""Loopback Chat API boundary for preview-locked per-Goal sub-agent settings."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .control_plane.goals.configure_goal_service import configure_goal_with_global_sync
+from .control_plane.todos.contract import normalize_todo_task_domain
+from .status_server import configure_goal_preview_id
+
+
+CHAT_GOAL_SUBAGENT_DRY_RUN_PATH = "/api/chat/goal-subagents/dry-run"
+CHAT_GOAL_SUBAGENT_APPLY_PATH = "/api/chat/goal-subagents/apply"
+CHAT_GOAL_SUBAGENT_MAX_CHILDREN = 32
+
+
+def goal_subagent_configuration_enabled(server: Any) -> bool:
+    return bool(getattr(server, "goal_subagent_configuration_enabled", False))
+
+
+def add_goal_subagent_capability(
+    capabilities: dict[str, Any],
+    *,
+    server: Any,
+) -> None:
+    if goal_subagent_configuration_enabled(server):
+        capabilities["goal_subagent_configuration"] = "preview_locked"
+
+
+def add_goal_subagent_routes(
+    routes: dict[str, Any],
+    *,
+    handler: Any,
+) -> None:
+    if goal_subagent_configuration_enabled(handler.server):
+        routes[CHAT_GOAL_SUBAGENT_DRY_RUN_PATH] = (
+            lambda: handler._goal_subagent_configuration(apply=False)
+        )
+        routes[CHAT_GOAL_SUBAGENT_APPLY_PATH] = (
+            lambda: handler._goal_subagent_configuration(apply=True)
+        )
+
+
+class GoalSubagentConfigurationRequestMixin:
+    """Preview and apply the existing canonical Goal orchestration policy."""
+
+    server: Any
+
+    def _read_json(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def _registry_and_goal(self, goal_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise NotImplementedError
+
+    def _send_error(self, message: str, **kwargs: Any) -> None:
+        raise NotImplementedError
+
+    def _send_json(self, payload: dict[str, Any], *, status: int = 200) -> None:
+        raise NotImplementedError
+
+    def _parse_goal_subagent_configuration(
+        self,
+        body: dict[str, Any],
+        *,
+        apply: bool,
+    ) -> dict[str, Any]:
+        allowed = {"goal_id", "enabled", "max_children", "allowed_domains"}
+        if apply:
+            allowed.add("preview_id")
+        unknown = sorted(set(body) - allowed)
+        if unknown:
+            raise ValueError(
+                "unknown Goal sub-agent configuration field(s): " + ", ".join(unknown)
+            )
+
+        goal_id = " ".join(str(body.get("goal_id") or "").split())[:160].strip()
+        if not goal_id:
+            raise ValueError("goal_id is required")
+        self._registry_and_goal(goal_id)
+        if not isinstance(body.get("enabled"), bool):
+            raise ValueError("enabled must be a boolean")
+        enabled = body["enabled"]
+
+        if enabled:
+            max_children = body.get("max_children")
+            if isinstance(max_children, bool) or not isinstance(max_children, int):
+                raise ValueError("max_children must be an integer")
+            if not 1 <= max_children <= CHAT_GOAL_SUBAGENT_MAX_CHILDREN:
+                raise ValueError(
+                    "max_children must be between 1 and "
+                    f"{CHAT_GOAL_SUBAGENT_MAX_CHILDREN}"
+                )
+            raw_domains = body.get("allowed_domains", [])
+            if not isinstance(raw_domains, list):
+                raise ValueError(
+                    "allowed_domains must be a list of public-safe task domains"
+                )
+            allowed_domains: list[str] = []
+            for raw_domain in raw_domains:
+                domain = normalize_todo_task_domain(raw_domain)
+                if not domain:
+                    raise ValueError(
+                        "allowed_domains must contain public-safe lowercase task-domain tokens"
+                    )
+                if domain not in allowed_domains:
+                    allowed_domains.append(domain)
+        else:
+            if body.get("max_children") not in (None, 0):
+                raise ValueError(
+                    "disabled Goal sub-agents require max_children 0 or omitted"
+                )
+            if body.get("allowed_domains") not in (None, []):
+                raise ValueError(
+                    "disabled Goal sub-agents require allowed_domains [] or omitted"
+                )
+            max_children = 0
+            allowed_domains = []
+
+        return {
+            "goal_id": goal_id,
+            "multi_subagent_feature": "enabled" if enabled else "off",
+            "max_children": max_children,
+            "allowed_domains": allowed_domains,
+        }
+
+    def _goal_subagent_configuration_payload(
+        self,
+        body: dict[str, Any],
+        *,
+        apply: bool,
+        execute: bool,
+    ) -> dict[str, Any]:
+        values = self._parse_goal_subagent_configuration(body, apply=apply)
+        return configure_goal_with_global_sync(
+            registry_path=self.server.registry_path,
+            goal_id=values["goal_id"],
+            runtime_root_override=self.server.runtime_root_override,
+            multi_subagent_feature=values["multi_subagent_feature"],
+            max_children=values["max_children"],
+            allowed_domains=values["allowed_domains"],
+            execute=execute,
+        )
+
+    @staticmethod
+    def _compact_goal_subagent_configuration(
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "ok": bool(payload.get("ok")),
+            "dry_run": payload.get("dry_run"),
+            "execute": payload.get("execute"),
+            "written": payload.get("written"),
+            "changed": payload.get("changed"),
+            "goal_id": payload.get("goal_id"),
+            "changed_fields": payload.get("changed_fields"),
+            "before": payload.get("before"),
+            "after": payload.get("after"),
+            "preview_id": configure_goal_preview_id(payload),
+            "orchestration_summary": payload.get("orchestration_summary"),
+            "feature_summary": payload.get("feature_summary"),
+            "global_sync": payload.get("global_sync"),
+            "partial_write": bool(payload.get("partial_write")),
+            "error": payload.get("error"),
+            "recommended_action": payload.get("recommended_action"),
+        }
+
+    def _goal_subagent_configuration(self, *, apply: bool) -> None:
+        try:
+            body = self._read_json()
+            if apply:
+                preview_id = str(body.get("preview_id") or "").strip()
+                if not preview_id:
+                    raise ValueError("preview_id is required")
+                dry_run = self._goal_subagent_configuration_payload(
+                    body,
+                    apply=True,
+                    execute=False,
+                )
+                expected_preview = self._compact_goal_subagent_configuration(dry_run)[
+                    "preview_id"
+                ]
+                if preview_id != expected_preview:
+                    self._send_error(
+                        "stale Goal sub-agent preview; generate a new preview before applying",
+                        status=409,
+                        error_code="stale_goal_subagent_preview",
+                    )
+                    return
+                payload = self._goal_subagent_configuration_payload(
+                    body,
+                    apply=True,
+                    execute=True,
+                )
+            else:
+                payload = self._goal_subagent_configuration_payload(
+                    body,
+                    apply=False,
+                    execute=False,
+                )
+        except ValueError as exc:
+            self._send_error(
+                str(exc),
+                status=400,
+                error_code="invalid_goal_subagent_configuration",
+            )
+            return
+        except Exception:
+            self._send_error(
+                "Goal sub-agent configuration could not be completed.",
+                status=400,
+                error_code="goal_subagent_configuration_failed",
+            )
+            return
+        response = self._compact_goal_subagent_configuration(payload)
+        self._send_json(response, status=200 if response["ok"] else 409)

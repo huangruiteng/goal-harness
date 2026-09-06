@@ -449,10 +449,9 @@ def semantic_delta_from_writeback(
         path_outcome = ""
         if isinstance(agent_vision, Mapping):
             vision_state = normalize_goal_vision_state(agent_vision.get("state"))
-            path_delta = (
-                agent_vision.get("path_delta")
-                if isinstance(agent_vision.get("path_delta"), Mapping)
-                else {}
+            raw_path_delta = agent_vision.get("path_delta")
+            path_delta: Mapping[str, Any] = (
+                raw_path_delta if isinstance(raw_path_delta, Mapping) else {}
             )
             path_outcome = str(path_delta.get("outcome") or "").strip()
         if vision_state != "no_followup" or path_outcome != "stop":
@@ -463,15 +462,13 @@ def semantic_delta_from_writeback(
             )
 
     if isinstance(agent_vision, Mapping):
-        patch = (
-            agent_vision.get("vision_patch")
-            if isinstance(agent_vision.get("vision_patch"), Mapping)
-            else {}
+        raw_patch = agent_vision.get("vision_patch")
+        patch: Mapping[str, Any] = (
+            raw_patch if isinstance(raw_patch, Mapping) else {}
         )
+        raw_path_delta = agent_vision.get("path_delta")
         path_delta = (
-            agent_vision.get("path_delta")
-            if isinstance(agent_vision.get("path_delta"), Mapping)
-            else {}
+            raw_path_delta if isinstance(raw_path_delta, Mapping) else {}
         )
         path_outcome = str(path_delta.get("outcome") or "").strip()
         evidence_refs = [
@@ -629,17 +626,18 @@ def build_replan_action_packet(
     successor_priority = str(todo_action.get("priority") or "P1").strip()
     if successor_priority not in {"P0", "P1", "P2", "P3", "P4"}:
         successor_priority = "P1"
-    selected_gap = (
+    raw_selected_gap = (
         bounded_research_frontier.get("selected_gap")
         if isinstance(bounded_research_frontier, Mapping)
-        and isinstance(bounded_research_frontier.get("selected_gap"), Mapping)
         else None
     )
-    raw_successor_binding = (
-        selected_gap.get("successor_binding")
-        if isinstance(selected_gap, Mapping)
-        and isinstance(selected_gap.get("successor_binding"), Mapping)
-        else {}
+    selected_gap: Mapping[str, Any] | None = (
+        raw_selected_gap if isinstance(raw_selected_gap, Mapping) else None
+    )
+    selected_gap_values: Mapping[str, Any] = selected_gap or {}
+    raw_binding = selected_gap_values.get("successor_binding")
+    raw_successor_binding: Mapping[str, Any] = (
+        raw_binding if isinstance(raw_binding, Mapping) else {}
     )
     successor_binding = replan_successor_semantic_binding(
         action_kind=raw_successor_binding.get("action_kind"),
@@ -650,9 +648,9 @@ def build_replan_action_packet(
     )
     writeback_contract: dict[str, Any] = {}
     successor_summary = str(
-        (selected_gap or {}).get("successor_summary") or ""
+        selected_gap_values.get("successor_summary") or ""
     ).strip()[:240]
-    if isinstance(selected_gap, Mapping) and successor_summary and successor_binding:
+    if selected_gap is not None and successor_summary and successor_binding:
         safe_goal_id = _stable_id(goal_id, field="goal_id") or "<goal-id>"
         safe_agent_id = (
             _stable_id(agent_id or obligation.get("agent_id"), field="agent_id")

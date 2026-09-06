@@ -251,6 +251,7 @@ def test_grouped_monitor_keeps_creator_ownership_across_turns_and_due_poll(
     with pytest.raises(ValueError, match=f"claimed_by={AGENT_ID!r}"):
         write_monitor_poll_todo_state(
             registry_path=registry,
+            runtime_root=tmp_path / "runtime",
             goal_id=GOAL_ID,
             todo_id=todo_id,
             result_hash=monitor["result_hash"],
@@ -262,6 +263,7 @@ def test_grouped_monitor_keeps_creator_ownership_across_turns_and_due_poll(
 
     polled = write_monitor_poll_todo_state(
         registry_path=registry,
+        runtime_root=tmp_path / "runtime",
         goal_id=GOAL_ID,
         todo_id=todo_id,
         result_hash=monitor["result_hash"],

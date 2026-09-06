@@ -27,7 +27,7 @@ def _peer_management(*agent_ids: str) -> dict[str, Any]:
 def _todo(
     todo_id: str,
     *,
-    task_domain: str = "code",
+    task_domain: str | None = "code",
     action_kind: str = "inspect",
     task_repository: str | None = None,
     required_capabilities: list[str] | None = None,
@@ -41,9 +41,10 @@ def _todo(
         "task_class": "advancement_task",
         "priority": "P0",
         "text": f"Advance {todo_id}",
-        "task_domain": task_domain,
         "action_kind": action_kind,
     }
+    if task_domain is not None:
+        item["task_domain"] = task_domain
     if required_capabilities:
         item["required_capabilities"] = required_capabilities
     if required_write_scopes:
@@ -97,12 +98,32 @@ def test_admission_requires_observed_spawn_capability() -> None:
     assert contract is None
 
 
+def test_admission_without_domain_filter_accepts_tagged_and_untagged_lanes() -> None:
+    contract = _contract(
+        [
+            _todo("todo_primary", task_domain=None),
+            _todo("todo_untagged", task_domain=None),
+            _todo("todo_docs", task_domain="docs"),
+        ],
+        available_capabilities=["subagent_spawn"],
+        allowed_domains=[],
+    )
+
+    assert contract is not None
+    assert [lane["todo_id"] for lane in contract["eligible_child_lanes"]] == [
+        "todo_untagged",
+        "todo_docs",
+    ]
+    assert contract["blocked_lanes"] == []
+
+
 def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
     contract = _contract(
         [
             _todo("todo_primary"),
             _todo("todo_child", required_capabilities=["network"]),
             _todo("todo_wrong_domain", task_domain="docs"),
+            _todo("todo_untagged", task_domain=None),
             _todo("todo_waiting", resume_ready=False),
         ],
         available_capabilities=["subagent_spawn", "network"],
@@ -127,14 +148,12 @@ def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
             "allowed": ["fresh"],
         },
         "expected_output": "public_safe_evidence",
-        "child_decision": "continue",
         "execution_policy": {
             "timeout": "bounded_by_host_turn",
             "cancel": "task_coordinator_or_host_timeout",
         },
-        "validation_policy": (
-            "run todo-scoped validation when applicable and report commands/results"
-        ),
+        "child_guard_policy": "prevention_first_v0",
+        "validation_policy": "child reports evidence; parent runs declared todo gate",
         "acceptance": [
             "report completed scope and evidence",
             "report validation result and residual risk",
@@ -168,8 +187,45 @@ def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
     }
     assert blocked == {
         "todo_wrong_domain": ["task_domain_not_allowed"],
+        "todo_untagged": ["task_domain_not_allowed"],
         "todo_waiting": ["dependency_not_ready"],
     }
+
+
+def test_admission_exposes_context_fork_only_as_explicit_host_capability() -> None:
+    contract = _contract(
+        [
+            _todo("todo_primary"),
+            _todo("todo_child"),
+        ],
+        available_capabilities=["subagent_spawn", "subagent_context_fork"],
+    )
+
+    assert contract is not None
+    assert contract["child_brief_defaults"]["context_policy"] == {
+        "selection_owner": "task_coordinator",
+        "default": "fresh",
+        "allowed": ["fresh", "forked_snapshot"],
+    }
+
+
+def test_admission_keeps_declared_validation_with_registered_parent() -> None:
+    validation_child = _todo("todo_child")
+    validation_child["completion_validation_required"] = True
+    contract = _contract(
+        [
+            _todo("todo_primary"),
+            validation_child,
+        ],
+        available_capabilities=["subagent_spawn"],
+    )
+
+    assert contract is not None
+    child_brief = contract["eligible_child_lanes"][0]["child_brief"]
+    assert child_brief["validation_declared"] is True
+    assert child_brief["validation_label"] is None
+    assert "validation_command" not in child_brief
+    assert "validation_command_argv" not in child_brief
 
 
 def test_admission_serializes_overlapping_write_scopes() -> None:

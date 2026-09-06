@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 from .agent_scope_frontier import (
     AGENT_LANE_FRONTIER_HINT_SCHEMA_VERSION,
@@ -87,15 +87,12 @@ _ACTION_SCOPE_STOPWORDS = {
 }
 
 AGENT_TASK_SCOPE = "goal_all_read_claimed_run_global_read_v0"
-
-
-def _agent_identity_has_scoped_lane(agent_identity: dict[str, Any] | None) -> bool:
-    return bool(
-        isinstance(agent_identity, dict)
-        and normalize_todo_claimed_by(agent_identity.get("agent_id"))
+def _agent_identity_has_scoped_lane(
+    agent_identity: dict[str, Any] | None,
+) -> TypeGuard[dict[str, object]]:
+    return isinstance(agent_identity, dict) and bool(
+        normalize_todo_claimed_by(agent_identity.get("agent_id"))
     )
-
-
 def _attach_agent_identity_contracts(
     *,
     payload: dict[str, Any],
@@ -110,9 +107,7 @@ def _attach_agent_identity_contracts(
 
 def _todo_task_class(item: dict[str, Any]) -> str:
     return todo_item_task_class(item)
-
-
-def _todo_projection_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
+def _todo_projection_sort_key(item: dict[str, Any]) -> tuple[int, int]:
     return todo_projection_sort_key(item)
 
 
@@ -377,17 +372,12 @@ def _scoped_user_gate_fallback(
     gates = _open_user_gate_todo_items(user_todo_summary)
     if not gates or not isinstance(agent_todo_summary, dict):
         return None
-
-    due_monitor_candidates = (
-        agent_todo_summary.get("monitor_due_items")
-        if isinstance(agent_todo_summary.get("monitor_due_items"), list)
-        else []
+    raw_due_monitor_candidates = agent_todo_summary.get("monitor_due_items")
+    due_monitor_candidates = raw_due_monitor_candidates if isinstance(raw_due_monitor_candidates, list) else []
+    raw_ready_deferred_candidates = agent_todo_summary.get(
+        "deferred_resume_candidates"
     )
-    ready_deferred_candidates = (
-        agent_todo_summary.get("deferred_resume_candidates")
-        if isinstance(agent_todo_summary.get("deferred_resume_candidates"), list)
-        else []
-    )
+    ready_deferred_candidates = raw_ready_deferred_candidates if isinstance(raw_ready_deferred_candidates, list) else []
 
     # An empty capability projection is authoritative for advancement work.
     # Due monitors are projected separately from advancement candidates and are
@@ -404,11 +394,13 @@ def _scoped_user_gate_fallback(
             *ready_deferred_candidates,
         ]
     else:
+        raw_backlog_items = agent_todo_summary.get("executable_backlog_items")
+        raw_first_items = agent_todo_summary.get("first_executable_items")
         advancement_items = (
-            agent_todo_summary.get("executable_backlog_items")
-            if isinstance(agent_todo_summary.get("executable_backlog_items"), list)
-            else agent_todo_summary.get("first_executable_items")
-            if isinstance(agent_todo_summary.get("first_executable_items"), list)
+            raw_backlog_items
+            if isinstance(raw_backlog_items, list)
+            else raw_first_items
+            if isinstance(raw_first_items, list)
             else []
         )
         executable_items = [
@@ -518,11 +510,8 @@ def _scoped_user_gate_fallback(
 def _first_executable_todo_text(agent_todo_summary: dict[str, Any] | None) -> str | None:
     if not isinstance(agent_todo_summary, dict):
         return None
-    items = (
-        agent_todo_summary.get("first_executable_items")
-        if isinstance(agent_todo_summary.get("first_executable_items"), list)
-        else []
-    )
+    raw_items = agent_todo_summary.get("first_executable_items")
+    items = raw_items if isinstance(raw_items, list) else []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -540,7 +529,8 @@ def _first_monitor_todo_text(agent_todo_summary: dict[str, Any] | None) -> str |
     if not isinstance(agent_todo_summary, dict):
         return None
     for key in ("monitor_due_items", "monitor_open_items"):
-        items = agent_todo_summary.get(key) if isinstance(agent_todo_summary.get(key), list) else []
+        raw_items = agent_todo_summary.get(key)
+        items = raw_items if isinstance(raw_items, list) else []
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -946,7 +936,8 @@ def _agent_scope_monitor_blocked_resume_candidates(
             continue
         if item.get("resume_ready") is not False:
             continue
-        condition = item.get("resume_condition") if isinstance(item.get("resume_condition"), dict) else {}
+        raw_condition = item.get("resume_condition")
+        condition = raw_condition if isinstance(raw_condition, dict) else {}
         if normalize_todo_status(condition.get("target_status")) != TODO_STATUS_OPEN:
             continue
         target_todo_id = normalize_todo_id(

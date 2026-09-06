@@ -66,10 +66,13 @@ recurring report: the host schedule should match that custom profile's RRULE.
 Pausing the Automation or setting the profile to `enabled: false` stops that
 scheduled path.
 
-External delivery and archival are separate opt-ins. Adding a sink binding
-does not grant authority by itself; the selected extension, runtime capability,
-execution decision, and exact readback must still pass their own gates. A
-normal in-session weekly report has no sink and performs no external write.
+External delivery and archival are separate opt-ins. A normal in-session weekly
+report has no sink and performs no external write. For the machine/Goal
+`periodic_report` subscription, however, `enabled: true` together with an
+explicit `route_ref` is standing authority to deliver reports produced at
+validated stage boundaries. The selected extension, runtime capability,
+configured route, sender identity, and exact readback must still pass their
+own fail-closed gates.
 
 The capability is intentionally effect-free. It first evaluates scheduled or
 material progress facts into a deterministic trigger receipt, then composes a
@@ -94,8 +97,8 @@ later stage includes only new facts and facts whose fingerprint changed;
 changed facts carry their prior status and kind so the editorial step can
 render a transition instead of repeating the old item. If no supplied fact is
 new or changed, the post-writeback producer emits no report intent. Local
-generation, approval, and failed or partial delivery never advance this
-cursor. A successful Goal Channel delivery records the predecessor
+generation and failed or partial delivery never advance this cursor. A
+successful Goal Channel delivery records the predecessor
 publication identity for the next report.
 
 An enabled custom profile may also declare `trigger_policy.aggregation` with a
@@ -111,8 +114,8 @@ No Todo predeclaration or separate Stage lifecycle is required. Todo count,
 elapsed time, ordinary completion, and blocker/stall/long-chain/monitor replans
 remain context and never produce a report by themselves. The producer performs
 no provider call or external write; an eligible receipt continues through the
-existing `compose-run`, renderer, and separately authorized approval and sink
-boundaries.
+existing `compose-run`, renderer, standing subscription authority, and sink
+readback boundaries.
 The CLI streams the append-only log and applies the 4,096-row capacity limit
 only after goal, segment-window, and relevant-kind filtering. Malformed durable
 rows and an oversized relevant window fail closed.
@@ -149,21 +152,25 @@ Todo completion, and generic replan produce no provider invocation or intent.
 
 The intent is not a report and grants no generation, publication, connector,
 network, credential, or sink authority. A separate governed executor may
-evaluate it into the normal trigger decision. Report composition, Miaoda HTML,
-content review, explicit owner approval, and any group delivery remain later
-independent gates.
+evaluate it into the normal trigger decision. At consumption time LoopX reads
+the current effective subscription again: a disabled subscription suppresses
+the action, while an enabled subscription with an explicit route supplies the
+standing delivery authority. Report composition, Miaoda HTML, content checks,
+provider readiness, and group-message readback remain later independent gates.
 
 `quota should-run` reads eligible `intent_recorded` sidecars for the exact Goal
 and Agent. A pending intent takes precedence over monitor-quiet and terminal
 no-follow-up projection and returns one TypeScript-validated governed command.
 That command may render provider-free local HTML and Markdown, run content
-checks, persist the normalized generation bundle, and create one blocked
-delivery successor plus one approval Todo bound to that successor and frozen
-generation digest. Exact replay does not rerender or duplicate either Todo.
-Approval consumes only that successor's decision scope and resumes it, so
-normal Todo/quota selection can see the required delivery work. Miaoda
-publication and group delivery remain unauthorized until that exact Todo is
-approved.
+checks, persist the normalized generation bundle, and create one runnable
+delivery successor bound to the frozen generation digest and current effective
+subscription. Exact replay does not rerender or duplicate the Todo. The delivery
+request carries that subscription's Goal, source, effective revision, and route;
+the Lark provider revalidates it immediately before each message write. Normal
+Todo/quota selection can therefore continue into Miaoda publication, Lark
+document creation, and Goal Channel delivery without another per-report owner
+gate. Disabling the subscription revokes pending automatic delivery; route,
+provider, sender-identity, or readback drift still fails closed.
 
 Project-specific scheduled reports should be layered as profiles and adapters.
 For example, a maintenance profile may choose a local timezone and weekly
@@ -204,8 +211,11 @@ identity. The intent instead supplies exactly two ordered HTTPS entries—the
 hosted report and the Lark document. Execution sends two independent messages,
 verifies the bound Bot and chat before send, then requires exact
 interactive-card, chat, and Bot-identity readback for both. Missing or drifted
-identity, either missing message, or a partial readback fails closed without a
-user/default-Bot fallback.
+identity or subscription authority, either missing message, or a partial readback
+fails closed without a user/default-Bot fallback. Retries first scan the complete
+Goal Channel history from the frozen generation time and reuse only an exact card,
+chat, and Bot-sender match. Incomplete history fails closed instead of risking a
+duplicate; the stable provider idempotency key closes the concurrent-send race.
 
 This is a built-in capability, not an extension: callers need the trigger,
 idempotency, retry, and receipt contract even when no provider is installed.
@@ -518,5 +528,5 @@ local status server can expose the latest report as a typed, content-addressed
 milestone projection. Its compact index deliberately omits report prose; the
 full projection is fetched over the loopback-only cold path and is accepted
 only when its generation id and digest match the current publication cursor.
-Pending approvals and generation-only artifacts remain invisible. The view is
-informational and has no browser write authority.
+Pending delivery work and generation-only artifacts remain invisible. The view
+is informational and has no browser write authority.

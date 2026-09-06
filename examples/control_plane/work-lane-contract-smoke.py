@@ -130,6 +130,7 @@ def assert_blocker_writeback_satisfies_contract_followthrough() -> None:
     compact = compact_post_handoff_run(
         {
             "classification": "runner_precise_blocker_writeback",
+            "delivery_turn_kind": "blocker_writeback",
             "delivery_batch_scale": "implementation",
             "delivery_outcome": "outcome_gap",
             "health_check": "precise blocker writeback: remote runner auth unavailable",

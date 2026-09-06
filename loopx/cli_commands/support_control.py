@@ -295,6 +295,13 @@ def register_support_control_commands(
         help="Enable POST /control-plane/configure-goal/apply on loopback only so the dashboard can write registry settings.",
     )
     serve_status_parser.add_argument(
+        "--enable-goal-subagent-configuration",
+        action="store_true",
+        help=(
+            "Expose the Goal sub-agent status projection. Disabled by default."
+        ),
+    )
+    serve_status_parser.add_argument(
         "--global-registry",
         action="store_true",
         help="Serve the shared global registry view even when invoked from a project directory.",
@@ -371,6 +378,14 @@ def register_support_control_commands(
         help="Use the shared global registry even when the command runs in a project directory.",
     )
     chat_parser.add_argument(
+        "--enable-goal-subagent-configuration",
+        action="store_true",
+        help=(
+            "Enable the preview-locked Goal sub-agent configuration API, "
+            "status projection, and dashboard controls."
+        ),
+    )
+    chat_parser.add_argument(
         "--no-open",
         action="store_true",
         help="Start the local server without opening a browser.",
@@ -434,6 +449,14 @@ def register_support_control_commands(
         "--global-registry",
         action="store_true",
         help="Use the shared global registry even when the command runs in a project directory.",
+    )
+    dashboard_parser.add_argument(
+        "--enable-goal-subagent-configuration",
+        action="store_true",
+        help=(
+            "Enable the preview-locked Goal sub-agent configuration API, "
+            "status projection, and dashboard controls."
+        ),
     )
     dashboard_parser.add_argument(
         "--no-open",
@@ -848,6 +871,9 @@ def handle_support_control_command(
                     args.enable_control_plane_write_api
                 ),
                 verbose=bool(args.verbose),
+                enable_goal_subagent_configuration=bool(
+                    args.enable_goal_subagent_configuration
+                ),
             )
         except Exception as exc:
             payload = {
@@ -893,6 +919,9 @@ def handle_support_control_command(
                 verbose=getattr(args, "verbose", False),
                 open_browser=not getattr(args, "no_open", False),
                 prefer_dev=getattr(args, "dev", False),
+                enable_goal_subagent_configuration=bool(
+                    getattr(args, "enable_goal_subagent_configuration", False)
+                ),
             )
         except Exception as exc:
             payload = {
@@ -934,6 +963,9 @@ def handle_support_control_command(
                 else None,
                 open_browser=not bool(args.no_open),
                 verbose=bool(args.verbose),
+                enable_goal_subagent_configuration=bool(
+                    args.enable_goal_subagent_configuration
+                ),
             )
         except Exception as exc:
             payload = {

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from . import chat_configuration_api as config_api
 from .attached_session_api import AttachedSessionRequestMixin
 from .chat import (
     TodoReviewPreviewConflict,
@@ -22,6 +23,12 @@ from .chat_agent import CodexChatAgentError
 from .chat_attachments import normalize_chat_image_attachments
 from .chat_actions import ChatActionService, ProtectedActionGate
 from .chat_action_store import ACTION_KINDS, ActionConflictError, ChatActionStore
+from .chat_goal_subagent_api import (
+    GoalSubagentConfigurationRequestMixin,
+    add_goal_subagent_capability,
+    add_goal_subagent_routes,
+)
+from .chat_status_api import ChatStatusRequestMixin
 from .chat_runtime import ChatRuntimeController, TERMINAL_TURN_STATES
 from .chat_ssh_source_api import SSH_SOURCE_ENSURE_PATH, SshSourceRequestMixin
 from .chat_store import ChatSessionStore
@@ -34,7 +41,6 @@ from .chat_lark_api import (
     build_goal_repository_contexts as build_goal_repository_contexts,
     build_lark_goal_topic_runtime_snapshot,
 )
-from . import chat_machine_configuration_api as machine_config_api
 from .extensions.lark import LARK_EXTENSION_ID, LARK_GOAL_CHANNEL_PERMISSION
 from .extensions.lark.app_setup import LarkAppSetupManager
 from .extensions.lark.cli_resolution import (
@@ -60,11 +66,11 @@ from .extensions.runtime import (
     resolve_extension_activation,
 )
 from .history import load_registry
+from .chat_completed_todos import CompletedTodoPages, CompletedTodoRequestMixin
 from .paths import resolve_runtime_root
 from .release_manifest import release_runtime_identity
 from .registry import registry_goals, resolve_state_file
 from .state_projection import build_active_state_structured_projection
-from .status import collect_status
 from .status_server import (
     cors_response_headers,
     is_loopback_host,
@@ -102,6 +108,8 @@ CHAT_LARK_CHATS_PATH = "/api/chat/lark/chats"
 CHAT_LARK_CONNECTIONS_PATH = "/api/chat/lark/connections"
 CHAT_ACTIONS_PATH = "/api/actions"
 CHAT_ACTION_PREVIEW_PATH = f"{CHAT_ACTIONS_PATH}/preview"
+
+
 def chat_cors_response_headers(origin: str | None) -> dict[str, str]:
     headers = cors_response_headers(origin)
     if headers:
@@ -413,9 +421,11 @@ class ChatHTTPServer(ThreadingHTTPServer):
     lark_app_setup_manager: LarkAppSetupManager
     lark_goal_topic_runtime: LarkGoalTopicRuntimeService
     ssh_config_path: Path | None
+    goal_subagent_configuration_enabled: bool
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.completed_todo_pages = CompletedTodoPages()
 
     def server_close(self) -> None:
         if hasattr(self, "lark_app_setup_manager"):
@@ -428,10 +438,13 @@ class ChatHTTPServer(ThreadingHTTPServer):
 
 
 class ChatRequestHandler(
+    CompletedTodoRequestMixin,
     AttachedSessionRequestMixin,
     SshSourceRequestMixin,
+    GoalSubagentConfigurationRequestMixin,
     LarkChatRequestMixin,
-    machine_config_api.MachineConfigurationRequestMixin,
+    config_api.ChatConfigurationRequestMixin,
+    ChatStatusRequestMixin,
     BaseHTTPRequestHandler,
 ):
     server: ChatHTTPServer
@@ -535,31 +548,6 @@ class ChatRequestHandler(
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
-
-    def _status(self) -> None:
-        try:
-            projection = collect_status(
-                registry_path=self.server.registry_path,
-                runtime_root_override=self.server.runtime_root_override,
-                scan_roots=self.server.scan_roots,
-                limit=self.server.limit,
-                goal_id=self.server.selected_goal_id,
-                include_public_boundary_scan=False,
-            )
-            protected_paths = [
-                self.server.registry_path,
-                *self.server.scan_roots,
-            ]
-            projection = json.loads(
-                redact_local_paths(
-                    json.dumps(projection, ensure_ascii=False),
-                    protected_paths=protected_paths,
-                )
-            )
-        except Exception:
-            self._send_error("LoopX status could not be projected for the workspace.", status=500)
-            return
-        self._send_json(projection)
 
     def _create_session(self) -> None:
         try:
@@ -1284,26 +1272,26 @@ class ChatRequestHandler(
             self._send_json({"ok": True})
             return
         if path == CHAT_CAPABILITIES_PATH:
-            self._send_json(
-                {
-                    "ok": True,
-                    "schema_version": "loopx_chat_capabilities_v1",
-                    "runtime_identity": release_runtime_identity(),
-                    "agent_backend": "multi_adapter",
-                    "sandbox": "read-only",
-                    "approval_policy": "never",
-                    "todo_write": "preview_locked",
-                    "goal_id": self.server.selected_goal_id,
-                    "streaming": True,
-                    "resume": True,
-                    "interrupt": True,
-                    "typed_actions": True,
-                    "attached_session_broker": True,
-                    "action_kinds": sorted(ACTION_KINDS),
-                    "adapters": self.server.runtime_controller.capabilities(),
-                    "lark_cli": self.server.lark_cli_resolution.public_snapshot(),
-                }
-            )
+            capabilities = {
+                "ok": True,
+                "schema_version": "loopx_chat_capabilities_v1",
+                "runtime_identity": release_runtime_identity(),
+                "agent_backend": "multi_adapter",
+                "sandbox": "read-only",
+                "approval_policy": "never",
+                "todo_write": "preview_locked",
+                "goal_id": self.server.selected_goal_id,
+                "streaming": True,
+                "resume": True,
+                "interrupt": True,
+                "typed_actions": True,
+                "attached_session_broker": True,
+                "action_kinds": sorted(ACTION_KINDS),
+                "adapters": self.server.runtime_controller.capabilities(),
+                "lark_cli": self.server.lark_cli_resolution.public_snapshot(),
+            }
+            add_goal_subagent_capability(capabilities, server=self.server)
+            self._send_json(capabilities)
             return
         if path == CHAT_ENDPOINTS_PATH:
             return self._send_json(
@@ -1314,6 +1302,7 @@ class ChatRequestHandler(
                 }
             )
         get_dispatch = {
+            "/api/chat/completed-todos": self._completed_todos,
             CHAT_SESSIONS_PATH: self._list_sessions,
             CHAT_ACTIONS_PATH: self._action_list,
             CHAT_GOAL_CONTEXTS_PATH: self._goal_contexts,
@@ -1321,7 +1310,7 @@ class ChatRequestHandler(
             CHAT_LARK_CHATS_PATH: self._lark_chats,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connections,
             CHAT_GOAL_CHANNEL_TARGETS_PATH: self._goal_channel_targets,
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_PATH: self._machine_configuration_inspect,
+            **self._configuration_get_routes(),
             DEFAULT_CHAT_STATUS_PATH: self._status,
             SSH_HOST_CATALOG_PATH: self._ssh_hosts,
         }
@@ -1361,11 +1350,10 @@ class ChatRequestHandler(
             CHAT_GOAL_CHANNEL_CONFIGURE_PATH: self._goal_channel_configure,
             CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connect,
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_PREVIEW_PATH: lambda: self._machine_configuration_update(execute=False),
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_APPLY_PATH: lambda: self._machine_configuration_update(execute=True),
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_ROLLBACK_PATH: self._machine_configuration_rollback,
+            **self._configuration_post_routes(),
             SSH_SOURCE_ENSURE_PATH: self._ssh_source_ensure,
         }
+        add_goal_subagent_routes(post_dispatch, handler=self)
         if path in post_dispatch:
             return post_dispatch[path]()
         session_action_parts = path.strip("/").split("/")
@@ -1431,6 +1419,7 @@ def serve_chat(
     assets_dir: Path | None = None,
     open_browser: bool = False,
     verbose: bool = False,
+    enable_goal_subagent_configuration: bool = False,
 ) -> None:
     if not is_loopback_host(host):
         raise ValueError("loopx chat requires a loopback --host such as 127.0.0.1")
@@ -1461,6 +1450,9 @@ def serve_chat(
     server.assets_dir = resolved_assets
     server.verbose = verbose
     server.ssh_config_path = None
+    server.goal_subagent_configuration_enabled = (
+        enable_goal_subagent_configuration
+    )
     server.lark_cli_resolution = lark_cli_resolution
     server.lark_runner = build_lark_command_runner(server.lark_cli_resolution)
     server.lark_app_setup_manager = LarkAppSetupManager(
@@ -1503,6 +1495,8 @@ def serve_chat(
     print(f"Serving LoopX Chat at {url}", flush=True)
     print("Agent boundary: local adapters, read-only sandbox, approval policy never", flush=True)
     print("Todo writes: preview-locked on loopback", flush=True)
+    if enable_goal_subagent_configuration:
+        print("Goal sub-agent configuration: preview-locked opt-in enabled", flush=True)
     if open_browser:
         webbrowser.open(url)
     try:

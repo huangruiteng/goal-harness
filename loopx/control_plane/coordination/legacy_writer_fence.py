@@ -17,11 +17,11 @@ from ..effect_runtime import effect_runtime_result
 from ...file_lock import exclusive_file_lock
 from ...history import load_registry
 from ...paths import resolve_runtime_root
-
-
-LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA = (
-    "loopx_legacy_coordination_write_check_request_v0"
+from .coordination_state_contract_generated import (
+    LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
 )
+
+
 LEGACY_COORDINATION_WRITE_CHECK_METHOD = (
     "coordination.local_authority.legacy_write_check"
 )
@@ -121,17 +121,25 @@ def legacy_todo_write_transaction(
     agent_id: str | None,
     operation: str,
     dry_run: bool,
+    *,
+    runtime_root: Path | None = None,
 ) -> Iterator[None]:
-    """Serialize promotion with one complete legacy Todo mutation."""
+    """Serialize promotion with one complete legacy Todo mutation.
 
-    runtime_root = resolve_runtime_root(
+    ``runtime_root`` is the effective runtime root of the CLI call (the
+    ``--runtime-root`` override when given) so the mutex and the fence check
+    share the same root as promotion and the observation hooks.  Callers that
+    omit it keep the registry-derived root.
+    """
+
+    resolved_runtime_root = runtime_root or resolve_runtime_root(
         load_registry(registry_path),
         None,
         registry_path=registry_path,
     )
     with exclusive_file_lock(
         legacy_coordination_todo_lock_path(
-            runtime_root=runtime_root,
+            runtime_root=resolved_runtime_root,
             goal_id=goal_id,
         ),
         agent_id=agent_id,
@@ -143,7 +151,7 @@ def legacy_todo_write_transaction(
     ):
         if not dry_run:
             require_legacy_coordination_write_allowed(
-                runtime_root=runtime_root,
+                runtime_root=resolved_runtime_root,
                 goal_id=goal_id,
             )
         yield

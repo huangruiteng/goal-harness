@@ -2,9 +2,16 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <title>LoopX Desktop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LoopX</title>
+    <link rel="stylesheet" href="boot.css" />
   </head>
   <body>
-    <p>LoopX desktop shell loads the local Chat workspace at /chat/.</p>
+    <main aria-busy="true" aria-live="polite" data-state="loading" role="status">
+      <header><span aria-hidden="true" class="mark">L</span><h1>LoopX</h1></header>
+      <p id="status">正在启动本地控制面…</p>
+      <div aria-hidden="true" class="progress"></div>
+    </main>
+    <script src="boot.js"></script>
   </body>
 </html>

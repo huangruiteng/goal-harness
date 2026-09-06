@@ -39,6 +39,7 @@ PRIMARY_SHOWCASE_IDS = [
     "2026-06-19-dynamic-workflow-hardware-agent",
     "2026-06-19-loopx-self-iteration",
     "2026-06-17-blocked-p0-safe-rotation",
+    "2026-09-dsh-loopx-replan",
 ]
 
 

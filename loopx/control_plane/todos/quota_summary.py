@@ -287,10 +287,16 @@ def validate_todo_source_contract(
         key: _strict_non_negative_int(value.get(key))
         for key in ("total_count", "open_count", "done_count", "deferred_count")
     }
+    total_count = counts["total_count"]
+    open_count = counts["open_count"]
+    done_count = counts["done_count"]
+    deferred_count = counts["deferred_count"]
     valid_counts = (
-        all(count is not None for count in counts.values())
-        and counts["total_count"]
-        == counts["open_count"] + counts["done_count"] + counts["deferred_count"]
+        total_count is not None
+        and open_count is not None
+        and done_count is not None
+        and deferred_count is not None
+        and total_count == open_count + done_count + deferred_count
     )
     valid_proof = bool(
         isinstance(proof, dict)
@@ -299,11 +305,12 @@ def validate_todo_source_contract(
         and proof.get("derived") is True
         and bool(str(value.get("source_section") or "").strip())
         and type(proof.get("item_count")) is int
-        and proof.get("item_count") == counts["total_count"]
+        and proof.get("item_count") == total_count
     )
     valid_terminal_closure = bool(
         valid_counts
         and valid_proof
+        and isinstance(proof, dict)
         and _terminal_closure_proof_is_valid(
             value,
             counts=counts,
@@ -320,18 +327,25 @@ def validate_todo_source_contract(
 
     intent = value.get("closure_intent")
     terminal_proof = value.get("terminal_closure_proof")
+    intent_count = intent.get("count") if isinstance(intent, dict) else None
     valid_intent = bool(
         valid_terminal_closure
         and isinstance(intent, dict)
         and intent.get("schema_version") == "todo_closure_intent_v0"
         and intent.get("kind") == "no_followup"
         and intent.get("derived") is True
-        and type(intent.get("count")) is int
-        and 0 < intent.get("count") <= counts["done_count"]
+        and type(intent_count) is int
+        and done_count is not None
+        and 0 < intent_count <= done_count
         and isinstance(terminal_proof, dict)
-        and intent.get("count") == terminal_proof.get("no_followup_count")
+        and intent_count == terminal_proof.get("no_followup_count")
     )
-    return completeness, {**intent, "source": "todo_no_followup"} if valid_intent else None
+    closure_intent = (
+        {**intent, "source": "todo_no_followup"}
+        if valid_intent and isinstance(intent, dict)
+        else None
+    )
+    return completeness, closure_intent
 
 
 def _build_quota_todo_lanes(

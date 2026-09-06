@@ -9,7 +9,10 @@ from typing import Any
 
 from loopx.extensions.lark.event_collector import _jq_projection
 from loopx.extensions.lark.event_inbox import inspect_lark_event_inbox
-from loopx.extensions.lark.goal_channel_contracts import read_goal_channel_binding
+from loopx.extensions.lark.goal_channel_contracts import (
+    binding_for_goal,
+    read_goal_channel_binding,
+)
 from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets
 from loopx.extensions.lark.goal_topic_connections import connect_lark_goal_topic
 
@@ -358,7 +361,8 @@ def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
 
     assert connected["ok"] is True
     assert configured[0]["lark_event_inbox_agent_id"] == "agent-alpha"
-    binding = read_goal_channel_binding(binding_path)["bindings"]["goal-alpha"]
+    binding = binding_for_goal(read_goal_channel_binding(binding_path), "goal-alpha")
+    assert binding is not None
     assert binding["agent_id"] == "agent-alpha"
     assert binding["routing"]["capture_scope"] == "addressed_only"
     assert binding["routing"]["ingress_mode"] == "async_inbox"
@@ -435,7 +439,11 @@ def test_invalid_persisted_routing_state_never_answers_replies_or_acknowledges(
     )
     assert connected["ok"] is True
     binding = read_goal_channel_binding(binding_path)
-    binding["bindings"]["goal-alpha"]["routing"]["ingress_mode"] = "async-inbox"
+    connection = binding_for_goal(binding, "goal-alpha")
+    assert connection is not None
+    binding["bindings"]["goal-alpha"]["connections"][connection["connection_id"]][
+        "routing"
+    ]["ingress_mode"] = "async-inbox"
 
     result = process_lark_goal_topic_event(
         target_payload=read_goal_channel_targets(target_path),

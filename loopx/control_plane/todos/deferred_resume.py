@@ -170,11 +170,13 @@ def todo_summary_deferred_items(
 ) -> list[dict[str, Any]]:
     if not isinstance(value, dict):
         return []
-    source_items = value.get(key) if isinstance(value.get(key), list) else []
+    raw_source_items = value.get(key)
+    source_items = raw_source_items if isinstance(raw_source_items, list) else []
     if not source_items and key == "deferred_items":
+        raw_items = value.get("items")
         source_items = [
             item
-            for item in value.get("items", [])
+            for item in (raw_items if isinstance(raw_items, list) else [])
             if isinstance(item, dict) and todo_item_is_deferred(item)
         ]
     items: list[dict[str, Any]] = []
@@ -214,14 +216,14 @@ def _dedupe_todo_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def todo_summary_resume_blocked_items(value: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(value, dict):
         return []
+    raw_source_items = value.get("resume_blocked_items")
     source_items = (
-        value.get("resume_blocked_items")
-        if isinstance(value.get("resume_blocked_items"), list)
-        else []
+        list(raw_source_items) if isinstance(raw_source_items, list) else []
     )
     if not source_items:
         for key in ("items", "backlog_items", "first_open_items"):
-            raw_items = value.get(key) if isinstance(value.get(key), list) else []
+            raw_value_items = value.get(key)
+            raw_items = raw_value_items if isinstance(raw_value_items, list) else []
             source_items.extend(item for item in raw_items if isinstance(item, dict))
     items: list[dict[str, Any]] = []
     for item in source_items:
@@ -250,7 +252,8 @@ def _monitor_target_todo_ids(value: dict[str, Any]) -> set[str]:
         "backlog_items",
         "first_open_items",
     ):
-        source_items = value.get(key) if isinstance(value.get(key), list) else []
+        raw_items = value.get(key)
+        source_items = raw_items if isinstance(raw_items, list) else []
         for item in source_items:
             if not isinstance(item, dict):
                 continue
@@ -270,11 +273,8 @@ def todo_summary_monitor_blocked_resume_items(
     for item in todo_summary_resume_blocked_items(value):
         if _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
             continue
-        condition = (
-            item.get("resume_condition")
-            if isinstance(item.get("resume_condition"), dict)
-            else {}
-        )
+        raw_condition = item.get("resume_condition")
+        condition = raw_condition if isinstance(raw_condition, dict) else {}
         if condition.get("kind") == "monitor_changed":
             # This is the intentional typed wait lifecycle.  The monitor stays
             # independently schedulable and its generation fence owns resume;
@@ -334,11 +334,8 @@ def todo_summary_blocked_successor_items(
         if claimed_by and claimed_by != agent_id:
             continue
         resume_when = normalize_todo_resume_when(item.get("resume_when"))
-        condition = (
-            item.get("resume_condition")
-            if isinstance(item.get("resume_condition"), dict)
-            else {}
-        )
+        raw_condition = item.get("resume_condition")
+        condition = raw_condition if isinstance(raw_condition, dict) else {}
         if not resume_when or condition.get("satisfied") is not False:
             continue
         target_task_class = normalize_todo_task_class(

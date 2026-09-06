@@ -215,8 +215,8 @@ def register_project_lifecycle_commands(
         "--delivery-batch-scale",
         choices=DELIVERY_BATCH_SCALE_INPUT_CHOICES,
         help=(
-            "Optional explicit delivery scale for this refresh run, overriding "
-            "classification-name inference. Accepts canonical scales plus "
+            "Explicit delivery scale for this refresh run; missing scale stays unknown. "
+            "Accepts canonical scales plus "
             "single_segment/bounded_segment aliases for single_surface."
         ),
     )

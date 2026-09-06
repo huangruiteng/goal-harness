@@ -83,6 +83,14 @@ qualification.
   bounded account probe before fallback is admitted; only a fresh quota-limited
   probe may create a replacement cooldown.
 
+`qualify_outage_recovery`
+: Orders the end of a provider-wide incident against the stale native cooldown
+  and degraded fallback affinity it created. A recovery signal newer than the
+  cooldown source must invalidate the cooldown, run a bounded probe and clear
+  or revalidate the fallback binding before a native-capability request is
+  admitted. Text-only traffic may remain on the fallback only while the probe
+  still reports an outage.
+
 `qualify_tool_transport`
 : Checks that a requested tool item type survives provider adaptation and that
   host dispatch completes. In particular, Code Mode `custom_tool_call` must not
@@ -142,6 +150,10 @@ loopx extension run loopx-codex-provider-routing \
   --execute \
   --format json
 loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/outage-recovery.json \
+  --execute \
+  --format json
+loopx extension run loopx-codex-provider-routing \
   --input-json packages/loopx-codex-provider-routing/examples/tool-transport.json \
   --execute \
   --format json
@@ -167,6 +179,7 @@ The earlier operator scripts split into three classes:
 | App/CPA model readback assertions | Migrated as the content-free `qualify_snapshot` contract |
 | Patched desktop ASAR/signature/launch checks | Migrated as `qualify_desktop_patch`; the effectful bundle patcher stays operator-owned |
 | Quota reset versus cached cooldown reconciliation | Migrated as `qualify_quota_recovery`; live cooldown invalidation and probing stay CPA-owned |
+| Provider incident end versus stale native cooldown and degraded fallback affinity | Migrated as `qualify_outage_recovery`; live invalidation, bounded probe and binding revalidation stay CPA-owned |
 | Ordered PR/patch candidate inventory and drift detection | Migrated as `reconcile_integration_candidate`; Git composition remains owned by LoopX core `integration-branch` |
 | Upgrade matrix, snapshot order and rollback triggers | Migrated as `upgrade_plan`; effect execution remains operator-owned |
 | CPA process launcher, OAuth login/reconcile, Ark key loading | Excluded; these are provider runtime and credential lifecycle, not LoopX state |
@@ -188,3 +201,12 @@ python3 packages/loopx-codex-provider-routing/smoke/recovery_contracts_smoke.py
 python3 -m pytest -q tests/extensions/test_colocated_extension_layout.py
 loopx check --scan-path packages/loopx-codex-provider-routing
 ```
+
+## Optional local operator
+
+Version 0.9 adds a separately invoked `loopx-cpa-operator` CLI for explicit local
+configuration, account enrollment, catalog generation, process supervision and
+readback. It ships the A/B/C Sol/Astra preset while preserving the managed
+extension's read-only protocol and the original A/B qualification default.
+See [Local CPA operator](OPERATOR.md) for activation, exact target boundaries,
+validation, rollback and disable commands.

@@ -44,6 +44,77 @@ def _native_codex_isolation_supported() -> bool:
     return _namespace_mounts_supported() and shutil.which("tini") is not None
 
 
+@pytest.mark.skipif(
+    not _native_codex_isolation_supported(), reason="Linux namespace mounts required"
+)
+@pytest.mark.parametrize("resource_parent", ["bin", "distribution"])
+def test_standalone_companions_visible_but_distribution_neighbors_hidden(
+    tmp_path, resource_parent
+):
+    private = tmp_path / "private"
+    work = tmp_path / "work"
+    binary_dir = tmp_path / "distribution" / "bin"
+    for directory in (private, work, binary_dir / "codex-resources"):
+        directory.mkdir(parents=True)
+    binary = binary_dir / "codex"
+    companion_root = binary_dir if resource_parent == "bin" else binary_dir.parent
+    (companion_root / "codex-resources").mkdir(exist_ok=True)
+    companion = companion_root / "codex-resources" / "bwrap"
+    code_host = binary_dir / "codex-code-mode-host"
+    neighbor = binary_dir / "unrelated-data"
+    neighbor.write_text("must remain hidden")
+    companion.write_text("#!/bin/sh\nexit 0\n")
+    code_host.write_text("#!/bin/sh\nexit 0\n")
+    binary.write_text(
+        '#!/bin/sh\nset -eu\n"$1"\n"$2"\n'
+        '[ ! -e "$3" ]\n[ "$4" = "argument with spaces" ]\n'
+    )
+    for path in (binary, companion, code_host):
+        path.chmod(0o755)
+    envelope = build_native_codex_isolation_envelope(
+        executable=str(binary),
+        process_args=[
+            str(companion),
+            str(code_host),
+            str(neighbor),
+            "argument with spaces",
+        ],
+        work_dir=work,
+        private_root=private,
+    )
+    result = subprocess.run(
+        envelope.process_command, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(shutil.which("tini") is None, reason="tini required")
+@pytest.mark.parametrize("target_kind", ["private_file", "directory", "missing"])
+def test_standalone_companion_rejects_symlink_or_non_file(tmp_path, target_kind):
+    private = tmp_path / "private"
+    work = tmp_path / "work"
+    binary_dir = tmp_path / "distribution" / "bin"
+    for directory in (private, work, binary_dir / "codex-resources"):
+        directory.mkdir(parents=True)
+    binary = binary_dir / "codex"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    companion = binary_dir / "codex-resources" / "bwrap"
+    if target_kind == "directory":
+        companion.mkdir()
+    else:
+        target = private / "runtime"
+        if target_kind == "private_file":
+            target.write_text("restricted")
+        companion.symlink_to(target)
+    with pytest.raises(
+        NativeCodexIsolationError, match="native_codex_companion_invalid"
+    ):
+        build_native_codex_isolation_envelope(
+            executable=str(binary), process_args=[], work_dir=work, private_root=private
+        )
+
+
 def test_native_codex_isolation_rejects_overlapping_authority_roots(
     tmp_path: Path,
 ) -> None:

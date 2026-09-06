@@ -217,7 +217,8 @@ def todo_summary_handoff_gates(value: dict[str, Any]) -> list[dict[str, Any]]:
     projected = value.get("handoff_gates")
     if isinstance(projected, list):
         return [item for item in projected if isinstance(item, dict)]
-    source_items = value.get("items") if isinstance(value.get("items"), list) else []
+    raw_items = value.get("items")
+    source_items = raw_items if isinstance(raw_items, list) else []
     return build_todo_handoff_gate_states(source_items)
 
 

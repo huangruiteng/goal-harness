@@ -165,7 +165,9 @@ def base_payload(
             "first_open_items": [advancement_item()] if should_run else [],
         },
         "automation_liveness": {
-            "automation_action": "execute_bounded_work" if should_run else "keep_active_quiet",
+            "automation_action": "execute_bounded_work"
+            if should_run
+            else "keep_active_quiet",
             "pause_allowed": False,
         },
     }
@@ -188,7 +190,9 @@ def finalize(payload: dict[str, Any]) -> dict[str, Any]:
     payload["scheduler_hint"] = build_scheduler_hint(
         payload,
         user_action_required=user_channel_action_required(payload),
-        agent_scope_frontier_actions=[action.value for action in AgentScopeFrontierAction],
+        agent_scope_frontier_actions=[
+            action.value for action in AgentScopeFrontierAction
+        ],
         scheduler_execution_context=APP_SCHEDULER_CONTEXT,
     )
     payload["protocol_action_packet"] = build_protocol_action_packet(payload)
@@ -476,6 +480,40 @@ def assert_user_action_is_non_blocking_notice() -> None:
     assert "user_action_pending=true" in summary, summary
 
 
+def assert_gate_cooldown_suppresses_non_blocking_notice() -> None:
+    payload = base_payload(
+        should_run=False,
+        effective_action="monitor_quiet_skip",
+        work_lane=monitor_quiet_lane(),
+        heartbeat_mode="monitor_quiet_until_material_transition",
+    )
+    user_action = {
+        "todo_id": "todo_user_action_cooldown",
+        "status": "open",
+        "task_class": "user_action",
+        "text": "Confirm one bounded action.",
+    }
+    payload["user_todo_summary"] = {
+        "first_open_items": [user_action],
+        "user_action_items": [user_action],
+    }
+    payload["user_gate_notification_cooldown"] = {
+        "notification_due": False,
+        "notification_suppressed": True,
+        "reason": "the same gate is outside its explicit reminder window",
+    }
+    contract = build_interaction_contract(
+        payload,
+        scheduler_execution_context=APP_SCHEDULER_CONTEXT,
+    )
+    user_channel = contract["user_channel"]
+    assert contract["mode"] == "user_gate_cooldown_wait", contract
+    assert user_channel["action_required"] is False, contract
+    assert user_channel["notify"] == "DONT_NOTIFY", contract
+    assert "non_blocking" not in user_channel, contract
+    assert "actions" not in user_channel, contract
+
+
 def assert_monitor_quiet_skip_is_no_spend() -> None:
     payload = finalize(
         base_payload(
@@ -493,8 +531,12 @@ def assert_monitor_quiet_skip_is_no_spend() -> None:
     assert contract["cli_channel"]["spend_policy"] == (
         "no spend for unchanged heartbeat stall receipt"
     ), contract
-    assert "heartbeat_receipt" in contract["cli_channel"]["next_cli_actions"][0], contract
-    assert "--turn-instance-id" in contract["cli_channel"]["next_cli_actions"][0], contract
+    assert "heartbeat_receipt" in contract["cli_channel"]["next_cli_actions"][0], (
+        contract
+    )
+    assert "--turn-instance-id" in contract["cli_channel"]["next_cli_actions"][0], (
+        contract
+    )
     assert "LOOPX_TURN" in contract["cli_channel"]["next_cli_actions"][0], contract
 
 
@@ -514,7 +556,9 @@ def assert_autonomous_replan_projects_accountable_settlement() -> None:
     assert contract["mode"] == "autonomous_replan", payload
     assert contract["agent_channel"]["must_attempt"] is True, contract
     assert contract["cli_channel"]["spend_after_validation"] is True, contract
-    assert "accountable replan delta" in contract["cli_channel"]["spend_policy"], contract
+    assert "accountable replan delta" in contract["cli_channel"]["spend_policy"], (
+        contract
+    )
     assert "surface_only" in contract["cli_channel"]["spend_policy"], contract
     settlement = contract["cli_channel"]["settlement_plan"]
     assert settlement["identity"]["binding_kind"] == "autonomous_replan", contract
@@ -550,7 +594,9 @@ def assert_agent_scope_wait_is_quiet_noop() -> None:
 def assert_successor_replan_is_validated_spend_path() -> None:
     payload = _successor_replan_payload()
     contract = payload["interaction_contract"]
-    assert contract["mode"] == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value, payload
+    assert (
+        contract["mode"] == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
+    ), payload
     assert contract["agent_channel"]["must_attempt"] is True, contract
     assert contract["cli_channel"]["spend_after_validation"] is True, contract
     assert contract["cli_channel"]["spend_policy"].startswith("spend once"), contract
@@ -590,6 +636,7 @@ def main() -> int:
     assert_bounded_delivery_bundle()
     assert_user_notice_can_coexist_with_bounded_delivery()
     assert_user_action_is_non_blocking_notice()
+    assert_gate_cooldown_suppresses_non_blocking_notice()
     assert_monitor_quiet_skip_is_no_spend()
     assert_autonomous_replan_projects_accountable_settlement()
     assert_agent_scope_wait_is_quiet_noop()

@@ -390,7 +390,9 @@ def main() -> int:
             ("Python CLI 仍负责", "Python CLI still owns"),
             ("不能再实现第二套独立 decision", "must not become a second independent decision implementation"),
             ("transaction-payoff phase", "transaction-payoff phase"),
-            ("RFC 中的 Stage 3/4 仍是后续方向", "RFC Stages 3 and 4 remain future direction"),
+            ("Stage 3 的第一个 receipt-bound scheduler follow-up 切片", "first receipt-bound scheduler follow-up slice of Stage 3"),
+            ("Stage 4 distribution cleanup 仍是后续方向", "Stage 4 distribution cleanup remain future work"),
+            ("安装 Provider 不会改变默认本地 authority", "installing a Provider does not change the default local authority"),
         ),
     )
     assert_bilingual_concepts(
@@ -408,14 +410,27 @@ def main() -> int:
         "chapters/03-one-turn.md",
         "en/chapters/03-one-turn.md",
         (
+            (f"`{release_tag}` 仍提供", f"`{release_tag}` still ships"),
             ("显式 opt-in 集成", "explicit opt-in integrations"),
             ("Turn settlement", "Turn settlement"),
             ("Todo completion", "Todo completion"),
-            ("quota delivery routing", "quota delivery routing"),
-            ("workspace causality", "workspace causality"),
-            ("scheduler state", "scheduler state"),
+            ("Host Todo settlement", "Host Todo settlement"),
+            ("spend/void/monitor-poll commit", "spend/void/monitor-poll commit"),
+            ("本地 task-lease 完整生命周期", "full local task-lease lifecycle"),
+            ("Vision refresh", "Vision refresh"),
+            ("receipt-bound scheduler follow-up", "receipt-bound scheduler follow-up"),
             ("Python 已被移除", "Python has been removed"),
             ("TypeScript Control-Plane Migration RFC", "TypeScript Control-Plane Migration RFC"),
+        ),
+    )
+    assert_bilingual_concepts(
+        "chapters/state-substrate.md",
+        "en/chapters/state-substrate.md",
+        (
+            (f"`{release_tag}` 的 shared-authority 工作", f"Shared-authority work in `{release_tag}`"),
+            ("provider-neutral TypeScript `AuthorityStore` contract", "provider-neutral TypeScript `AuthorityStore` contract"),
+            ("不自动获得 runtime authority", "do not acquire runtime authority automatically"),
+            ("不应倒推成", "are not evidence that"),
         ),
     )
     assert_bilingual_concepts(
@@ -433,7 +448,10 @@ def main() -> int:
         "chapters/source-protocol-map.md",
         "en/chapters/source-protocol-map.md",
         (
+            (f"在 `{release_tag}` 的迁移基线上", f"On the `{release_tag}` migration baseline"),
             ("bounded context 和实现语言是两个维度", "bounded context and implementation language are separate dimensions"),
+            ("本地 task-lease lifecycle", "local task-lease lifecycle"),
+            ("receipt-bound scheduler follow-up", "receipt-bound scheduler follow-up"),
             ("Python facade", "Python facade"),
             ("loopx capability list --format json", "loopx capability list --format json"),
             ("仅有 目录或 README 不证明能力已经发布", "A directory or README alone does not prove that a capability is shipped"),
@@ -447,6 +465,15 @@ def main() -> int:
             ("loopx capability list --format json", "loopx capability list --format json"),
             ("TypeScript migration RFC", "TypeScript migration RFC"),
             ("facade exit condition", "facade exit conditions"),
+        ),
+    )
+    assert_bilingual_concepts(
+        "chapters/appendix-reference.md",
+        "en/chapters/appendix-reference.md",
+        (
+            ("loopx todo list --goal-id <goal-id> --thin --format json", "loopx todo list --goal-id <goal-id> --thin --format json"),
+            (f"`{release_tag}` 新增的 `todo list --thin`", f"The `todo list --thin` option added in `{release_tag}`"),
+            ("不改变默认 list 的选择、排序、quota 或 lifecycle 语义", "without changing default selection, ordering, quota, or lifecycle semantics"),
         ),
     )
 

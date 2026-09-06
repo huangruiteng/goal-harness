@@ -134,7 +134,9 @@ def payload(
     }
 
 
-def adaptive_payload() -> dict:
+def adaptive_payload(
+    *, allowed_domains: tuple[str, ...] = ("code", "validation")
+) -> dict:
     coordinator = "codex-alpha"
     coordination = {
         "agent_model": "peer_v1",
@@ -183,7 +185,7 @@ def adaptive_payload() -> dict:
             "mode": "multi_subagent",
             "allowed": True,
             "max_children": 2,
-            "allowed_domains": ["code", "validation"],
+            "allowed_domains": list(allowed_domains),
         },
     }
     attention = {
@@ -361,6 +363,25 @@ def main() -> int:
         "resume",
     ]
 
+    unrestricted_state = adaptive_payload(allowed_domains=())
+    unrestricted_state["attention_queue"]["items"][0]["agent_todos"]["items"][
+        1
+    ].pop("task_domain")
+    unrestricted_decision = build_quota_should_run(
+        unrestricted_state,
+        goal_id=GOAL_ID,
+        agent_id="codex-alpha",
+        available_capabilities=["subagent_spawn", "subagent_resume"],
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_CLI_VISIBLE
+        ),
+    )
+    unrestricted_contract = unrestricted_decision["task_orchestration_contract"]
+    assert unrestricted_contract["mode"] == "adaptive"
+    assert unrestricted_contract["eligible_child_lanes"][0]["todo_id"] == (
+        "todo_validation"
+    )
+
     turn_envelope = build_turn_envelope(adaptive_decision)
     assert turn_envelope["action_signature"]["matches"] is True
     codex_plan = build_loopx_turn_plan(
@@ -370,9 +391,14 @@ def main() -> int:
     )
     codex_request = build_loopx_turn_host_request(codex_plan)
     assert [
-        item["context"]
-        for item in codex_request["child_operations"][0]["available_contexts"]
-    ] == ["fresh", "resume"]
+        item for item in codex_request["child_operations"][0]["available_contexts"]
+    ] == ["fresh"]
+    assert codex_request["child_operations"][0]["host_adapter"] == {
+        "host": "codex-cli",
+        "native_operation": "spawn_agent",
+        "arguments": {"fork_context": False},
+        "requires_session": False,
+    }
 
     claude_decision = build_quota_should_run(
         adaptive_payload(),
@@ -388,13 +414,13 @@ def main() -> int:
         host="claude-code",
         execution_mode="interactive-visible",
     )
-    assert claude_plan["child_operations"][0]["available_contexts"] == [
-        {
-            "context": "fresh",
-            "native_operation": "Task",
-            "requires_session": False,
-        }
-    ]
+    assert claude_plan["child_operations"][0]["available_contexts"] == ["fresh"]
+    assert claude_plan["child_operations"][0]["host_adapter"] == {
+        "host": "claude-code",
+        "native_operation": "Task",
+        "arguments": {},
+        "requires_session": False,
+    }
     print("task-orchestration-smoke ok")
     return 0
 

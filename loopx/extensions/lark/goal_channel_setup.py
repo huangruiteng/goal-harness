@@ -22,6 +22,7 @@ from .goal_channel_contracts import (
     provider_idempotency_key,
     read_goal_channel_binding,
     save_goal_binding,
+    serialize_goal_binding_mutation,
     semantic_key,
     write_human_gate_auto_notify_marker,
 )
@@ -169,6 +170,7 @@ def _resolved_binding(
     )
 
 
+@serialize_goal_binding_mutation
 def setup_lark_goal_channel(
     *,
     registry: Mapping[str, Any],

@@ -88,8 +88,9 @@ def todo_priority_rank(value: Any, *, text_mode: str = "label") -> int:
 
 
 def todo_index_rank(item: dict[str, Any]) -> int:
+    raw_index = item.get("index")
     try:
-        return int(item.get("index"))
+        return int(raw_index) if raw_index is not None else TODO_MISSING_INDEX
     except (TypeError, ValueError):
         return TODO_MISSING_INDEX
 
@@ -722,11 +723,8 @@ def todo_summary_first_executable_item(
 ) -> dict[str, Any] | None:
     if not isinstance(summary, dict):
         return None
-    items = (
-        summary.get("first_executable_items")
-        if isinstance(summary.get("first_executable_items"), list)
-        else []
-    )
+    raw_items = summary.get("first_executable_items")
+    items = raw_items if isinstance(raw_items, list) else []
     for item in items:
         if not isinstance(item, dict):
             continue

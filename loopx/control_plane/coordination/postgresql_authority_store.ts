@@ -12,6 +12,7 @@ import type {
 } from "./authority_store.ts";
 import {
   AuthorityStoreProtocolError,
+  canonicalAuthorityBytes,
   canonicalAuthorityObject,
   canonicalAuthorityObjectList,
   normalizeAuthorityStoreCommit,
@@ -22,6 +23,7 @@ import {
 const POSTGRESQL_STORE_IDENTITY_PATTERN = /^postgresql:[0-9a-f]{32}$/;
 const POSTGRESQL_PROVIDER_REVISION_PATTERN = /^postgresql:([0-9a-f]{32}):([1-9]\d*)$/;
 const POSTGRESQL_SCHEMA_VERSION = "loopx_postgresql_authority_store_v0";
+export const DEFAULT_POSTGRESQL_MAX_COMMIT_BYTES = 16 * 1024 * 1024;
 
 /**
  * Structural subset of a server-owned PostgreSQL driver connection.
@@ -44,6 +46,12 @@ export interface PostgreSqlAuthorityDatabase {
 export interface PostgreSqlAuthorityStoreOptions {
   tenant_id: string;
   goal_id: string;
+  /**
+   * Maximum canonical bytes admitted for one atomic commit. Deployments may
+   * lower this envelope; promotion still requires separately measured
+   * retention and sustained-capacity evidence.
+   */
+  max_commit_bytes?: number;
 }
 
 interface HeadRow extends JsonObject {
@@ -269,6 +277,15 @@ function parseExpectedRevision(value: string | null): {
   return { store_identity: `postgresql:${match[1]!}`, revision: match[2]! };
 }
 
+function canonicalCommitEnvelopeBytes(commit: AuthorityStoreCommit): number {
+  return canonicalAuthorityBytes({
+    operation_id: commit.operation_id,
+    events: commit.events,
+    next_projection: commit.next_projection,
+    receipts: commit.receipts,
+  }).byteLength;
+}
+
 function readFailure(error: unknown): AuthorityStoreReadFailure {
   if (error instanceof AuthorityStoreProtocolError || error instanceof SyntaxError) {
     return {
@@ -398,6 +415,7 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
   readonly database: PostgreSqlAuthorityDatabase;
   readonly tenantId: string;
   readonly goalId: string;
+  readonly maxCommitBytes: number;
 
   constructor(
     database: PostgreSqlAuthorityDatabase,
@@ -406,6 +424,12 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
     this.database = database;
     this.tenantId = requireAuthorityStoreId(options.tenant_id, "tenant id");
     this.goalId = requireAuthorityStoreId(options.goal_id, "goal id");
+    this.maxCommitBytes = options.max_commit_bytes ?? DEFAULT_POSTGRESQL_MAX_COMMIT_BYTES;
+    if (!Number.isSafeInteger(this.maxCommitBytes) || this.maxCommitBytes < 1) {
+      throw new AuthorityStoreProtocolError(
+        "PostgreSQL max commit bytes must be a positive safe integer",
+      );
+    }
   }
 
   private async connect(): Promise<PostgreSqlAuthorityConnection> {
@@ -494,6 +518,15 @@ export class PostgreSqlAuthorityStore implements AuthorityStore {
         status: "failed",
         reason_code: "invalid_commit_request",
         reason: error instanceof Error ? error.message : "invalid commit request",
+      };
+    }
+    const commitBytes = canonicalCommitEnvelopeBytes(normalized);
+    if (commitBytes > this.maxCommitBytes) {
+      return {
+        status: "failed",
+        reason_code: "store_capacity_exhausted",
+        reason:
+          `PostgreSQL authority commit is ${commitBytes} canonical bytes; configured maximum is ${this.maxCommitBytes}`,
       };
     }
 

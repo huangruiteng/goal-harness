@@ -16,6 +16,7 @@ HOST_CONTROL_RECOVERY_SCHEMA_VERSION = "codex_host_control_recovery_qualificatio
 DESKTOP_PATCH_SCHEMA_VERSION = "codex_desktop_patch_qualification_v0"
 QUOTA_RECOVERY_SCHEMA_VERSION = "codex_quota_recovery_qualification_v0"
 TOOL_TRANSPORT_SCHEMA_VERSION = "codex_tool_transport_qualification_v0"
+OUTAGE_RECOVERY_SCHEMA_VERSION = "codex_outage_recovery_qualification_v0"
 
 RECOVERABLE_HOST_CONTROL_NAMES = {
     "automation_update",
@@ -236,6 +237,131 @@ def qualify_desktop_patch(observation: Mapping[str, Any]) -> dict[str, Any]:
             "read_back_heartbeat_transport",
         ],
         "responsible_layer": "codex_desktop_runtime_builder",
+        "effect_boundary": "content_free_observation_only",
+    }
+
+
+def qualify_outage_recovery(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Qualify state transitions after a provider-wide outage ends.
+
+    A provider incident (for example repeated 4xx/5xx across every native
+    profile) creates two kinds of state: a cooldown on native profiles and a
+    degraded affinity to a text-only fallback. Once a recovery signal newer
+    than the cooldown source is observed, both must be revalidated before a
+    request that needs native capabilities is admitted.
+    """
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {
+            "outage_ended",
+            "outage_ended_observed_at",
+            "cooldown_source_observed_at",
+            "cooldown_expires_at",
+            "cooldown_invalidated",
+            "post_recovery_probe",
+            "degraded_fallback_binding_cleared",
+            "native_capability_requested",
+            "fallback_attempted",
+        },
+        "outage_recovery",
+    )
+    outage_ended = _boolean(
+        observation.get("outage_ended"), "outage_recovery.outage_ended"
+    )
+    cooldown_source_at = _utc_datetime(
+        observation.get("cooldown_source_observed_at"),
+        "outage_recovery.cooldown_source_observed_at",
+    )
+    cooldown_expires_at = _utc_datetime(
+        observation.get("cooldown_expires_at"),
+        "outage_recovery.cooldown_expires_at",
+    )
+    if cooldown_expires_at <= cooldown_source_at:
+        raise ValueError("outage_recovery cooldown expiry must follow its source")
+    invalidated = _boolean(
+        observation.get("cooldown_invalidated"),
+        "outage_recovery.cooldown_invalidated",
+    )
+    probe = _non_empty_string(
+        observation.get("post_recovery_probe"),
+        "outage_recovery.post_recovery_probe",
+    )
+    if probe not in {"not_attempted", "success", "still_outage", "transport_failed"}:
+        raise ValueError("outage_recovery.post_recovery_probe is unsupported")
+    degraded_cleared = _boolean(
+        observation.get("degraded_fallback_binding_cleared"),
+        "outage_recovery.degraded_fallback_binding_cleared",
+    )
+    native_requested = _boolean(
+        observation.get("native_capability_requested"),
+        "outage_recovery.native_capability_requested",
+    )
+    fallback_attempted = _boolean(
+        observation.get("fallback_attempted"),
+        "outage_recovery.fallback_attempted",
+    )
+
+    if outage_ended:
+        outage_ended_at = _utc_datetime(
+            observation.get("outage_ended_observed_at"),
+            "outage_recovery.outage_ended_observed_at",
+        )
+        if outage_ended_at <= cooldown_source_at:
+            raise ValueError("outage end must follow the cooldown source")
+        checks = [
+            {
+                "id": "stale_cooldown_invalidated",
+                "passed": invalidated,
+                "failure_code": "stale_outage_cooldown_retained",
+            },
+            {
+                "id": "recovery_probe_performed",
+                "passed": probe in {"success", "still_outage"},
+                "failure_code": "recovery_probe_missing",
+            },
+            {
+                "id": "fallback_gated_by_probe",
+                "passed": not fallback_attempted or probe == "still_outage",
+                "failure_code": "fallback_selected_after_recovery_probe",
+            },
+        ]
+        expected_action = "invalidate_cooldown_and_revalidate_affinity"
+    else:
+        checks = [
+            {
+                "id": "cooldown_retained_without_outage_end",
+                "passed": not invalidated,
+                "failure_code": "cooldown_invalidated_without_outage_end",
+            }
+        ]
+        expected_action = "retain_cooldown_until_recovery_observed"
+    checks.append(
+        {
+            "id": "degraded_binding_not_used_for_native",
+            "passed": not native_requested
+            or (not fallback_attempted and (not outage_ended or degraded_cleared)),
+            "failure_code": "degraded_fallback_binding_used_for_native_request",
+        }
+    )
+    failure_codes = [check["failure_code"] for check in checks if not check["passed"]]
+    return {
+        "schema_version": OUTAGE_RECOVERY_SCHEMA_VERSION,
+        "qualified": not failure_codes,
+        "failure_codes": failure_codes,
+        "outage_ended": outage_ended,
+        "expected_action": expected_action,
+        "checks": checks,
+        "required_contract": {
+            "incident_cooldown": "outage_end_newer_than_source_invalidates_cooldown",
+            "recovery_gate": "bounded_probe_before_fallback_admission",
+            "degraded_affinity": (
+                "fallback_binding_revalidated_before_native_capability_request"
+            ),
+            "native_capability": "fail_closed_when_no_eligible_native_provider",
+        },
+        "responsible_layer": "cpa_provider_health_state_and_selector",
         "effect_boundary": "content_free_observation_only",
     }
 
@@ -1474,6 +1600,24 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "gpt-5.6-luna",
         "ark/deepseek-v4-flash",
     }
+    preset = snapshot.get("routing_preset", "legacy-ab-sol")
+    if preset not in {"legacy-ab-sol", "abc-sol-astra"}:
+        raise ValueError("unsupported snapshot routing preset")
+    expected_hidden = {"gpt-5.6-sol"}
+    expected_rows = expected_visible
+    if preset == "abc-sol-astra":
+        from .selectors import MODEL_FAMILIES, ROUTES, VISIBLE_SELECTORS
+
+        expected_rows = set(ROUTES) | {
+            "ark/deepseek-v4-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-ga-260731",
+            "deepseek-v4-pro-ga-260813",
+        }
+        expected_visible = set(VISIBLE_SELECTORS)
+        expected_hidden = set(MODEL_FAMILIES) | (expected_rows - expected_visible)
+    expected_fast = {slug for slug in expected_rows if slug.startswith("fast/")}
+    expected_native = {slug for slug in expected_rows if "gpt-" in slug}
     checks: list[dict[str, Any]] = []
 
     def check(check_id: str, passed: bool, detail: str) -> None:
@@ -1486,12 +1630,12 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     check(
         "visible_routes",
         visible == expected_visible,
-        "selector exposes Standard and Fast Sol rows plus Luna and Ark",
+        "selector exposes the selected routing preset",
     )
     check(
         "hidden_alias",
-        "gpt-5.6-sol" in hidden,
-        "bare compatibility alias remains hidden",
+        expected_hidden <= hidden,
+        "compatibility aliases remain hidden",
     )
     modalities = snapshot.get("input_modalities")
     if not isinstance(modalities, Mapping):
@@ -1500,17 +1644,9 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "codex_image_admission",
         all(
             set(modalities.get(slug, [])) == {"text", "image"}
-            for slug in (
-                "auto/gpt-5.6-sol",
-                "fast/auto/gpt-5.6-sol",
-                "codex-a/gpt-5.6-sol",
-                "fast/codex-a/gpt-5.6-sol",
-                "codex-b/gpt-5.6-sol",
-                "fast/codex-b/gpt-5.6-sol",
-                "gpt-5.6-luna",
-            )
+            for slug in expected_native
         ),
-        "Standard/Fast Sol selectors and Luna declare text and image",
+        "subscription selectors declare text and image",
     )
     check(
         "ark_text_only",
@@ -1520,18 +1656,13 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     fast_models = set(_string_list(snapshot.get("fast_models"), "snapshot.fast_models"))
     check(
         "fast_projection",
-        fast_models
-        == {
-            "fast/auto/gpt-5.6-sol",
-            "fast/codex-a/gpt-5.6-sol",
-            "fast/codex-b/gpt-5.6-sol",
-        },
-        "Fast is exposed only as explicit Auto/Prefer A/Prefer B sibling rows",
+        fast_models == expected_fast,
+        "Fast compatibility rows retain their tier metadata",
     )
     selector_tiers = snapshot.get("selector_default_service_tiers")
     if not isinstance(selector_tiers, Mapping):
         raise TypeError("snapshot.selector_default_service_tiers must be an object")
-    standard_selectors = expected_visible - fast_models
+    standard_selectors = expected_rows - fast_models
     check(
         "fast_default_off",
         snapshot.get("default_service_tier") == "default"
@@ -1600,6 +1731,19 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             "fallback_tail": [],
         },
     }
+    if preset == "abc-sol-astra":
+        expected_traversal = {
+            slug: {
+                "entrypoint": "affinity_then_first"
+                if slug.removeprefix("fast/").startswith(("auto/", "auto-with-ds/"))
+                or slug == "gpt-5.6-luna"
+                else f"codex-{route['order'][0]}",
+                "ordered_candidates": [f"codex-{slot}" for slot in route["order"]]
+                + route["tail"],
+                "fallback_tail": route["tail"],
+            }
+            for slug, route in ROUTES.items()
+        }
     traversal_rows: dict[str, Mapping[str, Any]] = {}
     for slug in expected_traversal:
         raw_row = route_traversal.get(slug)
@@ -1622,7 +1766,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             == expected["ordered_candidates"]
             for slug, expected in expected_traversal.items()
         ),
-        "Standard/Fast Sol selectors and Luna use the expected ring entrypoint and order",
+        "subscription selectors use the expected ring entrypoint and order",
     )
     check(
         "terminal_fallback_tail",
@@ -1630,17 +1774,17 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             traversal_rows[slug].get("fallback_tail") == expected["fallback_tail"]
             for slug, expected in expected_traversal.items()
         ),
-        "only Standard Sol routes append Ark; Fast and Luna have no heterogeneous tail",
+        "only eligible Standard routes append Ark; Fast and Luna have no heterogeneous tail",
     )
     check(
         "fast_capable_only",
         all(
             traversal_rows[slug].get("ordered_candidates")
-            in (["codex-a", "codex-b"], ["codex-b", "codex-a"])
+            == expected_traversal[slug]["ordered_candidates"]
             and traversal_rows[slug].get("fallback_tail") == []
             for slug in fast_models
         ),
-        "Fast rows remain inside the A/B Fast-capable ring",
+        "Fast rows remain inside the selected Fast-capable account ring",
     )
     check(
         "single_cycle_traversal",

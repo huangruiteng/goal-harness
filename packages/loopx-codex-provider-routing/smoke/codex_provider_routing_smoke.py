@@ -840,6 +840,7 @@ def main() -> int:
         "desktop-patch.json",
         "heartbeat-transport.json",
         "host-control-recovery.json",
+        "outage-recovery.json",
         "quota-recovery.json",
         "tool-transport.json",
         "integration-candidate.json",

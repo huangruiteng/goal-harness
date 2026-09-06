@@ -5,6 +5,10 @@ decision boundary, non-goals, smallest useful implementation slice, and
 validation criteria. An RFC may describe future work; current behavior is
 defined by the implementation and stable reference contracts.
 
+Start new proposals from the [RFC template](TEMPLATE.md). Existing RFCs should
+adopt its maintenance contract when substantial revision would otherwise mix
+stable design, current progress, and historical evidence.
+
 The [Current Technical Directions](../../project/technical-directions.md) page
 maps RFCs to strategic programs, contribution routes, and promotion gates.
 
@@ -24,7 +28,21 @@ Within each entry, RFC maturity and delivery maturity remain separate facts:
 - **Current boundary** names what is real now and what is still excluded. It is
   a navigation aid, not a replacement for stable protocol documentation.
 
-This index was last audited against `main` on **2026-09-02**. Update an entry
+Within an RFC, keep the same separation:
+
+- normative sections define the current decision and acceptance contract;
+- a dated execution ledger records shipped slices and experiments without
+  silently changing that contract;
+- a decision log records explicit approval and the sections it changed;
+- an evidence registry maps claims to reproducible, public-safe proof.
+
+Do not append progress reports to a normative delivery plan. Move long ledgers
+to a linked `*-execution.md` companion. Schema reduction is never an incidental
+cleanup: the RFC or PR must name each removed field, document producer/reader/
+writer and compatibility research, define migration and rollback, prove the
+claimed semantic equivalence, and record explicit maintainer approval.
+
+This index was last audited against `main` on **2026-09-04**. Update an entry
 whenever its RFC status, promoted behavior, or meaningful delivery boundary
 changes.
 
@@ -49,15 +67,16 @@ changes.
   ([中文版](shared-goal-authority-state-provider-v0.zh-CN.md),
   [validation boundary](shared-goal-authority-state-provider-v0-evidence.zh-CN.md))
   - **RFC status:** Draft, under maintainer review.
-  - **Delivery on `main`:** Foundation and provider-contract slices
-    implemented.
+  - **Delivery on `main`:** Foundation, provider-contract, and local promotion
+    preparation slices implemented.
   - **Current boundary:** Recoverable shared-authority foundations, the
-    file-backed reference path, NoKV shadow/recovery evidence, and the
-    TypeScript store contract are on `main`
+    file-backed reference path, NoKV shadow/recovery evidence, the TypeScript
+    store contract, PostgreSQL candidate/conformance coverage, and the
+    default-off local shadow/cutover foundations are on `main`
     ([#3529](https://github.com/huangruiteng/loopx/pull/3529),
     [#3669](https://github.com/huangruiteng/loopx/pull/3669),
-    [#3798](https://github.com/huangruiteng/loopx/pull/3798)). No remote
-    provider is the promoted authority; PostgreSQL remains planned.
+    [#3798](https://github.com/huangruiteng/loopx/pull/3798)). No provider-first
+    runtime promotion or remote shared-authority service has shipped.
 - [Shared Goal Alignment and Governed Amendment Protocol v0](shared-goal-alignment-and-governed-amendment-v0.md)
   ([中文版](shared-goal-alignment-and-governed-amendment-v0.zh-CN.md))
   - **RFC status:** Draft, under maintainer review.

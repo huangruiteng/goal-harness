@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from loopx.extensions.bundled import bundled_extension_manifest
 from loopx.extensions.lark.goal_channel_contracts import (
     GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+    quota_human_gate_state_generation,
     read_goal_channel_binding,
     semantic_key,
     write_goal_channel_binding,
@@ -23,7 +24,6 @@ from loopx.extensions.runtime import (
     default_extension_state_file,
     install_extension,
 )
-from loopx.control_plane.runtime.public_safety import public_safe_compact_text
 from loopx.paths import registry_project_root
 from loopx.quota import build_quota_should_run
 from loopx.status import collect_status
@@ -33,6 +33,7 @@ GOAL_ID = "goal-channel-human-gate-smoke"
 GATE_TODO_ID = "todo_gate_fixture"
 CHAT_ID = "oc_public_fixture"
 MESSAGE_ID = "om_public_fixture"
+MESSAGE_SEND_COMMAND = "+messages-send"
 APP_ID = "cli_public_fixture"
 
 
@@ -71,12 +72,14 @@ def write_fake_lark_cli(root: Path) -> tuple[Path, Path]:
     return bin_dir, state_path
 
 
-def run_refresh(
+def run_loopx(
     *,
     registry_path: Path,
     runtime_root: Path,
     project: Path,
     bin_dir: Path,
+    args: list[str],
+    operation: str,
 ) -> dict[str, object]:
     environment = {
         **os.environ,
@@ -94,6 +97,35 @@ def run_refresh(
             str(runtime_root),
             "--format",
             "json",
+            *args,
+        ],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"{operation} failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    return json.loads(completed.stdout)
+
+
+def run_refresh(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    project: Path,
+    bin_dir: Path,
+) -> dict[str, object]:
+    return run_loopx(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        bin_dir=bin_dir,
+        operation="refresh-state",
+        args=[
             "refresh-state",
             "--goal-id",
             GOAL_ID,
@@ -105,17 +137,35 @@ def run_refresh(
             "Wait for owner approval.",
             "--no-global-sync",
         ],
-        cwd=project,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
     )
-    if completed.returncode != 0:
-        raise AssertionError(
-            f"refresh-state failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
-        )
-    return json.loads(completed.stdout)
+
+
+def update_gate(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    project: Path,
+    bin_dir: Path,
+) -> dict[str, object]:
+    return run_loopx(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        bin_dir=bin_dir,
+        operation="todo update",
+        args=[
+            "todo",
+            "update",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "user",
+            "--todo-id",
+            GATE_TODO_ID,
+            "--text",
+            "[P0] Approve the bounded external write after reviewing the diff.",
+        ],
+    )
 
 
 def write_project(root: Path) -> tuple[Path, Path]:
@@ -212,9 +262,7 @@ def write_project(root: Path) -> tuple[Path, Path]:
 
 
 def main() -> None:
-    with tempfile.TemporaryDirectory(
-        prefix="loopx-goal-channel-human-gate-"
-    ) as raw:
+    with tempfile.TemporaryDirectory(prefix="loopx-goal-channel-human-gate-") as raw:
         registry_path, binding_path = write_project(Path(raw))
         bin_dir, fake_state_path = write_fake_lark_cli(Path(raw))
         project = registry_path.parent.parent
@@ -228,7 +276,7 @@ def main() -> None:
         first = first_refresh["goal_channel_gate_sync"]
         first_fake_state = json.loads(fake_state_path.read_text(encoding="utf-8"))
         send_count = sum(
-            "+messages-send" in args for args in first_fake_state["calls"]
+            MESSAGE_SEND_COMMAND in args for args in first_fake_state["calls"]
         )
         second_refresh = run_refresh(
             registry_path=registry_path,
@@ -238,11 +286,6 @@ def main() -> None:
         )
         second = second_refresh["goal_channel_gate_sync"]
         second_fake_state = json.loads(fake_state_path.read_text(encoding="utf-8"))
-
-        assert first["status"] == "sent_verified", first
-        assert first["external_write_performed"] is True, first
-        assert first["readback_verified"] is True, first
-        notification = first["notification"]
         status = collect_status(
             registry_path=registry_path,
             runtime_root_override=str(Path(raw) / "runtime"),
@@ -256,21 +299,54 @@ def main() -> None:
             "lark",
             "notify_gate",
             GATE_TODO_ID,
-            public_safe_compact_text(quota["gate_prompt"], limit=900),
+            quota_human_gate_state_generation(quota),
+            "material_state",
             CHAT_ID,
         )
+        gate_update = update_gate(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            bin_dir=bin_dir,
+        )
+        third_refresh = run_refresh(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            bin_dir=bin_dir,
+        )
+        third = third_refresh["goal_channel_gate_sync"]
+        third_fake_state = json.loads(fake_state_path.read_text(encoding="utf-8"))
+
+        assert first["status"] == "sent_verified", first
+        assert first["external_write_performed"] is True, first
+        assert first["readback_verified"] is True, first
+        notification = first["notification"]
         assert notification["idempotency_key"] == expected_key, notification
         assert second["status"] == "already_sent", second
         assert (
-            sum("+messages-send" in args for args in second_fake_state["calls"])
+            sum(MESSAGE_SEND_COMMAND in args for args in second_fake_state["calls"])
             == send_count
+        )
+        assert gate_update["changed"] is True, gate_update
+        assert third["status"] == "sent_verified", third
+        assert (
+            sum(MESSAGE_SEND_COMMAND in args for args in third_fake_state["calls"])
+            == send_count + 1
         )
         receipts = read_goal_channel_binding(binding_path)["bindings"][GOAL_ID][
             "receipts"
         ]
         assert expected_key in receipts, receipts
-        assert "Approve the bounded external write." in second_fake_state["sent_text"]
-        assert "LoopX remains the source of truth" not in second_fake_state["sent_text"]
+        assert len(receipts) == 2, receipts
+        assert "Approve the bounded external write" in third_fake_state["sent_text"]
+        assert third_fake_state["sent_text"].startswith(
+            "LoopX · Action required\n\nGoal:"
+        )
+        assert "\n1. " in third_fake_state["sent_text"]
+        assert "\n- " not in third_fake_state["sent_text"]
+        assert "Next safe action while waiting" not in third_fake_state["sent_text"]
+        assert "LoopX remains the source of truth" not in third_fake_state["sent_text"]
         public_packet = json.dumps(first, ensure_ascii=False)
         assert CHAT_ID not in public_packet
         assert MESSAGE_ID not in public_packet

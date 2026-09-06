@@ -32,6 +32,7 @@ import type {
   WorkspaceActionPreviewRequest,
   WorkspaceDrawerSelection,
   WorkspaceGoal,
+  WorkspaceGoalArchiveLoadState,
   WorkspaceGoalTab,
   WorkspaceImageAttachment,
   WorkspaceModel,
@@ -43,6 +44,7 @@ import type {
 import { goalTitleFor, workspaceHomeLaneForGoal } from "./personal-workspace-model";
 import { routeWorkspaceInput } from "./personal-workspace-router";
 import { WorkspaceSettingsPage } from "./workspace-settings-page";
+import { readWorkspaceTheme, writeWorkspaceTheme, type WorkspaceTheme } from "./workspace-theme";
 import { WorkspaceShell } from "./workspace-shell";
 import type { StatusSourceControl } from "./status-source-switcher";
 import "./personal-workspace.css";
@@ -172,7 +174,7 @@ function GoalOutputsView({
 }) {
   const { locale, t } = useWorkspaceI18n();
   return (
-    <section className="personal-object-list" data-testid="personal-goal-outputs">
+    <section className="personal-object-list personal-files-list" data-testid="personal-goal-outputs">
       <header><strong>{t("files.title")}</strong><span>{items.length}</span></header>
       {reportState?.loading ? (
         <p className="personal-object-list-state" role="status"><RefreshCw className="is-spinning" size={14} />{t("files.loadingReports")}</p>
@@ -185,7 +187,7 @@ function GoalOutputsView({
       ) : null}
       {items.map((item) => (
         <button data-output-kind={item.output.kind} key={item.id} onClick={() => onSelect({ item: item.output, kind: "output" })} type="button">
-          <span>{item.output.kind === "report" ? "▤" : "↗"}</span>
+          <span className="personal-file-icon"><FileText size={16} /></span>
           <strong>{item.output.title}</strong>
           {item.output.report ? <em>{t("files.reportDelta", { added: item.output.report.addedCount, changed: item.output.report.changedCount })}</em> : null}
           <p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? t("files.emptySummary")}</p>
@@ -673,6 +675,7 @@ function readImageAttachment(file: File, t: WorkspaceTranslate): Promise<Workspa
 export function PersonalWorkspacePage({
   agents = [{ agentId: "codex", available: true, capability: "代码与项目执行", label: "Codex" }],
   callbacks = {},
+  goalArchiveLoadState = { error: null, phase: "ready" },
   model,
   readOnly = false,
   selectedAgentId: controlledAgentId,
@@ -681,6 +684,7 @@ export function PersonalWorkspacePage({
 }: {
   agents?: WorkspaceAgentOption[];
   callbacks?: PersonalWorkspaceCallbacks;
+  goalArchiveLoadState?: WorkspaceGoalArchiveLoadState;
   model: WorkspaceModel;
   ownerLabel?: string;
   readOnly?: boolean;
@@ -719,16 +723,11 @@ export function PersonalWorkspacePage({
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sessionProposalIds, setSessionProposalIds] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [theme, setTheme] = useState<"brutal" | "paper">(() => {
-    try {
-      return window.localStorage.getItem("loopx-pw-theme") === "brutal" ? "brutal" : "paper";
-    } catch {
-      return "paper";
-    }
-  });
+  const [theme, setTheme] = useState<WorkspaceTheme>(readWorkspaceTheme);
   const [goalContexts, setGoalContexts] = useState<Record<string, GoalRepositoryContext>>({});
   const [larkConnections, setLarkConnections] = useState<LarkGoalConnection[]>([]);
   const digestInitRef = useRef(false);
+  const digestSinceRef = useRef(Number.NaN);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const channelScrollRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -909,12 +908,16 @@ export function PersonalWorkspacePage({
   }, [managerChatItems.length, managerChatOpen, latestMessageTextLength]);
   const drawerSelection = useMemo<Exclude<WorkspaceDrawerSelection, { kind: "settings" }> | null>(() => {
     if (selection?.kind === "settings") return null;
+    if (selection?.kind === "goal") {
+      const currentGoal = workspaceGoals.find((goal) => goal.goalId === selection.item.goalId);
+      return currentGoal ? { item: currentGoal, kind: "goal" } : selection;
+    }
     if (selection?.kind !== "run") return selection;
     const currentRun = items.find((item): item is Extract<WorkspaceTimelineItem, { kind: "run" }> =>
       item.kind === "run" && item.run.runId === selection.item.runId
     );
     return currentRun ? { item: currentRun.run, kind: "run" } : selection;
-  }, [items, selection]);
+  }, [items, selection, workspaceGoals]);
 
   useEffect(() => {
     if (readOnly) {
@@ -944,27 +947,30 @@ export function PersonalWorkspacePage({
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [mobileSidebarOpen]);
 
-  // Morning digest: computed once per manager-home visit, measured against the previous visit.
   useEffect(() => {
-    if (digestInitRef.current || selectedGoalId || !items.length) return;
-    digestInitRef.current = true;
-    let since = Number.NaN;
-    try {
-      since = Date.parse(window.localStorage.getItem("loopx-pw-last-visit") ?? "");
-      window.localStorage.setItem("loopx-pw-last-visit", new Date().toISOString());
-    } catch {
-      // Storage unavailable: show current attention count only, without a time baseline.
+    if (selectedGoalId || !items.length) return;
+    if (!digestInitRef.current) {
+      digestInitRef.current = true;
+      try {
+        digestSinceRef.current = Date.parse(window.localStorage.getItem("loopx-pw-last-visit") ?? "");
+        window.localStorage.setItem("loopx-pw-last-visit", new Date().toISOString());
+      } catch {
+        digestSinceRef.current = Number.NaN;
+      }
     }
+    const since = digestSinceRef.current;
     const runs = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "run" }> => item.kind === "run").map((item) => item.run);
     const isFresh = (time?: string) => {
       const parsed = Date.parse(time ?? "");
       return !Number.isNaN(since) && !Number.isNaN(parsed) && parsed > since;
     };
-    setDigest({
+    const nextDigest = {
       attention: managerNeedsYouCount,
       done: runs.filter((run) => run.status === "completed" && isFresh(run.latestActivity)).length,
       failed: runs.filter((run) => (run.status === "failed" || run.status === "interrupted") && isFresh(run.latestActivity)).length,
-    });
+    };
+    setDigest((current) => current?.attention === nextDigest.attention
+      && current.done === nextDigest.done && current.failed === nextDigest.failed ? current : nextDigest);
   }, [items, managerNeedsYouCount, selectedGoalId]);
 
   useEffect(() => {
@@ -1432,9 +1438,9 @@ export function PersonalWorkspacePage({
     callbacks.onSelectAgent?.(agentId);
   }
 
-  function updateTheme(next: "brutal" | "paper") {
+  function updateTheme(next: WorkspaceTheme) {
     setTheme(next);
-    try { window.localStorage.setItem("loopx-pw-theme", next); } catch { /* Keep the in-memory preference. */ }
+    writeWorkspaceTheme(next);
   }
 
   async function sendMessage(messageOverride?: string) {
@@ -1707,6 +1713,7 @@ export function PersonalWorkspacePage({
             agents={agents}
             managerChatOpen={managerChatOpen}
             mobileNavigationOpen={mobileSidebarOpen}
+            onOpenGoalCapabilities={selectedGoal ? () => setSelection({ goalId: selectedGoal.goalId, kind: "settings", tab: "capabilities" }) : undefined}
             onOpenGoalDetail={selectedGoal ? () => setSelection({ item: selectedGoal, kind: "goal" }) : undefined}
             onRefresh={callbacks.onRefresh ? () => void refreshWorkspace() : undefined}
             onOpenNavigation={() => setMobileSidebarOpen(true)}
@@ -1752,6 +1759,7 @@ export function PersonalWorkspacePage({
             ) : null}
             {selectedGoal && selectedGoalTab === "tasks" ? (
               <GoalTasksView
+                historyEnabled={!readOnly}
                 goal={selectedGoal}
                 items={items}
                 onDraftTaskFromMessage={readOnly ? undefined : (reply) => {
@@ -1904,11 +1912,16 @@ export function PersonalWorkspacePage({
       )}
       sidebar={(
         <GoalSidebar
+          key={statusSourceControl?.activeSource.statusUrl ?? "/status.json"}
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
+          goalArchiveLoadState={goalArchiveLoadState}
           lifecycleBusyGoalIds={lifecycleBusyGoalIds}
           onRequestGoalCreate={readOnly ? undefined : requestGoalCreate}
           onRequestGoalLifecycle={readOnly ? undefined : (goal, operation) => void requestGoalLifecycle(goal, operation)}
+          onRetryGoalArchive={callbacks.onRetryGoalArchive || callbacks.onRefresh
+            ? () => void (callbacks.onRetryGoalArchive ?? callbacks.onRefresh)?.()
+            : undefined}
           onOpenSettings={readOnly ? undefined : () => setSelection({ kind: "settings" })}
           onSelectGoal={selectGoal}
           selectedGoalId={selectedGoalId}

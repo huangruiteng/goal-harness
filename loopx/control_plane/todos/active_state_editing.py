@@ -17,6 +17,7 @@ from .contract import (
 )
 from .text import normalize_new_todo
 from .todo_summary import normalize_todo_text
+from .machine_region import TODO_REGION_PREFIX, find_todo_regions
 
 
 TODO_SECTION_HEADINGS = {
@@ -27,6 +28,9 @@ COMPLETED_WORK_ARCHIVE_HEADING = "Completed Work Archive"
 
 
 def section_bounds(lines: list[str], role: str) -> tuple[int, int, str] | None:
+    if any(TODO_REGION_PREFIX in line for line in lines):
+        region = next((r for r in find_todo_regions(lines) if r.role == role), None)
+        return (region.start, region.body_end, region.heading) if region else None
     for index, line in enumerate(lines):
         if not line.startswith("## "):
             continue

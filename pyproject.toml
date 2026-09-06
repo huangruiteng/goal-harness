@@ -31,6 +31,7 @@ test = [
   "pytest>=8,<9",
   "pytest-cov>=5,<7",
   "pytest-xdist>=3,<4",
+  "pytest-split>=0.10,<0.11",
   "ruff>=0.12,<0.16",
   "mypy>=1.18,<2",
 ]
@@ -49,7 +50,7 @@ include = ["loopx*"]
 "loopx" = ["web/chat/*.html", "web/chat/assets/*", "web/chat/manifest.webmanifest", "web/chat/pwa/*"]
 "loopx.control_plane" = ["*.json", "*.ts"]
 "loopx.control_plane.agents" = ["*.ts"]
-"loopx.control_plane.coordination" = ["*.ts"]
+"loopx.control_plane.coordination" = ["*.ts", "*.json"]
 "loopx.control_plane.goals" = ["*.ts"]
 "loopx.control_plane.quota" = ["*.ts"]
 "loopx.control_plane.scheduler" = ["*.ts"]
@@ -118,6 +119,10 @@ include = ["loopx*"]
 [tool.pytest.ini_options]
 norecursedirs = ["deprecate"]
 
+[tool.coverage.run]
+source = ["loopx"]
+relative_files = true
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
@@ -126,12 +131,18 @@ files = [
   "loopx/control_plane/coordination/executor.py",
   "loopx/control_plane/coordination/file_provider.py",
   "loopx/control_plane/coordination/head.py",
+  "loopx/control_plane/coordination/local_authority_shadow_outbox.py",
+  "loopx/control_plane/coordination/local_authority_shadow_projection.py",
   "loopx/control_plane/quota/effect_program.py",
   "loopx/control_plane/quota/states.py",
   "loopx/control_plane/runtime/event_store_migration_bridge.py",
   "loopx/control_plane/runtime/time.py",
   "loopx/control_plane/runtime/trajectory_hygiene.py",
   "loopx/control_plane/scheduler/time.py",
+  "loopx/control_plane/testing/authority_e2e_fixtures.py",
+  "loopx/control_plane/testing/authority_e2e_ladder.py",
+  "loopx/control_plane/testing/authority_e2e_row_support.py",
+  "loopx/control_plane/testing/authority_e2e_rows_stage2c.py",
   "loopx/control_plane/work_items/delivery_batch_scale.py",
   "loopx/control_plane/work_items/delivery_outcome.py",
   "loopx/control_plane/work_items/lifecycle.py",

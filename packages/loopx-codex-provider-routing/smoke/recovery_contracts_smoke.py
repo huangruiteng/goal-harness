@@ -11,6 +11,7 @@ sys.path.insert(0, str(PACKAGE_ROOT / "src"))
 
 contract = importlib.import_module("loopx_codex_provider_routing.contract")
 qualify_desktop_patch = contract.qualify_desktop_patch
+qualify_outage_recovery = contract.qualify_outage_recovery
 qualify_quota_recovery = contract.qualify_quota_recovery
 qualify_tool_transport = contract.qualify_tool_transport
 
@@ -48,6 +49,63 @@ def main() -> int:
         "desktop_launch_failed",
         "heartbeat_transport_readback_failed",
     } <= set(stale_asar["failure_codes"])
+
+    outage_recovery = qualify_outage_recovery(
+        {
+            "outage_ended": True,
+            "outage_ended_observed_at": "2026-09-03T16:00:00Z",
+            "cooldown_source_observed_at": "2026-09-03T14:50:00Z",
+            "cooldown_expires_at": "2026-09-03T18:50:00Z",
+            "cooldown_invalidated": True,
+            "post_recovery_probe": "success",
+            "degraded_fallback_binding_cleared": True,
+            "native_capability_requested": True,
+            "fallback_attempted": False,
+        }
+    )
+    assert outage_recovery["qualified"] is True
+    assert outage_recovery["expected_action"] == (
+        "invalidate_cooldown_and_revalidate_affinity"
+    )
+
+    stale_outage_state = qualify_outage_recovery(
+        {
+            "outage_ended": True,
+            "outage_ended_observed_at": "2026-09-03T16:00:00Z",
+            "cooldown_source_observed_at": "2026-09-03T14:50:00Z",
+            "cooldown_expires_at": "2026-09-03T18:50:00Z",
+            "cooldown_invalidated": False,
+            "post_recovery_probe": "not_attempted",
+            "degraded_fallback_binding_cleared": False,
+            "native_capability_requested": True,
+            "fallback_attempted": True,
+        }
+    )
+    assert stale_outage_state["qualified"] is False
+    assert set(stale_outage_state["failure_codes"]) == {
+        "stale_outage_cooldown_retained",
+        "recovery_probe_missing",
+        "fallback_selected_after_recovery_probe",
+        "degraded_fallback_binding_used_for_native_request",
+    }
+
+    ongoing_outage_native_fallback = qualify_outage_recovery(
+        {
+            "outage_ended": False,
+            "outage_ended_observed_at": None,
+            "cooldown_source_observed_at": "2026-09-03T14:50:00Z",
+            "cooldown_expires_at": "2026-09-03T18:50:00Z",
+            "cooldown_invalidated": False,
+            "post_recovery_probe": "not_attempted",
+            "degraded_fallback_binding_cleared": False,
+            "native_capability_requested": True,
+            "fallback_attempted": True,
+        }
+    )
+    assert ongoing_outage_native_fallback["qualified"] is False
+    assert ongoing_outage_native_fallback["failure_codes"] == [
+        "degraded_fallback_binding_used_for_native_request"
+    ]
 
     quota_recovery = qualify_quota_recovery(
         {

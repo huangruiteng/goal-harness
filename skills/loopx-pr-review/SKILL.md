@@ -59,8 +59,16 @@ selected PR:
    repository-native validation when applicable.
 2. Fill `review_plan.result_template` from the shared execution contract;
    preserve missing evidence as `unverified`. For `default_off_isolation`, run
-   its paired counterfactual across all shared surfaces; for `authority_semantics`,
-   match names to actor authority. Never infer `verified` from metadata or CI.
+   its paired counterfactual across every shared and automatically loaded
+   surface, including skills, agent instructions, prompt templates, help,
+   schemas, install bundles, and provider guidance. Treat installation,
+   discovery, provider readiness, accepted input, and resolver success as
+   availability rather than activation; a runtime default-off flag cannot
+   compensate for capability behavior already projected through a baseline
+   instruction surface. For scoped activation, verify the intended scope and
+   every required subject before capability-specific guidance or effects. For
+   `authority_semantics`, match names to actor authority. Never infer
+   `verified` from metadata or CI.
 3. Apply `completion_gate` literally. If an applicable requirement is missing,
    do not manufacture a detailed verdict; name the evidence gap.
 4. Render the verified result through `review_template`. The five sections are
@@ -117,20 +125,11 @@ artifacts back.
 
 ## Full PR Interpretation Depth
 
-A complete review is a whole-PR interpretation, not a checklist or findings
-summary. For each selected PR:
-
-1. Read every changed file and map each file to its responsibility, inputs,
-   outputs, and key symbols.
-2. Pick 2-5 behavior-bearing symbols and explain before/after behavior,
-   critical branches, callers/callees, side effects, and failure paths.
-3. Walk one positive path from user/host action to observable result.
-4. Walk one negative path (invalid input, permission, timeout, corrupt state,
-   private boundary, or rollback) and show where it fails closed.
-5. Cover all changed surfaces in the five sections: motivation, approach,
-   concrete changes, main risk, overall judgment.
-6. List validation per surface and name anything not independently verified.
-7. State overall judgment for the entire PR, not only for the top finding.
+Use the packet's `repository_reuse`, `symbol_map`, `walkthroughs`, and
+`validation_matrix` evidence across the whole PR, including unchanged callers
+and sibling implementations. Walk one positive path to the observable result.
+Walk one negative path and explain its failure owner. Render the verified
+evidence in the five sections; do not maintain a second checklist here.
 
 A review that only repeats the PR body, only discusses one blocker, or omits
 whole files/modules is incomplete and must be reworked.

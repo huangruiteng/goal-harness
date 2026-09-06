@@ -444,6 +444,7 @@ def test_successful_update_revalidates_enabled_extensions(
         "plan": {"backup": {}},
     }
     completed = [
+        subprocess.CompletedProcess([], 0, "200", ""),
         subprocess.CompletedProcess([], 0, "installed", ""),
         subprocess.CompletedProcess([], 0, '{"ok": true}', ""),
         subprocess.CompletedProcess([], 0, '{"ok": true}', ""),
@@ -454,6 +455,8 @@ def test_successful_update_revalidates_enabled_extensions(
         args: list[str], **_kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         calls.append(list(args))
+        if args[0] == "curl":
+            Path(args[args.index("--output") + 1]).write_text("echo installed")
         return completed[len(calls) - 1]
 
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
@@ -467,7 +470,7 @@ def test_successful_update_revalidates_enabled_extensions(
 
     assert updated["ok"] is True
     assert updated["execution"]["extension_doctor_returncode"] == 0
-    assert calls[2] == [
+    assert calls[3] == [
         str(tmp_path / ".local" / "bin" / "loopx"),
         "--format",
         "json",

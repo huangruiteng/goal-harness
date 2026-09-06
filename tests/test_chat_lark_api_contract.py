@@ -53,7 +53,9 @@ def test_runtime_resolution_reads_the_runtime_target_before_server_binding(
         calls["target_path"] = path
         return {"targets": {"shared": {"identity": {"cli_bin": "target-lark-cli"}}}}
 
-    def fake_resolve(*, explicit: str | None, target_cli_bin: str | None) -> LarkCliResolution:
+    def fake_resolve(
+        *, explicit: str | None, target_cli_bin: str | None
+    ) -> LarkCliResolution:
         calls["explicit"] = explicit
         calls["target_cli_bin"] = target_cli_bin
         return LarkCliResolution(
@@ -73,12 +75,16 @@ def test_runtime_resolution_reads_the_runtime_target_before_server_binding(
     )
 
     assert resolution.command == "explicit-lark-cli"
-    assert calls["target_path"] == chat_server.default_goal_channel_target_path(tmp_path)
+    assert calls["target_path"] == chat_server.default_goal_channel_target_path(
+        tmp_path
+    )
     assert calls["explicit"] == "explicit-lark-cli"
     assert calls["target_cli_bin"] == "target-lark-cli"
 
 
-def test_goal_repository_context_is_credential_free_and_path_free(tmp_path: Path) -> None:
+def test_goal_repository_context_is_credential_free_and_path_free(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "private" / "loopx"
     project.mkdir(parents=True)
     calls: list[list[str]] = []
@@ -134,7 +140,9 @@ def test_runtime_snapshot_reuses_private_goal_channel_bindings(
         ]
     }
     monkeypatch.setattr(api, "load_registry", lambda _path: registry)
-    monkeypatch.setattr(api, "resolve_runtime_root", lambda *_args, **_kwargs: runtime_root)
+    monkeypatch.setattr(
+        api, "resolve_runtime_root", lambda *_args, **_kwargs: runtime_root
+    )
     monkeypatch.setattr(
         api,
         "resolve_goal_source_runtime_route",
@@ -182,7 +190,12 @@ def test_runtime_snapshot_reuses_private_goal_channel_bindings(
             "objective": "Alpha delivery",
         }
     }
-    assert snapshot["target_payload"]["targets"]["mew-product"]["identity"]["sender_profile"] == "mew"
+    assert (
+        snapshot["target_payload"]["targets"]["mew-product"]["identity"][
+            "sender_profile"
+        ]
+        == "mew"
+    )
 
 
 def test_chat_server_closes_lark_goal_topic_runtime(monkeypatch: Any) -> None:
@@ -249,7 +262,9 @@ def test_lark_apps_reports_safe_missing_cli_diagnostic() -> None:
     ]
 
 
-def test_lark_chats_reports_lookup_failure_instead_of_an_empty_list(monkeypatch: Any) -> None:
+def test_lark_chats_reports_lookup_failure_instead_of_an_empty_list(
+    monkeypatch: Any,
+) -> None:
     import loopx.chat_lark_api as api
 
     responses: list[dict[str, Any]] = []
@@ -301,7 +316,9 @@ def test_lark_chats_reports_lookup_failure_instead_of_an_empty_list(monkeypatch:
     ]
 
 
-def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: Path) -> None:
+def test_lark_connections_include_app_reply_health(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     import loopx.chat_lark_api as api
 
     calls: list[dict[str, Any]] = []
@@ -330,6 +347,7 @@ def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: P
         ]
 
     monkeypatch.setattr(api, "list_lark_connections", fake_list)
+
     def runner(*_args):
         return {"returncode": 0, "stdout": "{}", "stderr": ""}
 
@@ -375,11 +393,16 @@ def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: P
     assert calls[0]["cli_bin"] == "fake-lark"
     assert calls[0]["runtime_health"]["workspace-bot"]["status"] == "listening"
     assert responses[0]["connections"][0]["reply_ready"] is False
-    assert responses[0]["connections"][0]["health_error_code"] == "lark_message_permissions_required"
+    assert (
+        responses[0]["connections"][0]["health_error_code"]
+        == "lark_message_permissions_required"
+    )
     assert responses[0]["connections"][0]["last_event_reason"] == "topic_mismatch"
 
 
-def test_connect_refreshes_the_app_level_event_consumer(monkeypatch: Any, tmp_path: Path) -> None:
+def test_connect_refreshes_the_app_level_event_consumer(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     import loopx.chat_lark_api as api
 
     refreshed: list[bool] = []
@@ -388,14 +411,17 @@ def test_connect_refreshes_the_app_level_event_consumer(monkeypatch: Any, tmp_pa
     monkeypatch.setattr(
         api,
         "connect_lark_goal_topic",
-        lambda **kwargs: connect_calls.append(kwargs)
-        or {"ok": True, "status": "connected"},
+        lambda **kwargs: (
+            connect_calls.append(kwargs) or {"ok": True, "status": "connected"}
+        ),
     )
 
     class Handler(LarkChatRequestMixin):
         path = "/api/chat/lark/connections"
         server = SimpleNamespace(
-            lark_goal_topic_runtime=SimpleNamespace(refresh=lambda: refreshed.append(True))
+            lark_goal_topic_runtime=SimpleNamespace(
+                refresh=lambda: refreshed.append(True)
+            )
         )
 
         def _read_json(self) -> dict[str, Any]:
@@ -435,6 +461,7 @@ def test_connect_refreshes_the_app_level_event_consumer(monkeypatch: Any, tmp_pa
     assert connect_calls[0]["ingress_mode"] == "async_inbox"
     assert connect_calls[0]["registry_path"] == tmp_path / "registry.json"
     assert responses == [{"ok": True, "status": "connected", "http_status": 200}]
+    assert refreshed == [True]
 
 
 def test_session_ingress_resolves_the_exact_goal_agent_session(
@@ -447,16 +474,18 @@ def test_session_ingress_resolves_the_exact_goal_agent_session(
     monkeypatch.setattr(
         api,
         "connect_lark_goal_topic",
-        lambda **kwargs: connect_calls.append(kwargs)
-        or {"ok": True, "status": "connected"},
+        lambda **kwargs: (
+            connect_calls.append(kwargs) or {"ok": True, "status": "connected"}
+        ),
     )
     latest_calls: list[dict[str, Any]] = []
 
     class Handler(LarkChatRequestMixin):
         server = SimpleNamespace(
             chat_store=SimpleNamespace(
-                latest_session=lambda **kwargs: latest_calls.append(kwargs)
-                or {"session_id": "session-alpha"}
+                latest_session=lambda **kwargs: (
+                    latest_calls.append(kwargs) or {"session_id": "session-alpha"}
+                )
             ),
             lark_goal_topic_runtime=SimpleNamespace(refresh=lambda: None),
         )

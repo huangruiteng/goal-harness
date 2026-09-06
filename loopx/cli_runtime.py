@@ -271,6 +271,9 @@ def dispatch_common_command(
 		)
 		from .cli_commands.todo import handle_todo_command
 		from .cli_rollout import append_cli_rollout_event
+		from .control_plane.coordination.local_authority_shadow_adapter import (
+			effective_runtime_root,
+		)
 
 		return handle_todo_command(
 			args,
@@ -283,6 +286,10 @@ def dispatch_common_command(
 				periodic_report_post_writeback_hooks_for_goal(
 					registry_path=registry_path,
 					goal_id=args.goal_id,
+					runtime_root=effective_runtime_root(
+						registry_path,
+						args.runtime_root,
+					),
 				)
 				if args.todo_command == "complete"
 				else ()

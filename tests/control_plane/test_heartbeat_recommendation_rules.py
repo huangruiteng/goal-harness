@@ -180,6 +180,16 @@ def test_quiet_monitor_keeps_user_todo_non_blocking() -> None:
     assert "open user todo" in recommendation["spend_policy"]
 
 
+def test_true_monitor_only_lane_keeps_monitor_only_reason() -> None:
+    recommendation = _recommend(
+        lane="continuous_monitor",
+        must_attempt_work=False,
+        agent_open=1,
+    )
+
+    assert "all visible open agent todos are monitor-class" in recommendation["reason"]
+
+
 def test_due_monitor_lane_preempts_first_read_only_map() -> None:
     recommendation = _recommend(
         {

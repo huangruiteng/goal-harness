@@ -105,6 +105,15 @@ CONFIGURE_GOAL_REQUEST_FIELDS = {
 CONFIGURE_GOAL_APPLY_FIELDS = CONFIGURE_GOAL_REQUEST_FIELDS | {"preview_id"}
 
 
+def parse_goal_activation_filter(query: dict[str, list[str]]) -> str | None:
+    """Parse the shared scoped-status query without accepting ambiguous input."""
+
+    values = query.get("goal_activation", [])
+    if len(values) > 1 or (values and values[0] not in {"active", "stopped"}):
+        raise ValueError("goal_activation must be active or stopped")
+    return values[0] if values else None
+
+
 def is_loopback_host(host: str) -> bool:
     hostname = host.strip().lower()
     return hostname in {"127.0.0.1", "localhost", "::1", "[::1]"}
@@ -170,6 +179,7 @@ class StatusHTTPServer(ThreadingHTTPServer):
     configure_goal_dry_run_path: str
     configure_goal_apply_path: str
     control_plane_write_enabled: bool
+    goal_subagent_configuration_enabled: bool
     ssh_config_path: Path | None
     verbose: bool
 
@@ -807,6 +817,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             goal_id = (query.get("goal_id") or [""])[0].strip() or None
             limit_text = (query.get("limit") or [""])[0].strip()
             offset_text = (query.get("offset") or [""])[0].strip()
+            window_requested = "limit" in query or "offset" in query
             limit = DEFAULT_WORKSPACE_INDEX_LIMIT if not limit_text else int(limit_text)
             offset = 0 if not offset_text else int(offset_text)
             if limit < 0 or limit > MAX_WORKSPACE_INDEX_LIMIT:
@@ -825,6 +836,12 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                 limit=limit,
                 offset=offset,
             )
+            if not window_requested:
+                index = {
+                    "schema_version": index["schema_version"],
+                    "count": index["count"],
+                    "items": index["items"],
+                }
         except Exception as exc:  # noqa: BLE001 - local UI needs the read failure.
             self._send_json({"ok": False, "error": str(exc)}, status=400)
             return
@@ -919,23 +936,27 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
         path = parsed_url.path
+        # Keep blank values so `?goal_activation=` and repeated values like
+        # `?goal_activation=active&goal_activation=` fail closed with HTTP 400
+        # instead of being silently dropped by the default parse_qs behavior.
+        query = parse_qs(parsed_url.query, keep_blank_values=True)
         if path == "/healthz":
             self._send_json({"ok": True})
             return
         if path == DEFAULT_REVIEW_MATERIAL_PATH:
-            self._handle_review_material(parse_qs(parsed_url.query))
+            self._handle_review_material(query)
             return
         if path == DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH:
             self._handle_extension_presentation_surfaces()
             return
         if path == DEFAULT_EXTENSION_PROJECTION_PATH:
-            self._handle_extension_projection(parse_qs(parsed_url.query))
+            self._handle_extension_projection(query)
             return
         if path == DEFAULT_PERIODIC_REPORT_INDEX_PATH:
-            self._handle_periodic_report_index(parse_qs(parsed_url.query))
+            self._handle_periodic_report_index(query)
             return
         if path == DEFAULT_PERIODIC_REPORT_PROJECTION_PATH:
-            self._handle_periodic_report_projection(parse_qs(parsed_url.query))
+            self._handle_periodic_report_projection(query)
             return
         if path == DEFAULT_SSH_HOSTS_PATH:
             self._handle_ssh_hosts()
@@ -960,12 +981,32 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            activation_state_filter = parse_goal_activation_filter(query)
+        except ValueError as exc:
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                },
+                status=400,
+            )
+            return
+
+        try:
             payload = collect_status(
                 registry_path=self.server.registry_path,
                 runtime_root_override=self.server.runtime_root_override,
                 scan_roots=self.server.scan_roots,
                 limit=self.server.limit,
                 include_public_boundary_scan=False,
+                include_goal_subagent_configuration=(
+                    getattr(
+                        self.server,
+                        "goal_subagent_configuration_enabled",
+                        False,
+                    )
+                ),
+                activation_state_filter=activation_state_filter,
             )
             payload["local_dashboard_api"] = self._local_dashboard_api_payload()
         except Exception as exc:  # noqa: BLE001 - the HTTP layer should preserve diagnostics.
@@ -1034,6 +1075,7 @@ def serve_status(
     enable_reward_write_api: bool,
     enable_control_plane_write_api: bool,
     verbose: bool,
+    enable_goal_subagent_configuration: bool = False,
 ) -> None:
     normalized_path = normalize_status_path(status_path)
     if enable_reward_write_api and not is_loopback_host(host):
@@ -1052,6 +1094,9 @@ def serve_status(
     server.configure_goal_dry_run_path = DEFAULT_CONFIGURE_GOAL_DRY_RUN_PATH
     server.configure_goal_apply_path = DEFAULT_CONFIGURE_GOAL_APPLY_PATH
     server.control_plane_write_enabled = enable_control_plane_write_api
+    server.goal_subagent_configuration_enabled = (
+        enable_goal_subagent_configuration
+    )
     server.ssh_config_path = None
     server.verbose = verbose
     print(f"Serving LoopX status at http://{host}:{port}{normalized_path}", flush=True)

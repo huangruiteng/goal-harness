@@ -24,9 +24,11 @@ import {
   fetchPeriodicReportProjection,
   periodicReportApiUrls,
   resolveLocalStatusUrl,
+  scopedStatusUrl,
 } from "../data/local-status-query";
 import {
   ChatApiError,
+  applyGoalSubagentConfiguration,
   applyTypedAction,
   applyTodo,
   closeChatSession,
@@ -36,6 +38,7 @@ import {
   fetchChatSession,
   fetchChatSessions,
   interruptChatTurn,
+  previewGoalSubagentConfiguration,
   previewTodo,
   previewTypedAction,
   recordProjectionExchange,
@@ -52,10 +55,22 @@ import {
   type ProtectedActionProposal,
   type TodoProposal,
 } from "../data/chat";
+import {
+  beginStatusRequest,
+  createStatusRequestFence,
+  resetStatusRequestFence,
+  reserveStatusSourceSelection,
+  statusRequestCanCommit,
+  statusRequestIsCurrent,
+  type StatusRequest,
+  type StatusRequestFence,
+} from "../data/status-request-fence";
+import { mergeScopedStatusProjections } from "../data/status-merge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { PersonalWorkspacePage } from "../features/personal-workspace/personal-workspace-page";
+import { useWorkspaceI18n } from "../features/personal-workspace/i18n";
 import {
   normalizePersonalHomeModel,
   type WorkspaceAgentOption,
@@ -73,6 +88,7 @@ import {
   type WorkspaceTimelineItem,
   type WorkspaceWorker,
   type WorkspaceGoalNotification,
+  type WorkspaceGoalArchiveLoadState,
   type WorkspaceActionPreview,
   type WorkspaceActionPreviewRequest,
 } from "../features/personal-workspace/personal-workspace-model";
@@ -133,74 +149,6 @@ type DataSource =
   | { kind: "file"; label: string }
   | { kind: "url"; label: string };
 
-type StatusRequestFence = {
-  loadedUrl: string | null;
-  projectionRevision: number;
-  requestedUrl: string | null;
-  selectionRevision: number;
-};
-
-type StatusRequest = {
-  background: boolean;
-  projectionRevision: number;
-  selectionRevision: number;
-  url: string;
-};
-
-function reserveStatusSourceSelection(fence: StatusRequestFence, url: string) {
-  fence.selectionRevision += 1;
-  fence.requestedUrl = url;
-  return fence.selectionRevision;
-}
-
-function beginStatusRequest(
-  fence: StatusRequestFence,
-  url: string,
-  options: { background: boolean; selectionRevision?: number },
-): StatusRequest | null {
-  if (options.background) {
-    if (fence.requestedUrl !== null || fence.loadedUrl !== url) return null;
-    return {
-      background: true,
-      projectionRevision: fence.projectionRevision,
-      selectionRevision: fence.selectionRevision,
-      url,
-    };
-  }
-  const selectionRevision = options.selectionRevision ?? fence.selectionRevision + 1;
-  if (options.selectionRevision !== undefined && fence.selectionRevision !== selectionRevision) {
-    return null;
-  }
-  fence.selectionRevision = selectionRevision;
-  fence.projectionRevision += 1;
-  fence.requestedUrl = url;
-  return {
-    background: false,
-    projectionRevision: fence.projectionRevision,
-    selectionRevision,
-    url,
-  };
-}
-
-function statusRequestIsCurrent(fence: StatusRequestFence, request: StatusRequest) {
-  return fence.projectionRevision === request.projectionRevision
-    && fence.selectionRevision === request.selectionRevision;
-}
-
-function statusRequestCanCommit(fence: StatusRequestFence, request: StatusRequest) {
-  return statusRequestIsCurrent(fence, request) && (
-    !request.background
-    || (fence.requestedUrl === null && fence.loadedUrl === request.url)
-  );
-}
-
-function resetStatusRequestFence(fence: StatusRequestFence) {
-  fence.projectionRevision += 1;
-  fence.selectionRevision += 1;
-  fence.requestedUrl = null;
-  fence.loadedUrl = null;
-}
-
 async function fetchStatusPayload(url: string) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
@@ -250,6 +198,7 @@ type PersonalAgentTodoItem = {
   priority?: string | null;
   status?: string | null;
   taskClass?: string | null;
+  taskDomain?: string | null;
   text: string;
   todoId: string;
 };
@@ -490,6 +439,15 @@ type PersonalGoalItem = {
   nextSentence: string;
   runEvidence?: PersonalRunEvidence | null;
   state: PersonalGoalState;
+  subagentExecution?: {
+    allowedDomains: string[];
+    domainCandidates: Array<{
+      domain: string;
+      matchingTodoCount: number;
+    }>;
+    enabled: boolean;
+    maxChildren: number;
+  };
   title: string;
   usage?: WorkspaceGoalUsage | null;
 };
@@ -749,6 +707,7 @@ function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): Perso
     priority: todo.priority ?? null,
     status: todo.status ?? null,
     taskClass: todo.task_class ?? null,
+    taskDomain: todo.task_domain ?? null,
     text: personalTodoText(todo),
     todoId: todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`,
   };
@@ -756,6 +715,31 @@ function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): Perso
 
 function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
   return (getShareTodos(row, "agent")?.items ?? []).map((todo) => personalAgentTodoFromItem(todo, row));
+}
+
+function personalSubagentDomainCandidates(
+  payload: StatusPayload,
+  row: GoalDirectoryRow,
+  fallbackTodos: PersonalAgentTodoItem[],
+) {
+  const candidateTodos = new Map<string, PersonalAgentTodoItem>();
+  for (const todo of payload.todo_index?.items ?? []) {
+    if (todo.goal_id !== row.goal.id || todo.role !== "agent") continue;
+    const projected = personalAgentTodoFromItem(todo, row);
+    candidateTodos.set(projected.todoId, projected);
+  }
+  for (const todo of fallbackTodos) {
+    if (!candidateTodos.has(todo.todoId)) candidateTodos.set(todo.todoId, todo);
+  }
+
+  const counts = new Map<string, number>();
+  for (const todo of candidateTodos.values()) {
+    if (todo.done || todo.taskClass !== "advancement_task") continue;
+    const domain = todo.taskDomain?.trim();
+    if (!domain) continue;
+    counts.set(domain, (counts.get(domain) ?? 0) + 1);
+  }
+  return [...counts].map(([domain, matchingTodoCount]) => ({ domain, matchingTodoCount }));
 }
 
 function personalAgentTodoFromProjection(
@@ -1130,7 +1114,11 @@ function answerPersonalManagerQuestion(
 }
 
 
-function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]): PersonalHomeModel {
+function buildPersonalHomeModel(
+  payload: StatusPayload,
+  rows: GoalDirectoryRow[],
+  goalSubagentConfigurationEnabled = false,
+): PersonalHomeModel {
   const rowById = new Map(rows.map((row) => [row.goal.id, row]));
   const stoppedGoalIds = new Set(
     payload.run_history.goals
@@ -1188,14 +1176,29 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
     const needsYouTodo = allUserTodos.find((todo) => todo.goalId === goal.id);
     const needsYou = needsYouTodo?.text ?? null;
     const agentTodoFacts = personalAgentTodoFacts(row);
+    const registeredAgentIds = goal.coordination?.registered_agents ?? [];
+    const registeredAgentSet = new Set(registeredAgentIds);
     const goalAgentRows = agentRows.filter(
       (agent) => agent.goalIds.includes(goal.id)
         && !/unassigned|unknown/i.test(agent.agentId)
+        && (registeredAgentSet.size === 0 || registeredAgentSet.has(agent.agentId))
         && (agent.currentTodo?.goal_id === goal.id || agent.claimedTodos.some((todo) => todo.goalId === goal.id)),
     );
     const sortedGoalAgentRows = [...goalAgentRows].sort((left, right) =>
       (right.lastActivity ?? "").localeCompare(left.lastActivity ?? ""),
     );
+    const knownAgentIds = new Set(sortedGoalAgentRows.map((agent) => agent.agentId));
+    const goalAgentLanes = [
+      ...sortedGoalAgentRows.map((agent) => ({
+        agentId: agent.agentId,
+        label: agent.agentId,
+        lastActivityAt: agent.lastActivity,
+        state: agent.status.label,
+      })),
+      ...registeredAgentIds
+        .filter((agentId) => !knownAgentIds.has(agentId))
+        .map((agentId) => ({ agentId, label: agentId, lastActivityAt: null, state: "registered" })),
+    ];
     const agentRow = sortedGoalAgentRows[0];
     const goalAgentTodos = mergePersonalAgentTodos(personalAgentTodos(row), sortedGoalAgentRows, row);
     const nextSentence = [
@@ -1207,14 +1210,9 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       .find((value) => value !== "" && value !== "暂无") ?? "等待 LoopX 更新下一步";
     return [{
       activationState: goal.activation_state,
-      agentId: agentRow?.agentId ?? "codex",
-      agentLaneCount: sortedGoalAgentRows.length,
-      agentLanes: sortedGoalAgentRows.map((agent) => ({
-        agentId: agent.agentId,
-        label: agent.agentId,
-        lastActivityAt: agent.lastActivity,
-        state: agent.status.label,
-      })),
+      agentId: agentRow?.agentId ?? registeredAgentIds[0] ?? "codex",
+      agentLaneCount: goalAgentLanes.length,
+      agentLanes: goalAgentLanes,
       agentLabel: agentRow?.agentId,
       agentSentence: personalAgentSentence(payload, row, state),
       agentTodos: [...goalAgentTodos, ...agentTodoFacts.recentCompleted],
@@ -1229,6 +1227,16 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       nextSentence,
       runEvidence: personalRunEvidence(payload, row),
       state,
+      ...(goalSubagentConfigurationEnabled ? {
+        subagentExecution: {
+          allowedDomains: goal.spawn_policy?.allowed_domains ?? [],
+          domainCandidates: personalSubagentDomainCandidates(payload, row, goalAgentTodos),
+          enabled: goal.spawn_policy?.mode === "multi_subagent"
+            && goal.spawn_policy.spawn_allowed === true
+            && goal.spawn_policy.max_children > 0,
+          maxChildren: goal.spawn_policy?.max_children ?? 0,
+        },
+      } : {}),
       title: personalGoalTitle(goal.id, goal.display_name),
       usage: (() => {
         const goalUsage = usageById.get(goal.id);
@@ -1304,12 +1312,14 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
   };
 }
 function PersonalGoalHome({
+  goalArchiveLoadState,
   isLoading,
   onGoalActivationStateChange,
   onGoalDeleted,
   onSelectGoal,
   onReconcileStatus,
   onRefresh,
+  onRetryGoalArchive,
   payload,
   rows,
   selectedGoalId,
@@ -1317,12 +1327,14 @@ function PersonalGoalHome({
   theme,
   toggleTheme,
 }: {
+  goalArchiveLoadState: WorkspaceGoalArchiveLoadState;
   isLoading: boolean;
   onGoalActivationStateChange: (goalId: string, activationState: "active" | "stopped") => void;
   onGoalDeleted: (goalId: string) => void;
   onSelectGoal: (goalId: string) => void;
   onReconcileStatus: () => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
+  onRetryGoalArchive: () => void | Promise<void>;
   payload: StatusPayload;
   rows: GoalDirectoryRow[];
   selectedGoalId: string;
@@ -1331,6 +1343,7 @@ function PersonalGoalHome({
   toggleTheme: () => void;
 }) {
   const readOnly = statusSourceControl.activeSource.readOnly;
+  const { t } = useWorkspaceI18n();
   const [runtimeAgents, setRuntimeAgents] = useState<Array<{
     adapter_kind: string;
     agent_id: string;
@@ -1344,7 +1357,12 @@ function PersonalGoalHome({
     tool_calls?: boolean;
     trust_scope?: string;
   }>>([]);
-  const model = buildPersonalHomeModel(payload, rows);
+  const [goalSubagentConfigurationEnabled, setGoalSubagentConfigurationEnabled] = useState(false);
+  const model = buildPersonalHomeModel(
+    payload,
+    rows,
+    goalSubagentConfigurationEnabled,
+  );
   const selectedGoal = model.goals.find((goal) => goal.goalId === selectedGoalId) ?? null;
   const [periodicReport, setPeriodicReport] = useState<PeriodicReportProjection | null>(null);
   const [periodicReportError, setPeriodicReportError] = useState<string | null>(null);
@@ -1413,6 +1431,7 @@ function PersonalGoalHome({
   const [sendingContextId, setSendingContextId] = useState<string | null>(null);
   const [runtimeBindings, setRuntimeBindings] = useState<Record<string, PersonalRuntimeBinding>>({});
   const [executionSessions, setExecutionSessions] = useState<ChatSessionSummary[]>([]);
+  const [executionDiscoveryError, setExecutionDiscoveryError] = useState<"partial" | "offline" | null>(null);
   const [executionSessionSnapshots, setExecutionSessionSnapshots] = useState<Record<string, ChatSessionSnapshot>>({});
   const managerMessageId = useRef(1);
   const proposalId = useRef(1);
@@ -1504,14 +1523,21 @@ function PersonalGoalHome({
   useEffect(() => {
     if (readOnly) {
       setRuntimeAgents([]);
+      setGoalSubagentConfigurationEnabled(false);
       return;
     }
     let cancelled = false;
     void fetchChatCapabilities()
       .then((capabilities) => {
-        if (!cancelled) setRuntimeAgents(capabilities.adapters ?? []);
+        if (!cancelled) {
+          setRuntimeAgents(capabilities.adapters ?? []);
+          setGoalSubagentConfigurationEnabled(
+            capabilities.goal_subagent_configuration === "preview_locked",
+          );
+        }
       })
       .catch(() => {
+        if (!cancelled) setGoalSubagentConfigurationEnabled(false);
         // The Codex fallback stays visible while the local control plane reconnects.
       });
     return () => {
@@ -1759,6 +1785,7 @@ function PersonalGoalHome({
   }, [readOnly, sessionDiscoveryKey, selectedGoal?.goalId]);
 
   useEffect(() => {
+    setExecutionDiscoveryError(null);
     if (readOnly) {
       setExecutionSessions([]);
       setExecutionSessionSnapshots({});
@@ -1771,7 +1798,15 @@ function PersonalGoalHome({
     }
     let cancelled = false;
     let timer = 0;
+    let failures = 0;
+    setExecutionSessions([]);
+    setExecutionSessionSnapshots({});
     const discover = async () => {
+      if (cancelled) return;
+      if (document.hidden) {
+        timer = window.setTimeout(() => void discover(), 10_000);
+        return;
+      }
       try {
         const listed = await fetchChatSessions({ goalId: selectedGoal.goalId });
         if (!cancelled) {
@@ -1779,6 +1814,9 @@ function PersonalGoalHome({
           setExecutionSessions(taskSessions);
           const snapshots = await Promise.allSettled(taskSessions.map((session) => fetchChatSession(session.session_id)));
           if (!cancelled) {
+            const partialFailure = snapshots.some((result) => result.status === "rejected");
+            failures = partialFailure ? failures + 1 : 0;
+            setExecutionDiscoveryError(partialFailure ? "partial" : null);
             setExecutionSessionSnapshots(Object.fromEntries(snapshots.flatMap((result, index) => {
               if (result.status !== "fulfilled") return [];
               return [[taskSessions[index].session_id, result.value]];
@@ -1786,9 +1824,10 @@ function PersonalGoalHome({
           }
         }
       } catch {
-        // Durable Todos remain visible while the local execution runtime reconnects.
+        failures += 1;
+        if (!cancelled) setExecutionDiscoveryError("offline");
       }
-      if (!cancelled) timer = window.setTimeout(() => void discover(), 2_000);
+      if (!cancelled) timer = window.setTimeout(() => void discover(), Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4)));
     };
     void discover();
     return () => {
@@ -2466,6 +2505,7 @@ function PersonalGoalHome({
   };
   return (
     <div className={theme === "dark" ? "dark" : ""} data-testid="personal-goal-home">
+      {executionDiscoveryError ? <p role="status" className="m-0 bg-amber-50 px-4 py-2 text-sm text-amber-900">{t(executionDiscoveryError === "partial" ? "runs.discoveryPartial" : "runs.discoveryOffline")}</p> : null}
       <PersonalWorkspacePage
         agents={agentOptions.map((agent) => ({
           adapterKind: agent.adapterKind,
@@ -2580,9 +2620,32 @@ function PersonalGoalHome({
             });
           },
           onOpenOutput: (output) => openGoalChat(output.goalId),
+          ...(goalSubagentConfigurationEnabled ? {
+          onPreviewGoalSubagentConfiguration: async (request) => {
+            const preview = await previewGoalSubagentConfiguration(request);
+            return {
+              changed: preview.changed,
+              configuration: {
+                allowedDomains: preview.after.orchestration.allowed_domains,
+                enabled: preview.feature_summary.multi_subagent === "enabled",
+                maxChildren: preview.after.orchestration.max_children,
+              },
+              previewId: preview.preview_id,
+            };
+          },
+          onApplyGoalSubagentConfiguration: async ({ previewId, ...request }) => {
+            const result = await applyGoalSubagentConfiguration(request, previewId);
+            return {
+              allowedDomains: result.after.orchestration.allowed_domains,
+              enabled: result.feature_summary.multi_subagent === "enabled",
+              maxChildren: result.after.orchestration.max_children,
+            };
+          },
+          } : {}),
           onGoalActivationStateChange,
           onGoalDeleted,
           onReconcileStatus,
+          onRetryGoalArchive,
           onExportOutput: async (output) => {
             const contents = [
               `# ${output.title}`,
@@ -2609,6 +2672,7 @@ function PersonalGoalHome({
           onSendMessage: async (message, agentId, goalId, attachments) => sendManagerQuestion(message, { agentId, goalId, attachments }),
           onStartNewRunSession: startNewManagerSession,
         }}
+        goalArchiveLoadState={goalArchiveLoadState}
         model={workspaceModel}
         readOnly={readOnly}
         selectedAgentId={selectedAgent.agentId}
@@ -2711,17 +2775,18 @@ export function DashboardPage() {
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [goalArchiveLoadState, setGoalArchiveLoadState] = useState<WorkspaceGoalArchiveLoadState>({
+    error: null,
+    phase: "idle",
+  });
   const [requestedStatusUrl, setRequestedStatusUrl] = useState<string | null>(
     search.statusUrl.trim() || null,
   );
   const [exampleModeRequested, setExampleModeRequested] = useState(false);
   const suppressedStatusUrlRef = useRef<string | null>(null);
-  const statusRequestFenceRef = useRef<StatusRequestFence>({
-    loadedUrl: null,
-    projectionRevision: 0,
-    requestedUrl: search.statusUrl.trim() || null,
-    selectionRevision: 0,
-  });
+  const statusRequestFenceRef = useRef<StatusRequestFence>(
+    createStatusRequestFence(search.statusUrl.trim() || null),
+  );
   const routeStatusRequestUrl = !exampleModeRequested && source.kind === "example"
     ? search.statusUrl.trim()
     : "";
@@ -2736,8 +2801,7 @@ export function DashboardPage() {
   );
 
   const statusRequestActive = source.kind === "example"
-    && Boolean(activeStatusRequestUrl)
-    && Boolean(loadError && requestedStatusUrl);
+    && !exampleModeRequested;
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
   const goalRows = useMemo(
@@ -2745,9 +2809,72 @@ export function DashboardPage() {
     [runHistory.goals, queue.items],
   );
 
+  function loadGoalArchive(url: string, request: StatusRequest, resyncAttempt = 0) {
+    setGoalArchiveLoadState({ error: null, phase: "loading" });
+    void fetchStatusPayload(scopedStatusUrl(url, "stopped", window.location.href))
+      .then((archivePayload) => {
+        if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+        const archiveRevision = archivePayload.goal_projection?.registry_revision ?? null;
+        const revisionMismatch = request.registryRevision !== null
+          && request.registryRevision !== undefined
+          && archiveRevision !== null
+          && request.registryRevision !== archiveRevision;
+        setPayload((current) => mergeScopedStatusProjections(current, archivePayload));
+        if (revisionMismatch && resyncAttempt < 1) {
+          void loadFromUrl(url, { background: true, resyncAttempt: resyncAttempt + 1 });
+          return;
+        }
+        setGoalArchiveLoadState(
+          revisionMismatch
+            ? { error: "Goal 状态在加载历史时发生变化，请重试。", phase: "error" }
+            : { error: null, phase: "ready" },
+        );
+      })
+      .catch((error) => {
+        if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+        setGoalArchiveLoadState({ error: formatStatusError(error), phase: "error" });
+      });
+  }
+
+  function retryGoalArchive() {
+    const url = source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl);
+    const request = beginStatusRequest(statusRequestFenceRef.current, url, { background: true });
+    if (request) loadGoalArchive(url, request);
+  }
+
+  async function commitLoadedStatus(
+    url: string,
+    nextPayload: StatusPayload,
+    request: StatusRequest,
+  ) {
+    if (request.background) {
+      setPayload((current) => mergeScopedStatusProjections(current, nextPayload));
+      return true;
+    }
+    const nextSource: DataSource = { kind: "url", label: url };
+    statusRequestFenceRef.current.loadedUrl = url;
+    setPayload(nextPayload);
+    setSource(nextSource);
+    setStatusUrl(url);
+    await navigate({
+      search: (current) => ({
+        ...current,
+        statusUrl: url,
+      }),
+    });
+    if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return false;
+    statusRequestFenceRef.current.requestedUrl = null;
+    setRequestedStatusUrl(null);
+    return true;
+  }
+
   async function loadFromUrl(
     url: string,
-    options: { background?: boolean; selectionRevision?: number } = {},
+    options: {
+      background?: boolean;
+      resyncAttempt?: number;
+      selectionRevision?: number;
+    } = {},
   ) {
     const trimmed = url.trim();
     const background = options.background === true;
@@ -2766,28 +2893,21 @@ export function DashboardPage() {
       setRequestedStatusUrl(trimmed);
       setIsLoading(true);
       setLoadError(null);
+      setGoalArchiveLoadState({ error: null, phase: "idle" });
     }
     try {
-      const nextPayload = await fetchStatusPayload(trimmed);
+      const nextPayload = await fetchStatusPayload(
+        scopedStatusUrl(trimmed, "active", window.location.href),
+      );
       if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
-      if (background) {
-        setPayload(nextPayload);
+      request.registryRevision = nextPayload.goal_projection?.registry_revision ?? null;
+      if (!await commitLoadedStatus(trimmed, nextPayload, request)) return;
+      if (nextPayload.goal_projection?.scope !== "active"
+        || nextPayload.goal_projection.complete) {
+        setGoalArchiveLoadState({ error: null, phase: "ready" });
         return;
       }
-      const nextSource: DataSource = { kind: "url", label: trimmed };
-      statusRequestFenceRef.current.loadedUrl = trimmed;
-      setPayload(nextPayload);
-      setSource(nextSource);
-      setStatusUrl(trimmed);
-      await navigate({
-        search: (current) => ({
-          ...current,
-          statusUrl: trimmed,
-        }),
-      });
-      if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
-      statusRequestFenceRef.current.requestedUrl = null;
-      setRequestedStatusUrl(null);
+      loadGoalArchive(trimmed, request, options.resyncAttempt ?? 0);
     } catch (error) {
       if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
       if (!background) setLoadError(formatStatusError(error));
@@ -2875,6 +2995,7 @@ export function DashboardPage() {
     setRequestedStatusUrl(null);
     setLoadError(null);
     setIsLoading(false);
+    setGoalArchiveLoadState({ error: null, phase: "ready" });
     void navigate({
       search: (current) => ({
         ...current,
@@ -2927,7 +3048,8 @@ export function DashboardPage() {
       }
       return;
     }
-    if (search.goalId && !goalIds.has(search.goalId)) {
+    if (search.goalId && !goalIds.has(search.goalId)
+      && goalArchiveLoadState.phase !== "loading") {
       void navigate({
         search: (current) => ({
           ...current,
@@ -2935,7 +3057,7 @@ export function DashboardPage() {
         }),
       });
     }
-  }, [goalRows, navigate, search.goalId, search.statusUrl, source.kind]);
+  }, [goalArchiveLoadState.phase, goalRows, navigate, search.goalId, search.statusUrl, source.kind]);
 
   function selectGoal(goalId: string) {
     void navigate({
@@ -2952,8 +3074,8 @@ export function DashboardPage() {
         error={loadError}
         isLoading={isLoading}
         onReset={resetToExample}
-        onRetry={() => void loadFromUrl(activeStatusRequestUrl)}
-        requestedUrl={activeStatusRequestUrl}
+        onRetry={() => void loadFromUrl(activeStatusRequestUrl || defaultGlobalStatusUrl)}
+        requestedUrl={activeStatusRequestUrl || defaultGlobalStatusUrl}
         theme={theme}
         toggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
@@ -2962,6 +3084,7 @@ export function DashboardPage() {
 
   return (
     <PersonalGoalHome
+      goalArchiveLoadState={goalArchiveLoadState}
       isLoading={isLoading}
       onGoalActivationStateChange={(goalId, activationState) => {
         statusRequestFenceRef.current.projectionRevision += 1;
@@ -2976,6 +3099,7 @@ export function DashboardPage() {
         source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl),
         { background: true },
       )}
+      onRetryGoalArchive={retryGoalArchive}
       onRefresh={() => loadFromUrl(source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl))}
       payload={payload}
       rows={goalRows}

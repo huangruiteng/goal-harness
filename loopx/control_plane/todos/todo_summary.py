@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import re
 from typing import Any, Callable, Optional
 
@@ -66,6 +67,13 @@ from .succession_warning import (
 from .resume_condition import evaluate_todo_resume_conditions
 from ..work_items.project_asset import build_project_asset_todo_summary
 from .user_gate import open_user_gate_todo_items
+from ..coordination.coordination_state_contract import (
+    TODO_CANONICAL_READ_RECORD_FIELDS,
+    TODO_CANONICAL_READ_RECORD_SCHEMA_VERSION as TODO_CANONICAL_READ_RECORD_SCHEMA_VERSION,
+    TODO_CANONICAL_REQUIRED_READ_FIELDS,
+    TODO_ITEM_SCHEMA_VERSION,
+    canonical_record_fields,
+)
 
 
 MAX_STATUS_TODOS_PER_ROLE = 12
@@ -78,7 +86,6 @@ MAX_DEPENDENCY_BLOCKERS = 4
 MAX_COMPLETED_SUCCESSION_WARNING_ITEMS = 5
 MAX_RECENT_COMPLETED_ADVANCEMENT_ITEMS = MAX_TODO_VISIBILITY_LANE_ITEMS
 
-TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
 TODO_SOURCE_PROOF_SCHEMA_VERSION = "todo_source_proof_v0"
 TODO_CLOSURE_INTENT_SCHEMA_VERSION = "todo_closure_intent_v0"
 TODO_TERMINAL_CLOSURE_PROOF_SCHEMA_VERSION = "todo_terminal_closure_proof_v0"
@@ -128,6 +135,7 @@ TASK_ORCHESTRATION_CANDIDATE_FIELDS = (
     "resume_ready",
     "continuation_policy",
     "target_key",
+    "completion_validation_required",
     "title",
     "text",
 )
@@ -441,72 +449,44 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "done": bool(item.get("done")),
         "text": item.get("text"),
     }
-    for key in (
-        "schema_version",
-        "todo_id",
-        "role",
-        "status",
-        "priority",
-        "title",
-        "archive_state",
-        "source_section",
-        "task_class",
-        "action_kind",
-        "task_domain",
-        "capability_binding_ref",
-        "task_repository",
-        "continuation_policy",
-        "removed_continuation_policy",
-        "required_write_scopes",
-        "required_capabilities",
-        "target_capabilities",
-        "explore_result_node_refs",
-        "decision_scope",
-        "required_decision_scopes",
-        "decision_outcome",
-        "decision_scope_outcomes",
-        "claimed_by",
-        "created_by",
-        "last_actor_agent_id",
-        "bound_agent",
-        "goal_bound",
-        "blocks_agent",
-        "excluded_agents",
-        "global_gate",
-        "unblocks_todo_id",
-        "resume_when",
-        "resume_monitor_generation",
-        "resume_condition",
-        "resume_ready",
-        "no_followup",
-        "successor_todo_ids",
-        "completion_continuation",
-        "completion_recovery",
-        "replan_obligation_id",
-        "target_key",
-        "cadence",
-        "next_due_at",
-        "expires_at",
-        "watch_only",
-        "last_checked_at",
-        "result_hash",
-        "consecutive_no_change",
-        "material_change",
-        "material_change_generation",
-        "max_no_change_before_replan",
-        "note",
-        "evidence",
-        "reason",
-        "completed_at",
-        "completion_turn_key",
-        "updated_at",
-        "superseded_by",
-        "completion_validation_required",
-    ):
+    for key in TODO_CANONICAL_READ_RECORD_FIELDS:
+        if key in compact:
+            continue
         if item.get(key) is not None:
             compact[key] = item.get(key)
     attach_todo_handoff_note(compact)
     return compact
+
+
+def canonical_todo_read_record(
+    item: dict[str, Any],
+    *,
+    reject_unknown: bool = False,
+) -> dict[str, Any]:
+    """Copy one already-normalized Todo consumer record without re-deriving it."""
+
+    record = canonical_record_fields(
+        item,
+        fields=TODO_CANONICAL_READ_RECORD_FIELDS,
+        required_fields=TODO_CANONICAL_REQUIRED_READ_FIELDS,
+        label="canonical Todo read record",
+        reject_unknown=reject_unknown,
+    )
+    if (
+        record["schema_version"] != TODO_ITEM_SCHEMA_VERSION
+        or not isinstance(record["role"], str)
+        or record["role"] not in {"user", "agent"}
+        or not isinstance(record["status"], str)
+        or not record["status"]
+        or not isinstance(record["done"], bool)
+        or not isinstance(record["text"], str)
+        or not isinstance(record["archive_state"], str)
+        or not record["archive_state"]
+        or not isinstance(record["source_section"], str)
+        or not record["source_section"]
+    ):
+        raise ValueError("canonical Todo read record has invalid required semantics")
+    return record
 
 
 def _task_orchestration_authority(
@@ -578,19 +558,23 @@ def todo_item_is_actionable_open(item: dict[str, Any]) -> bool:
     return projection_todo_item_is_actionable_open(item)
 
 
-def todo_item_next_due_at(item: dict[str, Any]):
+def todo_item_next_due_at(item: dict[str, Any]) -> datetime | None:
     return projection_todo_item_next_due_at(item)
 
 
-def todo_item_expires_at(item: dict[str, Any]):
+def todo_item_expires_at(item: dict[str, Any]) -> datetime | None:
     return projection_todo_item_expires_at(item)
 
 
-def todo_item_is_due_monitor(item: dict[str, Any], *, now=None) -> bool:
+def todo_item_is_due_monitor(
+    item: dict[str, Any], *, now: datetime | None = None
+) -> bool:
     return projection_todo_item_is_due_monitor(item, now=now, task_text_keys=("text",))
 
 
-def todo_item_missing_monitor_schedule(item: dict[str, Any], *, now=None) -> bool:
+def todo_item_missing_monitor_schedule(
+    item: dict[str, Any], *, now: datetime | None = None
+) -> bool:
     return projection_todo_item_missing_monitor_schedule(item, now=now, task_text_keys=("text",))
 
 
@@ -728,7 +712,8 @@ def dependency_blocker_summary(
         goal_id = str(item.get("goal_id") or "")
         if not goal_id or goal_id == current_goal_id:
             continue
-        user_todos = item.get("user_todos") if isinstance(item.get("user_todos"), dict) else {}
+        raw_user_todos = item.get("user_todos")
+        user_todos = raw_user_todos if isinstance(raw_user_todos, dict) else {}
         for todo in user_todos.get("items") or []:
             if not isinstance(todo, dict) or todo.get("done"):
                 continue
@@ -776,6 +761,7 @@ def apply_resume_conditions(
     *,
     resume_source_items: list[dict[str, Any]] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
+    available_capabilities: Any = None,
 ) -> None:
     resume_items = [
         item
@@ -789,6 +775,7 @@ def apply_resume_conditions(
         resume_items,
         source_items=source_items,
         rollout_events=rollout_events,
+        available_capabilities=available_capabilities,
     )
     for item in items:
         resume_when = normalize_todo_resume_when(item.get("resume_when"))
@@ -890,8 +877,9 @@ def todo_item_is_succession_tracked_completion(item: dict[str, Any]) -> bool:
 
 
 def _completed_succession_sort_key(item: dict[str, Any]) -> tuple[str, int]:
+    raw_index = item.get("index")
     try:
-        index = int(item.get("index"))
+        index = int(raw_index) if raw_index is not None else 0
     except (TypeError, ValueError):
         index = 0
     timestamp = str(item.get("updated_at") or item.get("completed_at") or "")
@@ -1073,6 +1061,7 @@ def compact_todo_group(
     preferred_todo_ids: set[str] | None = None,
     resume_source_items: list[dict[str, Any]] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
+    available_capabilities: Any = None,
     item_limit: int | None = MAX_STATUS_TODOS_PER_ROLE,
     include_task_orchestration_authority: bool = False,
 ) -> dict[str, Any] | None:
@@ -1090,6 +1079,7 @@ def compact_todo_group(
             source_section=source_section,
         ),
         rollout_events=rollout_events,
+        available_capabilities=available_capabilities,
     )
     lanes = _todo_group_lanes(items, preferred_todo_ids=preferred_todo_ids)
     source_valid = role in {"user", "agent"} and bool(str(source_section or "").strip())
@@ -1143,7 +1133,7 @@ def compact_todo_group(
         for item in lanes.open_items
         if normalize_todo_id(item.get("todo_id")) not in watch_only_ids
     ]
-    summary = {
+    summary: dict[str, Any] = {
         "schema_version": "todo_summary_v0",
         "source_section": source_section,
         "total_count": len(items),

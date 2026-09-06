@@ -6,9 +6,7 @@ from typing import Any, Callable
 
 from ..control_plane.capability_hooks import (
     POST_WRITEBACK_HOOK_DISPATCH_SCHEMA_VERSION,
-    PostWritebackHookReceiptJournal,
     PostWritebackHookRegistration,
-    build_post_writeback_hook_input,
     dispatch_post_writeback_hooks,
 )
 from ..history import load_registry
@@ -54,24 +52,27 @@ def dispatch_committed_cli_post_writeback_hooks(
             if projection_builder is not None
             else {}
         )
-        hook_input = build_post_writeback_hook_input(
-            event_kind=event_kind,
-            goal_id=goal_id,
-            agent_id=str(identity.get("agent_id") or ""),
-            todo_id=str(identity.get("todo_id") or ""),
-            turn_instance_id=str(identity.get("turn_instance_id") or ""),
-            effect_id=str(identity.get("effect_id") or ""),
-            state_version=state_version,
-            committed_at=committed_at,
-            projection=projection,
-        )
         return dispatch_post_writeback_hooks(
             hooks,
-            hook_input=hook_input,
-            journal=PostWritebackHookReceiptJournal(
-                runtime_root=runtime_root,
-                goal_id=goal_id,
-            ),
+            source={
+                "schema_version": "loopx_post_writeback_hook_source_v0",
+                "event_kind": event_kind,
+                "status": "committed",
+                "durable": True,
+                "identity": {
+                    "goal_id": goal_id,
+                    "agent_id": str(identity.get("agent_id") or ""),
+                    "todo_id": str(identity.get("todo_id") or ""),
+                    "turn_instance_id": str(
+                        identity.get("turn_instance_id") or ""
+                    ),
+                    "effect_id": str(identity.get("effect_id") or ""),
+                },
+                "state_version": state_version,
+                "committed_at": committed_at,
+                "projection": projection,
+            },
+            runtime_root=runtime_root,
         )
     except Exception:  # Optional hooks never alter primary truth.
         return {

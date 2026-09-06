@@ -236,9 +236,16 @@ authority 回答的是“哪次状态转换合法”。
 
 ### 当前已发布与仍在设计中的边界
 
-当前公开架构把 CLI 作为 compatibility baseline，并把 local server/daemon 描述为 roadmap。
-多 Host 协作、离线队列和 shared control plane 的详细方案存在于状态为 **Draft** 的 RFC 中，不能
-写成当前安装后即可用的云端功能。
+`v0.5.4` 的 shared-authority 工作已经不只是纸面方案：仓库包含 provider-neutral TypeScript
+`AuthorityStore` contract，以及 file、NoKV 和 PostgreSQL 的 staged candidate 与 conformance evidence。
+但这仍不等于已启用 shared control plane。发布版没有把这些 candidate 接到默认运行时，也没有
+提供可直接启用的远端 authority service；安装 Provider 更不会自动改变某个 Goal 的事实源。
+
+`v0.5.4` 之后的 `main` 可能继续出现 default-off shadow、parity、fencing 或 provider-first cutover
+切片。它们证明迁移机制，不应倒推成 `v0.5.4` 已交付云端协作。稳定版行为以对应 tag 和 release
+notes 为准，实验状态以
+[Shared Control-Plane Authority RFC](/loopx/docs/architecture/rfcs/shared-goal-authority-state-provider-v0/)
+的当前 stage 为准。
 
 当前可以依赖：
 
@@ -246,6 +253,8 @@ authority 回答的是“哪次状态转换合法”。
 - Todo lifecycle writer 的 active-state file lock、preview/readback 和当前已实现的幂等行为；
 - registered peer、soft claim、可选 task lease 与独立 worktree guard；
 - 不同 Host 通过同一 registry/Goal 读取并受控写回。
+- 用于开发和 qualification 的 staged file/NoKV/PostgreSQL candidate；它们不自动获得 runtime
+  authority。
 
 当前不应承诺：
 
@@ -255,8 +264,9 @@ authority 回答的是“哪次状态转换合法”。
 - NoKV、数据库或 IM 自动替代 LoopX lifecycle owner。
 
 如果要实现跨设备控制面，应保留一个 canonical LoopX authority，要求 revision-bound、幂等的受控
-命令与 receipt，并把消息传递、上下文记忆和状态 authority 分开。直到该 Draft 经过发布验证，
-Dev Book 只教授这些协议边界，不提供“云端模式已可用”的操作步骤。
+命令与 receipt，并把消息传递、上下文记忆和状态 authority 分开。直到 shared mode 经过独立
+promotion、运行时接线和发布验证，Dev Book 只教授这些协议边界，不提供“云端模式已可用”的操作
+步骤。
 
 ## 历史产物的三层完整性
 

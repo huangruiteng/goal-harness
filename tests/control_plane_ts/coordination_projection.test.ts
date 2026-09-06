@@ -8,14 +8,90 @@ import type {
   AuthorityStoreCommit,
   AuthorityStoreCommitResult,
 } from "../../loopx/control_plane/coordination/authority_store.ts";
+import { canonicalAuthoritySha256 } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import type { JsonObject } from "../../loopx/control_plane/effect_program.ts";
 import {
   commitCoordinationProjectionMutation,
   indexCoordinationProjection,
   indexCoordinationProjectionTodos,
   prepareCoordinationProjectionCommit,
   reduceCoordinationProjection,
+  TODO_CANONICAL_READ_RECORD_FIELDS,
+  TODO_CANONICAL_READ_RECORD_SCHEMA,
 } from "../../loopx/control_plane/coordination/coordination_projection.ts";
 import { FileAuthorityStore } from "../../loopx/control_plane/coordination/file_authority_store.ts";
+import {
+  listLocalCoordinationTodos,
+  LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+} from "../../loopx/control_plane/coordination/local_authority_runtime.ts";
+import {
+  TODO_DOMAIN_ITEM_SCHEMA,
+  TODO_DOMAIN_READ_RECORD_SCHEMA,
+  TODO_DOMAIN_RECORD_CONTRACT,
+} from "../../loopx/control_plane/coordination/coordination_state_contract.ts";
+
+test("native provider Todo creation and archival need no Markdown address", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-domain-todo-"));
+  const store = new FileAuthorityStore(root, "goal-a");
+  const initial = await store.commitAuthority({
+    expected_provider_revision: null,
+    operation_id: "bootstrap:domain",
+    events: [{ schema_version: "bootstrap_v0" }],
+    next_projection: {
+      goal_id: "goal-a", todos: [], leases: [],
+      todo_read_model: {
+        schema_version: TODO_DOMAIN_READ_RECORD_SCHEMA,
+        todo_count: 0,
+        records_sha256: canonicalAuthoritySha256([]),
+        contract_fields: [...TODO_DOMAIN_RECORD_CONTRACT.fields],
+      },
+    },
+    receipts: [],
+  });
+  assert.equal(initial.status, "applied");
+  if (initial.status !== "applied") return;
+  const todo = {
+    schema_version: TODO_DOMAIN_ITEM_SCHEMA,
+    todo_id: "todo_native", role: "agent", status: "done", done: true,
+    text: "Retain the archival decision independently of its rendered section",
+    archive_state: "active", no_followup: true,
+  };
+  const input = {
+    goal_id: "goal-a", operation_id: "create:domain",
+    expected_provider_revision: initial.provider_revision,
+    mutations: [{ kind: "todo_upsert" as const, todo }],
+  };
+  assert.equal((await commitCoordinationProjectionMutation(store, input)).status, "applied");
+  assert.equal((await commitCoordinationProjectionMutation(store, input)).status, "replayed");
+  const head = await store.loadAuthority();
+  assert.equal(head.status, "loaded");
+  if (head.status !== "loaded") return;
+  assert.deepEqual(head.head.todos, [todo]);
+  assert.throws(() => reduceCoordinationProjection(head.head, "goal-a", [{
+    kind: "todo_upsert", todo: { ...todo, source_section: "Agent Todo" },
+  }]), /unversioned fields: source_section/);
+  const { archive_state: _archive, ...missingArchive } = todo;
+  assert.throws(() => reduceCoordinationProjection(head.head, "goal-a", [{
+    kind: "todo_upsert", todo: missingArchive,
+  }]), /omits existing fields: archive_state/);
+  assert.equal((await commitCoordinationProjectionMutation(store, {
+    goal_id: "goal-a", operation_id: "archive:domain",
+    expected_provider_revision: head.provider_revision,
+    mutations: [{ kind: "todo_upsert", todo: { ...todo, archive_state: "archive" } }],
+  })).status, "applied");
+  const reopened = await new FileAuthorityStore(root, "goal-a").loadAuthority();
+  assert.equal(reopened.status, "loaded");
+  if (reopened.status === "loaded") {
+    assert.deepEqual(reopened.head.todos, [{ ...todo, archive_state: "archive" }]);
+  }
+  const listed = await listLocalCoordinationTodos({
+    schema_version: LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+    runtime_root: root, goal_id: "goal-a",
+  }, { createStore: () => new FileAuthorityStore(root, "goal-a") });
+  assert.equal(listed.status, "loaded");
+  assert.equal(listed.legacy_fallback_used, false);
+  assert.deepEqual(listed.todos, [{ ...todo, archive_state: "archive" }]);
+});
 
 test("coordination projection indexes exact Todo identities in stable order", () => {
   const first = { todo_id: "todo_b", status: "open" };
@@ -137,6 +213,89 @@ test("coordination projection reducer fails closed on partial or invalid batches
     ]),
     /more than once/,
   );
+});
+
+test("canonical Todo mutation rejects a replacement that drops existing consumer fields", () => {
+  const todo = {
+    schema_version: "todo_item_v0",
+    todo_id: "todo_a",
+    role: "agent",
+    status: "open",
+    done: false,
+    text: "Qualify provider cutover",
+    archive_state: "active",
+    source_section: "Agent Todo",
+    priority: "P0",
+    title: "Provider cutover",
+    resume_when: "material_change:todo_monitor",
+    evidence: "receipt:cqr_example",
+  };
+  const projection = {
+    goal_id: "goal-a",
+    todos: [todo],
+    leases: [],
+    todo_read_model: {
+      schema_version: TODO_CANONICAL_READ_RECORD_SCHEMA,
+      todo_count: 1,
+      records_sha256: canonicalAuthoritySha256([todo]),
+      contract_fields: [...TODO_CANONICAL_READ_RECORD_FIELDS],
+    },
+  };
+
+  assert.throws(
+    () => reduceCoordinationProjection(projection, "goal-a", [{
+      kind: "todo_upsert",
+      todo: {
+        schema_version: "todo_item_v0",
+        todo_id: "todo_a",
+        role: "agent",
+        status: "done",
+        done: true,
+        text: "Qualify provider cutover",
+        archive_state: "active",
+        source_section: "Agent Todo",
+      },
+    }]),
+    /omits existing fields: evidence, priority, resume_when, title/,
+  );
+
+  const reduced = reduceCoordinationProjection(projection, "goal-a", [{
+    kind: "todo_upsert",
+    todo: { ...todo, status: "done", done: true },
+  }]);
+  assert.deepEqual((reduced.todos as JsonObject[])[0], {
+    ...todo,
+    status: "done",
+    done: true,
+  });
+
+  const explicitlyCleared = reduceCoordinationProjection(projection, "goal-a", [{
+    kind: "todo_upsert",
+    todo: { ...todo, resume_when: null, evidence: null },
+  }]);
+  assert.deepEqual((explicitlyCleared.todos as JsonObject[])[0], {
+    ...todo,
+    resume_when: null,
+    evidence: null,
+  });
+
+  const inserted = reduceCoordinationProjection(projection, "goal-a", [{
+    kind: "todo_upsert",
+    todo: {
+      schema_version: "todo_item_v0",
+      todo_id: "todo_b",
+      role: "agent",
+      status: "open",
+      done: false,
+      text: "Review cutover evidence",
+      archive_state: "active",
+      source_section: "Agent Todo",
+    },
+  }]);
+  assert.deepEqual((inserted.todos as JsonObject[]).map((record) => record.todo_id), [
+    "todo_a",
+    "todo_b",
+  ]);
 });
 
 test("coordination projection commit derives one auditable atomic transaction", () => {

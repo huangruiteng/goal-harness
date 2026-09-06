@@ -61,11 +61,16 @@ loopx doctor
 loopx registry
 loopx status
 loopx todo list --goal-id <goal-id>
+loopx todo list --goal-id <goal-id> --thin --format json
 loopx history --goal-id <goal-id>
 loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin --limit 30
 loopx quota should-run --goal-id <goal-id> --agent-id <agent-id>
 loopx extension list --format json
 ```
+
+The `todo list --thin` option added in `v0.5.4` is an explicit bounded projection. It compacts fields and
+the number of returned items per lane without changing default selection, ordering, quota, or lifecycle
+semantics. Use the command without `--thin`, or an exact `todo_id`, when you need full detail.
 
 ## Project onboarding entrypoints
 

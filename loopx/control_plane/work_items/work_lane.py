@@ -505,7 +505,10 @@ def build_work_lane_contract(
     has_agent_todos = open_count > 0
     has_advancement_todos = advancement_count > 0
     has_monitor_todos = monitor_count > 0
-    monitor_only_todos = has_agent_todos and has_monitor_todos and not has_advancement_todos
+    monitor_only_schedule = (
+        has_agent_todos and has_monitor_todos and not has_advancement_todos
+    )
+    non_runnable_non_monitor_count = max(0, open_count - monitor_count)
     first_due_monitor = due_monitor_items[0] if due_monitor_items else None
     blocked_by_monitor_items = resume_blocked_by_monitor_items or []
     schedule_gap_items = monitor_schedule_gap_items or []
@@ -621,7 +624,7 @@ def build_work_lane_contract(
         if resume_blocked_by_monitor_count > 0 and not first_due_monitor:
             selected = blocked_by_monitor_items[0] if blocked_by_monitor_items else {}
             reason_codes = ["resume_blocked_by_open_monitor"]
-            if monitor_only_todos:
+            if monitor_only_schedule:
                 reason_codes.insert(0, "monitor_todo_only")
             return {
                 "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
@@ -644,7 +647,7 @@ def build_work_lane_contract(
                     "non-blocking monitor contract"
                 ),
             }
-        if monitor_only_todos:
+        if monitor_only_schedule:
             if first_due_monitor:
                 return due_monitor_contract(
                     reason_codes=["monitor_todo_only", "monitor_due"]
@@ -656,7 +659,10 @@ def build_work_lane_contract(
                     "next_lane": "advancement_task",
                     "obligation": "materialize_advancement_todo_or_blocker",
                     "must_attempt_work": True,
-                    "reason_codes": ["monitor_todo_only", "next_action_requires_advancement"],
+                    "reason_codes": [
+                        "monitor_todo_only",
+                        "next_action_requires_advancement",
+                    ],
                     "monitor_policy": "material_transition_only",
                     "action": (
                         "materialize the planning/self-repair advancement todo or write a concrete blocker"
@@ -694,7 +700,14 @@ def build_work_lane_contract(
                 "next_lane": "continuous_monitor",
                 "obligation": "quiet_until_material_monitor_transition",
                 "must_attempt_work": False,
-                "reason_codes": ["monitor_todo_only"],
+                "reason_codes": [
+                    *(
+                        ["non_runnable_non_monitor_todos_present"]
+                        if non_runnable_non_monitor_count
+                        else ["monitor_todo_only"]
+                    ),
+                ],
+                "non_runnable_non_monitor_count": non_runnable_non_monitor_count,
                 "monitor_policy": "write_once_per_material_transition_else_no_spend",
                 "material_transition": (
                     "a monitor todo may write back only material state transitions, regressions, or concrete blockers"
@@ -708,7 +721,7 @@ def build_work_lane_contract(
         reason_codes.append("open_agent_todo")
         if effective_due_monitor_preemption:
             reason_codes.append("due_monitor_priority_preempts_advancement")
-    elif monitor_only_todos:
+    elif monitor_only_schedule:
         reason_codes.append("monitor_todo_only")
         if first_due_monitor:
             reason_codes.append("monitor_due")

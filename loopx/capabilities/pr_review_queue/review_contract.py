@@ -20,7 +20,9 @@ CODE_AREAS = {
 
 EXAMPLE_OR_SMOKE_AREAS = {"test_or_example"}
 
-NEGATIVE_PATH_AREAS = CODE_AREAS | {"public_entry_or_policy"}
+BEHAVIORAL_POLICY_AREAS = {"public_entry_or_policy", "agent_instruction_surface"}
+
+NEGATIVE_PATH_AREAS = CODE_AREAS | BEHAVIORAL_POLICY_AREAS
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
@@ -74,7 +76,7 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
             _section(
                 "改动思路",
                 "300-500字",
-                "Use `architecture_flow` and `walkthroughs`: entry point, authoritative state, decision boundary, positive path, alternative, and ownership trade-off.",
+                "Use `architecture_flow`, `repository_reuse`, and `walkthroughs`: entry point, authoritative state, decision boundary, positive path, existing implementation comparison, and ownership trade-off.",
             ),
             _section(
                 "具体改动",
@@ -136,6 +138,48 @@ def build_review_execution_contract() -> dict[str, Any]:
                 ],
             },
             {
+                "evidence_id": "repository_reuse",
+                "required_when": "behavior_bearing_change",
+                "verdict_values": [
+                    "reused", "separation_justified", "no_existing_candidate",
+                    "unjustified_duplication", "not_yet_proven",
+                ],
+                "fields": [
+                    "searched_revisions", "queries_and_paths", "existing_candidates",
+                    "semantic_comparison", "reuse_or_separation_reason",
+                    "validation_evidence", "verdict",
+                ],
+                "comparison_dimensions": [
+                    "resource_and_caller", "data_scope_and_filters",
+                    "ordering_and_pagination", "authority_and_sanitization",
+                    "state_retry_and_failure_owner",
+                ],
+                "rule": (
+                    "Before judging the proposed architecture, search the base and "
+                    "exact-head repository by caller outcome, resource, routes and "
+                    "symbols, not only new filenames. Record immutable searched "
+                    "revisions, queries, paths and candidate definitions/callers, "
+                    "including unchanged siblings outside the diff. Compare the "
+                    "applicable dimensions for each candidate and explain why the "
+                    "nearest existing owner can be reused or extended, or why an "
+                    "independent boundary is necessary. Same-resource views must "
+                    "retain the same semantics unless a deliberate difference is "
+                    "disclosed and validated; exercise switching consumers and "
+                    "concurrent updates when state or paging is involved. Green CI, "
+                    "shared low-level readers, different names, and conflict-free "
+                    "coexistence do not justify a second contract or state owner. "
+                    "A no_existing_candidate verdict requires a bounded negative "
+                    "search with its scope and limitations, not an empty candidate "
+                    "list. Similar code alone is not duplication: preserve distinct "
+                    "invariants or compatibility boundaries when evidence justifies "
+                    "separation. After base integration or head changes, repeat the "
+                    "comparison rather than inheriting an earlier approval. Missing "
+                    "or unverified evidence is not_yet_proven and cannot approve. "
+                    "This is a reviewer-executed evidence requirement, not an "
+                    "automatic similarity detector or proof that a search ran."
+                ),
+            },
+            {
                 "evidence_id": "changed_line_classification",
                 "required_when": "always",
                 "categories": [
@@ -150,21 +194,25 @@ def build_review_execution_contract() -> dict[str, Any]:
             },
             {
                 "evidence_id": "scope_fit",
-                "required_when": "code_change",
+                "required_when": "behavior_bearing_change",
                 "fields": [
                     "shipped_behavior",
                     "active_call_sites",
+                    "instruction_install_or_load_path",
+                    "target_audience_and_scope",
                     "caller_path_or_none",
                     "coverage_only_declared",
                     "scope_fit_verdict",
                 ],
                 "rule": (
                     "For every added or moved production module, adapter, CLI "
-                    "command, or control-plane contract, verify a shipped "
-                    "behavior and at least one active production call site in "
-                    "the reviewed branch. Test-only coverage of an unused "
-                    "module is not a shipped behavior; name the gap and treat "
-                    "it as blocking unless an explicit, owner-accepted "
+                    "command, control-plane contract, or agent instruction surface, "
+                    "verify a shipped behavior and at least one active production "
+                    "call site or automatic installation/loading path in the reviewed "
+                    "branch. For instructions, verify the audience and activation "
+                    "scope reached by that path. Test-only coverage of an unused "
+                    "module or uninstalled instruction is not a shipped behavior; "
+                    "name the gap and treat it as blocking unless an explicit, owner-accepted "
                     "coverage-only boundary is recorded."
                 ),
             },
@@ -293,7 +341,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             },
             {
                 "evidence_id": "default_off_isolation",
-                "required_when": "code_change",
+                "required_when": "behavior_bearing_change",
                 "verdict_values": [
                     "isolated",
                     "not_isolated",
@@ -303,15 +351,20 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "fields": [
                     "opt_in_or_default_off_claim",
                     "authoritative_gate",
+                    "declared_activation_scope",
+                    "enabled_subjects",
                     "default_state",
+                    "availability_signals_that_do_not_activate",
                     "disabled_entry_path",
                     "enabled_entry_path",
                     "shared_changed_surfaces",
+                    "installed_or_auto_loaded_instruction_surfaces",
                     "disabled_schema_or_required_fields",
                     "disabled_prompt_or_guidance",
                     "disabled_accepted_inputs",
                     "disabled_state_or_projection",
                     "disabled_scheduling_quota_or_side_effects",
+                    "disabled_user_experience_parity",
                     "paired_counterfactual_validation",
                     "verdict",
                 ],
@@ -322,7 +375,19 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "preserve the previous observable contract: schema and required "
                     "fields, prompts and guidance, accepted host inputs, persisted "
                     "or journal projections, scheduling and quota decisions, and "
-                    "external effects. The absence of a topology, operation list, "
+                    "external effects. Treat installed or automatically loaded "
+                    "skills, system or agent instructions, prompt templates, help "
+                    "text, schemas, and provider setup guidance as production "
+                    "surfaces when they can change model or user behavior. A runtime "
+                    "default of false does not isolate guidance that is already "
+                    "present on one of those baseline surfaces. Distinguish "
+                    "availability from activation: installation, discovery, provider "
+                    "readiness, accepted input, locator resolution, or CLI presence "
+                    "does not enable a capability. For goal-, project-, tenant-, "
+                    "user-, or agent-scoped activation, prove that the authoritative "
+                    "gate binds the intended scope and every required subject before "
+                    "any capability-specific instruction, action, state mutation, or "
+                    "user-facing concept is projected. The absence of a topology, operation list, "
                     "or feature object proves only that one enabled path did not run; "
                     "it does not prove isolation of shared builders or serializers. "
                     "Run a paired counterfactual using otherwise identical inputs "
@@ -400,7 +465,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             },
             {
                 "evidence_id": "behavior_change_disclosure",
-                "required_when": "runtime_behavior_change",
+                "required_when": "behavior_bearing_change",
                 "fields": [
                     "previous_default",
                     "new_default",
@@ -408,10 +473,12 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "disclosure_surface",
                 ],
                 "rule": (
-                    "Default behavior changes must be disclosed through renamed "
-                    "smokes, docs, or release notes. Flag silent behavior changes "
-                    "that alter existing automation without naming the old and new "
-                    "default."
+                    "Default behavior changes in runtime or automatically loaded "
+                    "instruction surfaces must be disclosed through renamed smokes, "
+                    "docs, or release notes. Flag silent behavior changes that alter "
+                    "existing "
+                    "automation or ordinary agent behavior without naming the old and "
+                    "new default."
                 ),
             },
             {
@@ -482,6 +549,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             "exact_head_recheck_required": True,
             "stale_head_verdict_allowed": False,
             "blocking_evidence_verdicts": {
+                "repository_reuse": ["unjustified_duplication", "not_yet_proven"],
                 "change_proportionality": [
                     "disproportionate",
                     "not_yet_proven",
@@ -499,6 +567,11 @@ def build_review_execution_contract() -> dict[str, Any]:
         },
         "verdict_policy": {
             "open_pr_blocking_finding": "REQUEST_CHANGES",
+            "open_pr_unresolved_reuse": (
+                "REQUEST_CHANGES when repository_reuse is unjustified_duplication "
+                "or not_yet_proven, including missing/unverified search evidence; "
+                "request reuse, an evidence-backed separation, or further investigation"
+            ),
             "open_pr_unresolved_proportionality": (
                 "REQUEST_CHANGES when change_proportionality is disproportionate "
                 "or not_yet_proven; correctness, green CI, and resolved earlier "
@@ -533,8 +606,12 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         str(area) for area, count in _as_mapping(item.get("areas")).items() if count
     }
     code_change = bool(areas & CODE_AREAS)
+    behavioral_policy_change = bool(areas & BEHAVIORAL_POLICY_AREAS)
+    behavior_bearing_change = code_change or behavioral_policy_change
     docs_only = bool(areas) and areas <= {"public_docs", "public_entry_or_policy"}
-    smoke_or_example_only = bool(areas & EXAMPLE_OR_SMOKE_AREAS) and not code_change
+    smoke_or_example_only = bool(areas & EXAMPLE_OR_SMOKE_AREAS) and not (
+        code_change or behavioral_policy_change
+    )
     required_evidence = [
         "problem_context",
         "architecture_flow",
@@ -548,11 +625,15 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         required_evidence.insert(3, "symbol_map")
         required_evidence.append("scope_fit")
         required_evidence.append("change_proportionality")
-        required_evidence.append("default_off_isolation")
         required_evidence.append("authority_semantics")
         required_evidence.append("typed_state_rule")
+    if behavior_bearing_change:
+        required_evidence.insert(3, "repository_reuse")
+        if "scope_fit" not in required_evidence:
+            required_evidence.append("scope_fit")
+        required_evidence.append("default_off_isolation")
         required_evidence.append("behavior_change_disclosure")
-    if areas & {"product_runtime", "public_entry_or_policy"}:
+    if areas & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}:
         required_evidence.append("domain_neutrality")
         required_evidence.append("guidance_vs_obligation")
     if smoke_or_example_only:
@@ -572,20 +653,25 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         "applicability": {
             "areas": sorted(areas),
             "code_change": code_change,
+            "behavioral_policy_change": behavioral_policy_change,
+            "behavior_bearing_change": behavior_bearing_change,
             "docs_only": docs_only,
             "symbol_map_required": code_change,
-            "scope_fit_required": code_change,
+            "scope_fit_required": behavior_bearing_change,
+            "repository_reuse_required": behavior_bearing_change,
             "change_proportionality_required": code_change,
-            "default_off_isolation_required": code_change,
+            "default_off_isolation_required": behavior_bearing_change,
             "authority_semantics_required": code_change,
             "negative_walkthrough_required": bool(areas & NEGATIVE_PATH_AREAS),
             "typed_state_rule_required": code_change,
-            "behavior_change_disclosure_required": code_change,
+            "behavior_change_disclosure_required": behavior_bearing_change,
             "domain_neutrality_required": bool(
-                areas & {"product_runtime", "public_entry_or_policy"}
+                areas
+                & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}
             ),
             "guidance_vs_obligation_required": bool(
-                areas & {"product_runtime", "public_entry_or_policy"}
+                areas
+                & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}
             ),
             "smoke_or_example_only": smoke_or_example_only,
             "durable_smoke_value_required": smoke_or_example_only,

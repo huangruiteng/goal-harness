@@ -138,6 +138,7 @@ def enter_todo_ownership_handoff_gate(
     mutation_authority: dict[str, Any],
     actor_agent_id: str | None,
     ownership_mutation: bool,
+    runtime_root: Path | None = None,
 ) -> dict[str, Any]:
     """Gate one claimed_by mutation on an existing todo behind the goal mode.
 
@@ -168,6 +169,7 @@ def enter_todo_ownership_handoff_gate(
             goal_id=goal_id,
             todo_id=todo_id,
             actor_agent_id=actor_agent_id,
+            runtime_root=runtime_root,
         )
     )
     return extras
@@ -184,6 +186,7 @@ def enter_added_todo_ownership_handoff_gate(
     text: str,
     claimed_by: str | None,
     actor_agent_id: str | None,
+    runtime_root: Path | None = None,
 ) -> dict[str, Any]:
     """Gate the ``todo add`` path when it would reassign an existing todo.
 
@@ -225,6 +228,7 @@ def enter_added_todo_ownership_handoff_gate(
             and requested is not None
             and requested != current
         ),
+        runtime_root=runtime_root,
     )
 
 
@@ -294,6 +298,7 @@ def _quiescence_offenders(
     registry_path: Path,
     goal_id: str,
     state_text: str,
+    runtime_root: Path | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return blockers visible to the v0 materialized-state scan.
 
@@ -329,7 +334,8 @@ def _quiescence_offenders(
                     }
                 )
     leases: list[dict[str, Any]] = []
-    runtime_root = runtime_root_from_registry(registry_path, None)
+    if runtime_root is None:
+        runtime_root = runtime_root_from_registry(registry_path, None)
     lease_dir = task_lease_dir(runtime_root=runtime_root, goal_id=goal_id)
     if lease_dir.exists():
         for path in sorted(lease_dir.glob("todo_*.json")):
@@ -359,6 +365,34 @@ def _authority_offender_tokens(
     )
 
 
+def _previous_handoff_mode_fields(
+    previous_raw: object,
+) -> tuple[str, dict[str, Any]]:
+    """Type the persisted front-matter mode; invalid values stay reportable."""
+
+    try:
+        previous = normalize_handoff_mode(previous_raw)
+    except HandoffModeError as exc:
+        previous = str(previous_raw or "").strip()
+        return previous, {
+            "previous_mode": previous,
+            "previous_mode_valid": False,
+            "previous_mode_error_code": exc.code,
+        }
+    return previous, {"previous_mode": previous, "previous_mode_valid": True}
+
+
+def _write_handoff_mode_frontmatter(lines: list[str], requested: str) -> None:
+    """Replace or insert the handoff_mode key inside the front-matter block."""
+
+    open_index, close_index = _frontmatter_bounds(lines)
+    for index in range(open_index, close_index):
+        if lines[index].split(":", 1)[0].strip() == HANDOFF_MODE_FRONTMATTER_KEY:
+            lines[index] = f"{HANDOFF_MODE_FRONTMATTER_KEY}: {requested}"
+            return
+    lines.insert(close_index, f"{HANDOFF_MODE_FRONTMATTER_KEY}: {requested}")
+
+
 def set_goal_handoff_mode(
     *,
     registry_path: Path,
@@ -366,6 +400,7 @@ def set_goal_handoff_mode(
     mode: str,
     project: Path | None = None,
     state_file: Path | None = None,
+    runtime_root_arg: str | None = None,
 ) -> dict[str, Any]:
     """Set the goal handoff mode; requires a quiescent goal for transitions.
 
@@ -399,25 +434,14 @@ def set_goal_handoff_mode(
         project=project,
         state_file=state_file,
     )
+    # One effective runtime root for the lease lock, the quiescence scan, and
+    # the post-commit observation of this call.
+    runtime_root = runtime_root_from_registry(registry_path, runtime_root_arg)
     with exclusive_file_lock(resolved_state_file, operation="handoff_mode_set"):
         original = resolved_state_file.read_text(encoding="utf-8")
-        previous_raw = parse_state_frontmatter(original).get(
-            HANDOFF_MODE_FRONTMATTER_KEY
+        previous, previous_mode_fields = _previous_handoff_mode_fields(
+            parse_state_frontmatter(original).get(HANDOFF_MODE_FRONTMATTER_KEY)
         )
-        try:
-            previous = normalize_handoff_mode(previous_raw)
-        except HandoffModeError as exc:
-            previous = str(previous_raw or "").strip()
-            previous_mode_fields = {
-                "previous_mode": previous,
-                "previous_mode_valid": False,
-                "previous_mode_error_code": exc.code,
-            }
-        else:
-            previous_mode_fields = {
-                "previous_mode": previous,
-                "previous_mode_valid": True,
-            }
         payload = {
             "ok": True,
             "schema_version": HANDOFF_MODE_SCHEMA_VERSION,
@@ -430,15 +454,13 @@ def set_goal_handoff_mode(
         if previous == requested:
             payload["changed"] = False
             return payload
-        lease_lock = task_lease_lock_path(
-            runtime_root=runtime_root_from_registry(registry_path, None),
-            goal_id=goal_id,
-        )
+        lease_lock = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
         with exclusive_file_lock(lease_lock, operation="handoff_mode_set"):
             claimed, leases = _quiescence_offenders(
                 registry_path=registry_path,
                 goal_id=goal_id,
                 state_text=original,
+                runtime_root=runtime_root,
             )
             requested_core_mode = HandoffMode(requested)
             if previous in HANDOFF_MODE_VALUES:
@@ -494,19 +516,20 @@ def set_goal_handoff_mode(
                     },
                 )
             lines = original.splitlines()
-            open_index, close_index = _frontmatter_bounds(lines)
-            for index in range(open_index, close_index):
-                if (
-                    lines[index].split(":", 1)[0].strip()
-                    == HANDOFF_MODE_FRONTMATTER_KEY
-                ):
-                    lines[index] = f"{HANDOFF_MODE_FRONTMATTER_KEY}: {requested}"
-                    break
-            else:
-                lines.insert(
-                    close_index, f"{HANDOFF_MODE_FRONTMATTER_KEY}: {requested}"
-                )
+            _write_handoff_mode_frontmatter(lines, requested)
             new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
             resolved_state_file.write_text(new_text, encoding="utf-8")
     payload["changed"] = True
+    from ..coordination.local_authority_shadow_adapter import (
+        observe_local_authority_commit,
+    )
+
+    evidence = observe_local_authority_commit(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        observation_trigger=f"handoff_mode_set:{previous}:{requested}",
+    )
+    if evidence is not None:
+        payload["authority_shadow"] = evidence
     return payload

@@ -112,6 +112,7 @@ def _vision_wait_state(before: dict[str, Any]) -> dict[str, Any]:
 def _registry_due_monitor(
     *,
     registry_path: Path | None,
+    runtime_root: Path | None,
     goal_id: str,
     todo_id: str | None,
     target_key: str | None,
@@ -122,6 +123,7 @@ def _registry_due_monitor(
         item = resolve_monitor_todo_item(
             registry_path=registry_path,
             goal_id=goal_id,
+            runtime_root=runtime_root,
             todo_id=todo_id,
             target_key=target_key,
         )
@@ -145,12 +147,14 @@ def _decision_packet(
     todo_id: str | None,
     target_key: str | None,
     registry_path: Path | None = None,
+    runtime_root: Path | None = None,
     authorized_due_monitor_poll: bool | None = None,
 ) -> dict[str, Any]:
     lane = _mapping(before.get("work_lane_contract"))
     due_candidates = _due_monitor_candidates(before)
     registry_due = _registry_due_monitor(
         registry_path=registry_path,
+        runtime_root=runtime_root,
         goal_id=goal_id,
         todo_id=todo_id,
         target_key=target_key,
@@ -555,9 +559,11 @@ def _provider_writeback(
     plan: Mapping[str, Any],
     *,
     registry_path: Path,
+    runtime_root: Path,
 ) -> dict[str, Any]:
     result = write_monitor_poll_todo_state(
         registry_path=registry_path,
+        runtime_root=runtime_root,
         goal_id=str(plan.get("goal_id") or ""),
         generated_at=str(plan.get("generated_at") or ""),
         execute=plan.get("execute") is True,
@@ -634,12 +640,22 @@ def record_quota_monitor_poll_for_decision(
         if normalized_turn_id
         else f"quota-monitor-poll:{goal_id}:{uuid.uuid4().hex}"
     )
+    if execute and (safe_todo_id or safe_target_key):
+        from ..coordination.legacy_writer_fence import (
+            require_legacy_coordination_write_allowed,
+        )
+
+        require_legacy_coordination_write_allowed(
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+        )
     decision = _decision_packet(
         before,
         goal_id=goal_id,
         todo_id=safe_todo_id,
         target_key=safe_target_key,
         registry_path=registry_path,
+        runtime_root=runtime_root,
     )
     observation = _observation_packet(
         before=before,
@@ -716,7 +732,11 @@ def record_quota_monitor_poll_for_decision(
             raise TypeError("TypeScript monitor-poll preflight omitted provider plan")
         if registry_path is None:
             raise ValueError("monitor todo writeback requires registry_path")
-        provider_receipt = _provider_writeback(plan, registry_path=registry_path)
+        provider_receipt = _provider_writeback(
+            plan,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+        )
         status_warning = None
         if execute:
             after_status, status_warning = _reload_status_after_monitor_writeback(

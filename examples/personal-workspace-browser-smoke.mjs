@@ -44,6 +44,152 @@ const periodicReportProjection = {
   truth_contract: { published_cursor_is_source_of_truth: true, generation_receipt_is_delivery_receipt: false, projection_is_writable: false, browser_write_api: false },
 };
 
+function periodicReportCapability({ effectiveConfiguration, machineCurrent } = {}) {
+  return {
+    capability_id: "periodic_report",
+    display_name: "Periodic reports",
+    description: "Turn validated Goal progress into a reviewable report draft.",
+    available_scopes: ["machine", "goal"],
+    availability: "supported_explicit_override",
+    machine_namespace: "periodic_report",
+    goal_feature_id: "periodic_report",
+    effective_value_policy: "goal_override_over_live_machine_default",
+    default: {
+      schema_version: "periodic_report_machine_defaults_v0",
+      enabled: false,
+      inheritance: "live_machine_default",
+      timezone: "UTC",
+    },
+    ...(machineCurrent ? { machine_current: machineCurrent } : {}),
+    ...(effectiveConfiguration ? { effective_configuration: effectiveConfiguration } : {}),
+    configuration_editor: {
+      schema_version: "capability_configuration_editor_v0",
+      editable: true,
+      supported_scopes: ["machine", "goal"],
+      writable_scopes: ["machine", "goal"],
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "profile_preset", label: "Profile preset", description: "", input_kind: "text", required: false },
+        { key: "route_ref", label: "Goal Channel route", description: "", input_kind: "text", required: false },
+        { key: "timezone", label: "Timezone", description: "", input_kind: "text", required: true },
+      ],
+    },
+  };
+}
+
+function multiSubagentCapability({ current } = {}) {
+  const fallback = {
+    enabled: false,
+    max_children: 4,
+    allowed_domains: [],
+  };
+  const effective = current ?? fallback;
+  return {
+    capability_id: "multi_subagent",
+    display_name: "Adaptive child capacity",
+    description: "Bound child-agent capacity and eligible responsibility domains.",
+    available_scopes: ["goal"],
+    availability: "supported_opt_in",
+    goal_feature_id: "multi_subagent",
+    default: fallback,
+    ...(current ? { current } : {}),
+    effective_configuration: {
+      schema_version: "capability_configuration_resolution_v0",
+      capability_id: "multi_subagent",
+      source: current ? "goal_override" : "capability_default",
+      configuration: effective,
+      inherited: false,
+      goal_override_present: Boolean(current),
+      machine_default_present: false,
+      effective_revision: current ? "sha256:subagent-current" : "sha256:subagent-default",
+    },
+    configuration_editor: {
+      schema_version: "capability_configuration_editor_v0",
+      editable: true,
+      supported_scopes: ["goal"],
+      writable_scopes: ["goal"],
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "max_children", label: "Maximum children", description: "", input_kind: "number", required: false, minimum: 1, maximum: 32 },
+        { key: "allowed_domains", label: "Allowed responsibility domains", description: "", input_kind: "string_list", required: false },
+      ],
+    },
+  };
+}
+
+function goalCapability({
+  availability = "supported_opt_in",
+  capabilityId,
+  displayName,
+  fields = [{ key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false }],
+  readOnlyReason,
+}) {
+  const editable = fields.length > 0;
+  return {
+    capability_id: capabilityId,
+    display_name: displayName,
+    description: `${displayName} Goal policy.`,
+    available_scopes: ["goal"],
+    goal_feature_id: capabilityId,
+    availability,
+    default: editable ? Object.fromEntries(fields.flatMap((field) => field.key === "enabled" ? [[field.key, false]] : [])) : {},
+    configuration_editor: {
+      schema_version: "capability_configuration_editor_v0",
+      editable,
+      supported_scopes: ["goal"],
+      writable_scopes: editable ? ["goal"] : [],
+      fields,
+      ...(readOnlyReason ? { read_only_reason: readOnlyReason } : {}),
+    },
+  };
+}
+
+function goalCapabilityCatalog(multiSubagentConfiguration) {
+  return [
+    periodicReportCapability(),
+    goalCapability({
+      capabilityId: "change_quality_qualification",
+      displayName: "Change quality qualification",
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "safe_fix", label: "Allow one bounded safe-fix pass", description: "", input_kind: "boolean", required: false },
+        { key: "strict_receipt", label: "Require an exact-diff receipt", description: "", input_kind: "boolean", required: false },
+      ],
+    }),
+    goalCapability({ capabilityId: "explore_graph", displayName: "Explore Graph" }),
+    goalCapability({
+      capabilityId: "explore_harness",
+      displayName: "Explore Harness",
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "profile", label: "Planner profile", description: "", input_kind: "select", required: false, options: ["generic"] },
+      ],
+    }),
+    goalCapability({ capabilityId: "lark_kanban_heartbeat_sync", displayName: "Lark Kanban heartbeat sync" }),
+    goalCapability({
+      capabilityId: "lark_event_inbox",
+      displayName: "Lark event inbox",
+      fields: [],
+      readOnlyReason: "Requires a local-private provider binding.",
+    }),
+    goalCapability({
+      availability: "supported_explicit_opt_in",
+      capabilityId: "peer_task_coordination",
+      displayName: "Registered-peer task coordination",
+      fields: [{ key: "coordinator_agent_id", label: "Coordinator Agent", description: "", input_kind: "text", required: false }],
+    }),
+    multiSubagentCapability({ current: multiSubagentConfiguration }),
+    goalCapability({ availability: "experimental_opt_in", capabilityId: "local_authority_shadow", displayName: "Local authority shadow" }),
+    goalCapability({
+      availability: "experimental_opt_in",
+      capabilityId: "reward_memory",
+      displayName: "Reward Memory experiment",
+      fields: [],
+      readOnlyReason: "Requires a reviewed local-private provider binding.",
+    }),
+  ];
+}
+
 function startServer() {
   if (packaged) {
     return spawn(process.env.LOOPX_PYTHON_BIN || "python3", [
@@ -65,9 +211,56 @@ async function visibleElementCount(locator) {
   }).length);
 }
 
-async function installApi(page) {
+async function waitForInputValue(locator, expected, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  let actual = await locator.inputValue();
+  while (actual !== expected && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    actual = await locator.inputValue();
+  }
+  if (actual !== expected) {
+    throw new Error(`Timed out waiting for input value ${expected}; received ${actual}`);
+  }
+}
+
+function capturedStatusGeneration(state) {
+  if (!state.captureNextStatusGeneration) return state.goalActivationStates;
+  if (!state.capturedStatusGeneration) {
+    state.capturedStatusGeneration = new Map(state.goalActivationStates);
+  }
+  return state.capturedStatusGeneration;
+}
+
+function filterStatusFixtureToScope(fixture, statusGeneration, scope) {
+  const activationForGoal = (goalId) => statusGeneration.get(goalId) ?? "active";
+  const matchesScope = (goalId) => activationForGoal(goalId) === scope;
+  fixture.attention_queue.items = fixture.attention_queue.items.filter((item) => matchesScope(item.goal_id));
+  fixture.attention_queue.item_count = fixture.attention_queue.items.length;
+  if (fixture.todo_index?.items) {
+    fixture.todo_index.items = fixture.todo_index.items.filter((item) => matchesScope(item.goal_id));
+    fixture.todo_index.total_count = fixture.todo_index.items.length;
+  }
+  if (fixture.usage_summary?.goals) {
+    fixture.usage_summary.goals = fixture.usage_summary.goals.filter((item) => matchesScope(item.goal_id));
+  }
+  if (fixture.event_ledger_summary?.goals) {
+    fixture.event_ledger_summary.goals = fixture.event_ledger_summary.goals.filter((item) => matchesScope(item.goal_id));
+  }
+  if (fixture.decision_freshness_summary?.items) {
+    fixture.decision_freshness_summary.items = fixture.decision_freshness_summary.items.filter((item) => matchesScope(item.goal_id));
+  }
+  if (fixture.agent_management_projection?.agents) {
+    fixture.agent_management_projection.agents = fixture.agent_management_projection.agents.filter((agent) =>
+      (agent.goal_ids ?? []).some(matchesScope) || matchesScope(agent.current_todo?.goal_id));
+  }
+  if (fixture.goal_channel_notification_projection?.goals) {
+    fixture.goal_channel_notification_projection.goals = fixture.goal_channel_notification_projection.goals.filter((item) => matchesScope(item.goal_id));
+  }
+}
+
+async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}) {
   let turnCounter = 0;
-  const runtime = page.__loopxRuntime ??= { actionProposals: new Map(), larkConnections: [], messages: new Map(), sessions: new Map(), turnMessages: new Map() };
+  const runtime = page.__loopxRuntime ??= { actionProposals: new Map(), goalSubagentConfigurations: new Map(), larkConnections: [], messages: new Map(), sessions: new Map(), turnMessages: new Map() };
   const actionProposals = runtime.actionProposals;
   const sessions = runtime.sessions;
   const messages = runtime.messages;
@@ -80,16 +273,23 @@ async function installApi(page) {
     durableResources: new Set(),
     durableWriteCount: 0,
     failNextLifecycleApply: false,
+    failNextGoalSubagentResponse: false,
     failNextLifecyclePreview: false,
     failNextActionPreview: false,
     failNextStatusRequest: false,
+    freezeGoalSubagentStatusProjection: false,
+    goalSubagentConfigurationEnabled,
     goalActivationStates: new Map([
       ["product-release", "active"],
       ["research-monitor", "active"],
       ["legacy-benchmark", "stopped"],
       ["archived-notes", "stopped"],
     ]),
+    goalSubagentPreviews: [],
+    goalSubagentWrites: [],
     interrupts: [],
+    goalConfigurationRequests: [],
+    machineConfigurationRequests: [],
     larkWrites: [],
     actionTransitions: [],
     allowNextHeartbeatApply: false,
@@ -97,13 +297,24 @@ async function installApi(page) {
     nextLifecyclePreviewDelayMs: 0,
     nextActionPreviewDelayMs: 0,
     nextStatusDelayMs: 0,
+    nextFullStatusDelayMs: 0,
+    failNextFullStatus: false,
+    captureNextStatusGeneration: false,
+    capturedStatusGeneration: null,
+    activationChangeAfterCapturedActive: null,
     statusRequestCount: 0,
     turnRequests: [],
     get larkConnections() { return runtime.larkConnections; },
+    get goalSubagentConfigurations() { return runtime.goalSubagentConfigurations; },
   };
-  await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
+  await page.route(`http://127.0.0.1:${port}/status.json*`, async (route) => {
     state.statusRequestCount += 1;
     const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
+    const defaultSubagentConfiguration = { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
+    const projectedSubagentConfiguration = (goalId, fallback) => state.freezeGoalSubagentStatusProjection
+      ? fallback ?? defaultSubagentConfiguration
+      : runtime.goalSubagentConfigurations.get(goalId) ?? fallback ?? defaultSubagentConfiguration;
+    const statusGeneration = capturedStatusGeneration(state);
     fixture.local_dashboard_api = {
       ...(fixture.local_dashboard_api ?? {}),
       periodic_report_index_url: "/periodic-report-workspace",
@@ -117,10 +328,15 @@ async function installApi(page) {
       { id: "archived-notes", display_name: "Archived Notes" },
     ];
     for (const directoryGoal of directoryFixtures) {
-      const activation_state = state.goalActivationStates.get(directoryGoal.id) ?? "active";
+      const activation_state = statusGeneration.get(directoryGoal.id) ?? "active";
       const existingGoal = fixture.run_history.goals.find((goal) => goal.id === directoryGoal.id);
       if (existingGoal) {
         existingGoal.activation_state = activation_state;
+        if (state.goalSubagentConfigurationEnabled) {
+          existingGoal.spawn_policy = projectedSubagentConfiguration(directoryGoal.id, existingGoal.spawn_policy);
+        } else {
+          delete existingGoal.spawn_policy;
+        }
         continue;
       }
       fixture.run_history.goals.push({
@@ -128,9 +344,19 @@ async function installApi(page) {
         status: "active-read-only", registry_member: true,
         legacy_runtime_goal: false, adapter_kind: "generic_project_goal_v0", adapter_status: "connected",
         lifecycle_phase: "registered", lifecycle_flags: ["registered"],
+        ...(state.goalSubagentConfigurationEnabled
+          ? { spawn_policy: projectedSubagentConfiguration(directoryGoal.id) }
+          : {}),
         quota: { compute: 1, window_hours: 24, slot_minutes: 1, allowed_slots: 1440, spent_slots: 0, state: activation_state === "stopped" ? "paused" : "waiting" },
         index_exists: false, raw_index_records: 0, unique_runs: 0, latest_runs: [],
       });
+    }
+    for (const fixtureGoal of fixture.run_history.goals) {
+      if (state.goalSubagentConfigurationEnabled) {
+        fixtureGoal.spawn_policy = projectedSubagentConfiguration(fixtureGoal.id, fixtureGoal.spawn_policy);
+      } else {
+        delete fixtureGoal.spawn_policy;
+      }
     }
     if (!fixture.run_history.goals.some((goal) => goal.id === "stale-browser-goal")) {
       fixture.run_history.goals.push({
@@ -148,6 +374,21 @@ async function installApi(page) {
         source_section: "User Todo",
         total_count: 1,
       };
+      const domainTodos = (first.project_asset?.agent_todos?.items ?? first.agent_todos?.items ?? [])
+        .filter((todo) => !todo.done)
+        .slice(0, 2);
+      for (const [index, todo] of domainTodos.entries()) {
+        todo.task_class = "advancement_task";
+        todo.task_domain = index === 0 ? "code" : "validation";
+        const indexedTodo = fixture.todo_index?.items?.find((item) => item.todo_id === todo.todo_id);
+        if (indexedTodo) {
+          indexedTodo.role = "agent";
+          indexedTodo.task_class = todo.task_class;
+          indexedTodo.task_domain = todo.task_domain;
+        } else if (fixture.todo_index?.items) {
+          fixture.todo_index.items.push({ ...todo, goal_id: first.goal_id, role: "agent", source: "browser-smoke" });
+        }
+      }
     }
     if (!fixture.attention_queue.items.some((item) => item.goal_id === "progress-projection")) {
       const idlessLongTitle = `Idless long Todo ${"projection identity ".repeat(16)}keeps one card`;
@@ -253,6 +494,14 @@ async function installApi(page) {
         },
       );
     }
+    const goalActivationScope = new URL(route.request().url()).searchParams.get("goal_activation");
+    const isActiveScope = goalActivationScope === "active";
+    const activeGoalCount = fixture.run_history.goals.filter((goal) => goal.activation_state !== "stopped").length;
+    const stoppedGoalCount = fixture.run_history.goals.length - activeGoalCount;
+    const registryRevision = [...statusGeneration.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([goalId, activationState]) => `${goalId}:${activationState}`)
+      .join("|");
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
     if (delayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
@@ -261,10 +510,64 @@ async function installApi(page) {
       await route.fulfill({ contentType: "application/json", json: { error: "temporary status failure" }, status: 503 });
       return;
     }
+    if (isActiveScope) {
+      fixture.goal_projection = {
+        schema_version: "loopx_goal_projection_scope_v0",
+        scope: "active",
+        complete: false,
+        projected_goal_count: activeGoalCount,
+        registry_goal_count: fixture.run_history.goals.length,
+        registry_revision: registryRevision,
+      };
+      fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state !== "stopped");
+      filterStatusFixtureToScope(fixture, statusGeneration, "active");
+      // Freeze only the first half of the active-first read. The stopped
+      // request must observe the registry after the intervening lifecycle
+      // change so this fixture exercises the cross-snapshot revision fence.
+      state.captureNextStatusGeneration = false;
+      state.capturedStatusGeneration = null;
+      if (state.activationChangeAfterCapturedActive) {
+        const { goalId, activationState } = state.activationChangeAfterCapturedActive;
+        state.goalActivationStates.set(goalId, activationState);
+        state.activationChangeAfterCapturedActive = null;
+      }
+    } else if (goalActivationScope === "stopped") {
+      const fullDelayMs = state.nextFullStatusDelayMs;
+      state.nextFullStatusDelayMs = 0;
+      if (fullDelayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, fullDelayMs));
+      if (state.failNextFullStatus) {
+        state.failNextFullStatus = false;
+        await route.fulfill({ contentType: "application/json", json: { error: "stopped goals unavailable" }, status: 503 });
+        return;
+      }
+      fixture.goal_projection = {
+        schema_version: "loopx_goal_projection_scope_v0",
+        scope: "stopped",
+        complete: false,
+        projected_goal_count: stoppedGoalCount,
+        registry_goal_count: fixture.run_history.goals.length,
+        registry_revision: registryRevision,
+      };
+      fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state === "stopped");
+      filterStatusFixtureToScope(fixture, statusGeneration, "stopped");
+    } else {
+      fixture.goal_projection = {
+        schema_version: "loopx_goal_projection_scope_v0",
+        scope: "all",
+        complete: true,
+        projected_goal_count: fixture.run_history.goals.length,
+        registry_goal_count: fixture.run_history.goals.length,
+        registry_revision: registryRevision,
+      };
+    }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
   });
   await page.route("**/periodic-report-workspace?*", async (route) => {
-    const goalId = new URL(route.request().url()).searchParams.get("goal_id");
+    const requestUrl = new URL(route.request().url());
+    const goalId = requestUrl.searchParams.get("goal_id");
+    if (requestUrl.searchParams.get("limit") !== "100" || requestUrl.searchParams.get("offset") !== "0") {
+      throw new Error("Periodic-report index request did not negotiate a bounded window");
+    }
     const items = goalId === periodicReportProjection.goal_id ? [{
       goal_id: periodicReportProjection.goal_id,
       agent_id: periodicReportProjection.agent_id,
@@ -281,7 +584,19 @@ async function installApi(page) {
     }] : [];
     await route.fulfill({
       contentType: "application/json",
-      json: { ok: true, periodic_reports: { schema_version: "periodic_report_workspace_index_v0", count: items.length, items } },
+      json: {
+        ok: true,
+        periodic_reports: {
+          schema_version: "periodic_report_workspace_index_v0",
+          count: items.length,
+          returned_count: items.length,
+          total_count: items.length,
+          limit: 100,
+          offset: 0,
+          truncated: false,
+          items,
+        },
+      },
       status: 200,
     });
   });
@@ -330,6 +645,190 @@ async function installApi(page) {
   await page.route("**/api/chat/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/chat/completed-todos") {
+      const total = url.searchParams.get("goal_id") === "progress-projection" ? 4087 : 0;
+      const offset = Number(url.searchParams.get("cursor") || 0);
+      const items = Array.from({ length: Math.min(40, total - offset) }, (_, position) => {
+        const index = offset + position;
+        return { todo_id: `todo_history_${index}`, text: index < 3 ? `Completed ${String.fromCharCode(65 + index)}` : `Completed historical Task ${index + 1}`, claimed_by: "example-agent", evidence: null, priority: null, task_class: "advancement_task" };
+      });
+      await route.fulfill({ json: { ok: true, total, items, next_cursor: offset + 40 < total ? String(offset + 40) : null } });
+      return;
+    }
+    const periodicConfiguration = {
+      schema_version: "periodic_report_machine_defaults_v0",
+      enabled: true,
+      inheritance: "live_machine_default",
+      profile_preset: "weekly-progress",
+      route_ref: "report-route",
+      timezone: "Asia/Shanghai",
+    };
+    const machineConfigurationBase = {
+      ok: true,
+      available_namespaces: ["periodic_report"],
+      namespace_catalog: {
+        schema_version: "machine_configuration_catalog_v0",
+        namespaces: [{
+          namespace: "periodic_report",
+          title: "Periodic reports",
+          description: "Governed report defaults.",
+          schema_versions: ["periodic_report_machine_defaults_v0"],
+          configuration_template: periodicConfiguration,
+          template_status: "ready",
+        }],
+      },
+      capability_catalog: {
+        schema_version: "capability_configuration_catalog_v0",
+        capabilities: goalCapabilityCatalog().map((capability) => capability.capability_id === "periodic_report"
+          ? periodicReportCapability({ machineCurrent: periodicConfiguration })
+          : capability),
+      },
+      changed_namespaces: [],
+      machine_configuration: {
+        schema_version: "loopx_machine_configuration_v0",
+        namespaces: { periodic_report: periodicConfiguration },
+      },
+    };
+    if (url.pathname === "/api/chat/machine-configuration" && request.method() === "GET") {
+      await route.fulfill({ contentType: "application/json", json: {
+        ...machineConfigurationBase,
+        schema_version: "machine_configuration_inspection_v0",
+        status: "configured",
+        revision: "sha256:machine-current",
+      }, status: 200 });
+      return;
+    }
+    if (url.pathname === "/api/chat/machine-configuration/preview" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.machineConfigurationRequests.push({ phase: "preview", ...body });
+      await route.fulfill({ contentType: "application/json", json: {
+        ...machineConfigurationBase,
+        schema_version: "machine_configuration_update_plan_v0",
+        status: "preview",
+        action: "update",
+        current_revision: "sha256:machine-current",
+        desired_revision: "sha256:machine-desired",
+        plan_revision: "sha256:machine-plan",
+        writes_required: 1,
+        changed_namespaces: [body.namespace],
+        machine_configuration: {
+          schema_version: "loopx_machine_configuration_v0",
+          namespaces: { periodic_report: body.namespace_configuration },
+        },
+      }, status: 201 });
+      return;
+    }
+    if (url.pathname === "/api/chat/machine-configuration/apply" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.machineConfigurationRequests.push({ phase: "apply", ...body });
+      await route.fulfill({ contentType: "application/json", json: {
+        ...machineConfigurationBase,
+        schema_version: "machine_configuration_transaction_v0",
+        status: "applied",
+        plan_revision: body.expected_plan_revision,
+        transaction_id: "machine-transaction",
+        readback_verified: true,
+        rollback_available: true,
+        applied_revision: "sha256:machine-desired",
+        prior_revision: "sha256:machine-current",
+        changed_namespaces: [body.namespace],
+      }, status: 200 });
+      return;
+    }
+    if (url.pathname === "/api/chat/goal-configuration" && request.method() === "GET") {
+      const goalId = url.searchParams.get("goal_id");
+      const spawnPolicy = runtime.goalSubagentConfigurations.get(goalId);
+      const multiSubagentConfiguration = spawnPolicy ? {
+        enabled: spawnPolicy.mode === "multi_subagent" && spawnPolicy.spawn_allowed === true,
+        max_children: spawnPolicy.max_children || null,
+        allowed_domains: spawnPolicy.allowed_domains ?? [],
+      } : undefined;
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: true,
+        schema_version: "goal_configuration_inspection_v0",
+        status: "configured",
+        goal_id: goalId,
+        revision: "sha256:goal-current",
+        available_capabilities: [
+          "periodic_report",
+          "change_quality_qualification",
+          "explore_graph",
+          "explore_harness",
+          "lark_kanban_heartbeat_sync",
+          "lark_event_inbox",
+          "peer_task_coordination",
+          "multi_subagent",
+          "local_authority_shadow",
+          "reward_memory",
+        ],
+        capability_catalog: {
+          schema_version: "capability_configuration_catalog_v0",
+          capabilities: goalCapabilityCatalog(multiSubagentConfiguration).map((capability) => capability.capability_id === "periodic_report" ? periodicReportCapability({
+              machineCurrent: periodicConfiguration,
+              effectiveConfiguration: {
+                schema_version: "capability_configuration_resolution_v0",
+                capability_id: "periodic_report",
+                source: "machine_default",
+                configuration: periodicConfiguration,
+                inherited: true,
+                goal_override_present: false,
+                machine_default_present: true,
+                effective_revision: "sha256:periodic-effective",
+              },
+            }) : capability),
+        },
+      }, status: 200 });
+      return;
+    }
+    if (url.pathname === "/api/chat/goal-configuration/preview" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.goalConfigurationRequests.push({ phase: "preview", ...body });
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: true, schema_version: "goal_configuration_update_plan_v0", status: "preview",
+        action: body.capability_id === "multi_subagent" && runtime.goalSubagentConfigurations.has(body.goal_id) ? "update" : "create", current_revision: "absent", desired_revision: "sha256:desired",
+        base_revision: "sha256:goal-current", plan_revision: `sha256:goal-plan-${body.capability_id}`, writes_required: 1,
+        goal_id: body.goal_id, capability_id: body.capability_id,
+        changed_fields: [body.capability_id], goal_configuration: body.configuration,
+        capability_catalog: { schema_version: "capability_configuration_catalog_v0", capabilities: [] },
+      }, status: 201 });
+      return;
+    }
+    if (url.pathname === "/api/chat/goal-configuration/apply" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.goalConfigurationRequests.push({ phase: "apply", ...body });
+      if (body.capability_id === "multi_subagent") {
+        runtime.goalSubagentConfigurations.set(body.goal_id, body.configuration.enabled ? {
+          mode: "multi_subagent",
+          spawn_allowed: true,
+          max_children: body.configuration.max_children,
+          allowed_domains: body.configuration.allowed_domains,
+        } : {
+          mode: "default",
+          spawn_allowed: false,
+          max_children: 0,
+          allowed_domains: [],
+        });
+        await route.fulfill({ contentType: "application/json", json: {
+          ok: true, schema_version: "goal_configuration_transaction_v0", status: "applied",
+          goal_id: body.goal_id, capability_id: body.capability_id,
+          plan_revision: body.expected_plan_revision, applied_revision: "sha256:goal-applied",
+          readback_verified: true, changed_fields: [body.capability_id], goal_configuration: body.configuration,
+          capability_catalog: { schema_version: "capability_configuration_catalog_v0", capabilities: [] },
+        }, status: 200 });
+        return;
+      }
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: false, schema_version: "goal_configuration_transaction_v0", status: "partial_write",
+        goal_id: body.goal_id, capability_id: body.capability_id,
+        plan_revision: body.expected_plan_revision, applied_revision: "sha256:goal-applied",
+        source_written: true, shared_sync_pending: true, readback_verified: true,
+        changed_fields: ["periodic_report"], goal_configuration: body.configuration,
+        capability_catalog: { schema_version: "capability_configuration_catalog_v0", capabilities: [] },
+        error: "shared projection did not synchronize",
+        recommended_action: `rerun loopx sync-global --goal-id ${body.goal_id}`,
+      }, status: 207 });
+      return;
+    }
     const resumedEvents = url.pathname.match(/^\/api\/chat\/sessions\/([^/]+)\/turns\/([^/]+)\/events$/);
     if (resumedEvents && request.method() === "GET") {
       const sessionId = resumedEvents[1];
@@ -389,12 +888,14 @@ async function installApi(page) {
     }
     if (url.pathname === "/api/chat/lark/connections" && request.method() === "POST") {
       const body = request.postDataJSON();
+      const connectionId = `lark-${body.goal_id}-${body.agent_id ?? "default"}`;
       if (body.execute) {
         const fixture = require(resolve(repoRoot, "examples/status.example.json"));
         const goal = (fixture.run_history?.goals ?? []).find((item) => item.id === body.goal_id);
-        runtime.larkConnections = runtime.larkConnections.filter((item) => item.goal_id !== body.goal_id);
+        runtime.larkConnections = runtime.larkConnections.filter((item) => item.connection_id !== connectionId);
         runtime.larkConnections.push({
           agent_id: body.agent_id ?? null,
+          connection_id: connectionId,
           app_label: "LoopX Mew", app_ref: body.app_ref, chat_name: body.chat_name, enabled: true,
           capture_scope: body.capture_scope,
           event_count: 0, health_error_code: "lark_event_delivery_unverified",
@@ -414,15 +915,62 @@ async function installApi(page) {
       return;
     }
     if (url.pathname === "/api/chat/lark/connections" && request.method() === "DELETE") {
-      const goalId = url.searchParams.get("goal_id");
-      runtime.larkConnections = runtime.larkConnections.filter((item) => item.goal_id !== goalId);
+      const connectionId = url.searchParams.get("connection_id");
+      runtime.larkConnections = runtime.larkConnections.filter((item) => item.connection_id !== connectionId);
       await route.fulfill({ contentType: "application/json", json: { ok: true, status: "disconnected" }, status: 200 });
+      return;
+    }
+    if (["/api/chat/goal-subagents/dry-run", "/api/chat/goal-subagents/apply"].includes(url.pathname) && request.method() === "POST") {
+      if (state.failNextGoalSubagentResponse) {
+        state.failNextGoalSubagentResponse = false;
+        await route.fulfill({ body: "", contentType: "text/plain", status: 502 });
+        return;
+      }
+      const body = request.postDataJSON();
+      const apply = url.pathname.endsWith("/apply");
+      const before = runtime.goalSubagentConfigurations.get(body.goal_id)
+        ?? { mode: "default", spawn_allowed: false, max_children: 0, allowed_domains: [] };
+      const after = body.enabled
+        ? { mode: "multi_subagent", spawn_allowed: true, max_children: body.max_children, allowed_domains: body.allowed_domains }
+        : { mode: "default", spawn_allowed: false, max_children: 0 };
+      const changed = JSON.stringify(before) !== JSON.stringify(after);
+      const previewId = `goal-subagents-${body.goal_id}-${JSON.stringify(after)}`;
+      if (apply && body.preview_id !== previewId) {
+        await route.fulfill({ contentType: "application/json", json: { ok: false, error: "stale Goal sub-agent preview", error_code: "stale_goal_subagent_preview" }, status: 409 });
+        return;
+      }
+      if (apply && changed) {
+        runtime.goalSubagentConfigurations.set(body.goal_id, after);
+        state.goalSubagentWrites.push({ ...body });
+        state.durableWriteCount += 1;
+      } else if (!apply) {
+        state.goalSubagentPreviews.push({ ...body, preview_id: previewId });
+      }
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: true,
+        dry_run: !apply,
+        execute: apply,
+        written: apply && changed,
+        changed,
+        goal_id: body.goal_id,
+        changed_fields: changed ? ["orchestration"] : [],
+        before: { orchestration: before },
+        after: { orchestration: after },
+        preview_id: previewId,
+        feature_summary: { multi_subagent: body.enabled ? "enabled" : "off" },
+        global_sync: {
+          required: changed,
+          executed: apply && changed,
+          readback: { status: apply && changed ? "verified" : changed ? "not_executed" : "not_required", verified: apply && changed },
+        },
+      }, status: 200 });
       return;
     }
     if (url.pathname === "/api/chat/capabilities") {
       await route.fulfill({ contentType: "application/json", json: {
         ok: true, schema_version: "loopx_chat_capabilities_v1", agent_backend: "multi_adapter",
         sandbox: "read-only", approval_policy: "never", todo_write: "preview_locked",
+        ...(state.goalSubagentConfigurationEnabled ? { goal_subagent_configuration: "preview_locked" } : {}),
         goal_id: null, streaming: true, resume: true, interrupt: true, typed_actions: true,
         action_kinds: ["goal.create", "goal.lifecycle", "agent.bind", "heartbeat.bind", "monitor.create", "run.correct"],
         adapters: [
@@ -694,7 +1242,7 @@ async function installApi(page) {
 async function main() {
   const { chromium } = loadPlaywright();
   await mkdir(outputDir, { recursive: true });
-  const results = new Map(Array.from({ length: 20 }, (_, index) => [index + 1, { status: "UNTESTED", note: "" }]));
+  const results = new Map(Array.from({ length: 24 }, (_, index) => [index + 1, { status: "UNTESTED", note: "" }]));
   const observations = [];
   const pass = (criterion, note) => results.set(criterion, { status: "PASS", note });
   const fail = (criterion, note) => results.set(criterion, { status: "FAIL", note });
@@ -704,6 +1252,18 @@ async function main() {
     const url = `http://127.0.0.1:${port}/${packaged ? "chat/" : ""}?statusUrl=/status.json`;
     await waitForHttp(url);
     browser = await launchBrowser(chromium);
+    const capabilityOffPage = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    await installApi(capabilityOffPage, { goalSubagentConfigurationEnabled: false });
+    await capabilityOffPage.goto(url, { waitUntil: "networkidle" });
+    await capabilityOffPage.getByTestId("personal-goal-home").waitFor({ state: "visible", timeout: 15_000 });
+    await capabilityOffPage.locator(".personal-goal-link").first().click();
+    await capabilityOffPage.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
+    await capabilityOffPage.getByRole("group", { name: "Goal 设置" }).getByRole("button", { name: /Goal 详情/ }).click();
+    await capabilityOffPage.locator(".personal-drawer-header").waitFor({ state: "visible" });
+    if (await capabilityOffPage.locator(".personal-goal-subagents").count()) {
+      throw new Error("Capability-off Dashboard exposed Goal sub-agent controls");
+    }
+    await capabilityOffPage.close();
     const page = await browser.newPage({ viewport: { width: 1512, height: 982 } });
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -739,7 +1299,55 @@ async function main() {
     if (await page.locator(".personal-global-rail").count()) throw new Error("Old icon rail is visible");
     if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Active Goal directory did not exclude stopped Goals");
     const stoppedDirectory = page.locator(".personal-stopped-goals");
+    // Real pointer gestures against the shipped sidebar, not synthetic drag events.
+    const activeRows = page.locator('.personal-goal-list:not(.is-stopped) .personal-goal-row');
+    const readOrder = () => activeRows.evaluateAll(rows => rows.map(row => row.dataset.reorderGoal));
+    const initialOrder = await readOrder();
+    const firstLink = activeRows.nth(0).locator('.personal-goal-link');
+    const start = await firstLink.boundingBox();
+    const end = await activeRows.nth(2).boundingBox();
+    const beforeDragUrl = page.url();
+    await page.mouse.move(start.x + 40, start.y + start.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(end.x + 40, end.y + end.height - 4, { steps: 12 });
+    await page.locator('.is-drop-after').waitFor();
+    await page.mouse.up();
+    const expectedOrder = [initialOrder[1], initialOrder[2], initialOrder[0], ...initialOrder.slice(3)];
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(expectedOrder)) throw new Error('Pointer Goal reorder failed');
+    if (page.url() !== beforeDragUrl) throw new Error('Dragging accidentally selected a Goal');
+    await page.reload({ waitUntil: 'networkidle' });
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(expectedOrder)) throw new Error('Goal order did not survive reload');
+    // Escape cancels rather than committing a partially completed gesture.
+    const cancelStart = await activeRows.first().locator('.personal-goal-link').boundingBox();
+    const cancelEnd = await activeRows.nth(2).boundingBox();
+    await activeRows.first().locator('.personal-goal-link').focus();
+    await page.mouse.move(cancelStart.x + 40, cancelStart.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(cancelEnd.x + 40, cancelEnd.y + cancelEnd.height - 4, { steps: 8 });
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(expectedOrder)) throw new Error('Cancelled drag changed order');
+    await page.getByRole('button', { name: '调整 Goal 顺序', exact: true }).click();
+    const up = activeRows.nth(2).getByRole('button', { name: /^上移 / });
+    await up.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    if (JSON.stringify(await readOrder()) !== JSON.stringify(initialOrder)) throw new Error('Keyboard Goal reorder failed or lost focus');
+    if (!(await activeRows.first().getByRole('button', { name: /^上移 / }).isDisabled())) throw new Error('First Goal can move beyond list boundary');
+    await page.screenshot({ path: resolve(outputDir, 'goal-reorder-controls.png'), fullPage: false, animations: 'disabled' });
+    await page.getByRole('button', { name: '调整 Goal 顺序', exact: true }).click();
+    await page.screenshot({ path: resolve(outputDir, 'goal-reorder-default.png'), fullPage: false, animations: 'disabled' });
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
+    await page.waitForFunction(() => document.querySelectorAll(".personal-stopped-goals .personal-goal-row").length === 2, null, { timeout: 3_000 });
+    await stoppedDirectory.locator("summary").click();
+    await page.locator(".personal-goal-link").filter({ hasText: "Legacy Benchmark" }).click();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("goalId") === "legacy-benchmark");
+    const stoppedGoalBody = await page.locator(".personal-channel").innerText();
+    if (!stoppedGoalBody.includes("Legacy Benchmark") || !stoppedGoalBody.includes("历史、Todo 和证据仍保留")) {
+      throw new Error(`Stopped Goal lost its archive context after merge: ${stoppedGoalBody.slice(0, 1200)}`);
+    }
+    await page.locator(".personal-goal-link").filter({ hasText: "Product Release" }).click();
+    await stoppedDirectory.locator("summary").click();
     const writesBeforeLifecyclePreview = api.durableWriteCount;
     const statusRequestsBeforeStop = api.statusRequestCount;
     api.nextLifecyclePreviewDelayMs = 900;
@@ -806,16 +1414,196 @@ async function main() {
     const closeLifecycleDrawer = page.getByRole("button", { name: "关闭", exact: true });
     if (await closeLifecycleDrawer.count()) await closeLifecycleDrawer.click();
     await page.emulateMedia({ reducedMotion: "reduce" });
-    const stoppedChevronTransition = await stoppedDirectory.locator("summary svg").evaluate((element) => getComputedStyle(element).transitionDuration);
+    const stoppedChevronTransition = await stoppedDirectory.locator("summary > svg:first-child").evaluate((element) => getComputedStyle(element).transitionDuration);
     if (stoppedChevronTransition !== "0s") throw new Error(`Stopped Goals disclosure ignores reduced motion: ${stoppedChevronTransition}`);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.screenshot({ path: resolve(outputDir, "goal-lifecycle-directory.png"), fullPage: false, animations: "disabled" });
     pass(1, "Goal stop applies directly without a redundant confirmation, while resume stays reviewed; both update optimistically, roll back rejected applies, and reconcile status in the background.");
     if (await page.locator(".personal-timeline-row").filter({ hasText: /纠偏/u }).count()) throw new Error("Browse rows expose repeated correction actions");
     pass(2, "Browse rows are full-row click targets and Session rows state that they open execution progress and results.");
+    const workspaceSettingsEntry = page.getByRole("button", { name: "设置", exact: true });
+    const settingsEntryVisual = await workspaceSettingsEntry.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const icon = element.querySelector(".personal-sidebar-utility-icon")?.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
+      return {
+        backgroundColor: style.backgroundColor,
+        borderTopWidth: style.borderTopWidth,
+        height: rect.height,
+        iconHeight: icon?.height ?? 0,
+        width: rect.width,
+      };
+    });
+    if (settingsEntryVisual.height < 52 || settingsEntryVisual.iconHeight < 32 || settingsEntryVisual.width < 180) {
+      throw new Error(`Settings entry is not a prominent navigation target: ${JSON.stringify(settingsEntryVisual)}`);
+    }
+    if (settingsEntryVisual.borderTopWidth === "0px" || settingsEntryVisual.backgroundColor === "rgba(0, 0, 0, 0)") {
+      throw new Error(`Settings entry still renders as a weak transparent footer row: ${JSON.stringify(settingsEntryVisual)}`);
+    }
     await page.screenshot({ path: resolve(outputDir, "desktop-first-screen.png"), fullPage: false, animations: "disabled" });
     pass(4, "First viewport exposes needs-you, running, observing, and scheduled Goal lanes with collapsed history.");
     pass(15, "Desktop viewport matches the approved single-sidebar/channel/drawer composition.");
+
+    await page.locator(".personal-goal-link").first().click();
+    await page.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
+    await page.getByRole("group", { name: "Goal 设置" }).getByRole("button", { name: /Goal 详情/ }).click();
+    const drawerHeaderVisual = await page.locator(".personal-drawer-header").evaluate((element) => {
+      const close = element.querySelector(".personal-drawer-close")?.getBoundingClientRect();
+      const header = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        closeHeight: close?.height ?? 0,
+        closeTopInset: close ? close.top - header.top : 0,
+        closeWidth: close?.width ?? 0,
+        headerHeight: header.height,
+        paddingTop: Number.parseFloat(style.paddingTop),
+      };
+    });
+    if (drawerHeaderVisual.closeHeight < 44 || drawerHeaderVisual.closeWidth < 44) {
+      throw new Error(`Goal drawer close control is below the 44px target: ${JSON.stringify(drawerHeaderVisual)}`);
+    }
+    if (drawerHeaderVisual.headerHeight < 84 || drawerHeaderVisual.paddingTop < 18 || drawerHeaderVisual.closeTopInset < 18) {
+      throw new Error(`Goal drawer header is still pinned too close to the top edge: ${JSON.stringify(drawerHeaderVisual)}`);
+    }
+    const goalDrawerOrder = await page.locator(".personal-drawer-body").evaluate((element) => {
+      const lark = element.querySelector(".personal-goal-notification");
+      const session = element.querySelector(".personal-goal-session");
+      const actions = element.querySelector(".personal-drawer-action-grid");
+      const subagents = element.querySelector(".personal-goal-subagents");
+      const precedes = (earlier, later) => Boolean(earlier && later
+        && (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING));
+      return {
+        actionsBeforeSubagents: precedes(actions, subagents),
+        larkBeforeSession: precedes(lark, session),
+        sessionBeforeSubagents: precedes(session, subagents),
+        subagentsLast: subagents?.nextElementSibling === null,
+      };
+    });
+    if (!goalDrawerOrder.larkBeforeSession
+      || !goalDrawerOrder.sessionBeforeSubagents
+      || !goalDrawerOrder.actionsBeforeSubagents
+      || !goalDrawerOrder.subagentsLast) {
+      throw new Error(`Goal drawer did not keep Lark and Session ahead of advanced sub-agent settings: ${JSON.stringify(goalDrawerOrder)}`);
+    }
+    const subagentSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
+    await subagentSwitch.waitFor({ state: "visible" });
+    if (await subagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Per-Goal sub-agent execution did not default off");
+    if (!(await subagentSwitch.isEnabled())) throw new Error("Per-Goal sub-agent execution still required a task-domain selection");
+    await page.getByLabel("最多子代理数").selectOption("2");
+    const writesBeforeSubagentPreview = api.durableWriteCount;
+    api.freezeGoalSubagentStatusProjection = true;
+    await subagentSwitch.click();
+    await page.getByText("预览已锁定，确认后才会写入这个 Goal。", { exact: true }).waitFor({ state: "visible" });
+    if (api.durableWriteCount !== writesBeforeSubagentPreview) throw new Error("Unrestricted sub-agent preview mutated durable Goal state");
+    if (api.goalSubagentPreviews.at(-1)?.allowed_domains.length !== 0) throw new Error("Unrestricted sub-agent preview invented a task-domain filter");
+    await page.getByText("最多允许创建 2 个子代理；任务领域限制：不限制任务领域。", { exact: true }).waitFor({ state: "visible" });
+    const previewPlacement = await page.locator(".personal-goal-subagents").evaluate((element) => {
+      const preview = element.querySelector(".personal-subagent-preview");
+      const currentSummary = element.querySelector("dl");
+      const switchBounds = element.querySelector(".personal-subagent-switch")?.getBoundingClientRect();
+      const previewBounds = preview?.getBoundingClientRect();
+      return {
+        gapFromSwitch: switchBounds && previewBounds ? previewBounds.top - switchBounds.bottom : Number.POSITIVE_INFINITY,
+        previewBeforeCurrentSummary: Boolean(preview && currentSummary
+          && (preview.compareDocumentPosition(currentSummary) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      };
+    });
+    if (!previewPlacement.previewBeforeCurrentSummary || previewPlacement.gapFromSwitch > 150) {
+      throw new Error(`Sub-agent confirmation is detached from its switch: ${JSON.stringify(previewPlacement)}`);
+    }
+    await page.locator(".personal-subagent-preview").getByRole("button", { name: "确认", exact: true }).click();
+    await page.getByText("已写入，并通过共享 Goal 状态读回校验。", { exact: true }).waitFor({ state: "visible" });
+    const enabledSubagentSwitch = page.getByRole("switch", { name: "预览关闭子代理执行" });
+    await enabledSubagentSwitch.waitFor({ state: "visible" });
+    if (await enabledSubagentSwitch.getAttribute("aria-checked") !== "true") throw new Error("Verified apply receipt did not keep the per-Goal switch on while the status projection remained stale");
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 1) throw new Error("Unrestricted sub-agent apply did not produce exactly one durable Goal write");
+    api.freezeGoalSubagentStatusProjection = false;
+    const echoedStatusResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/status.json",
+    );
+    await page.getByRole("button", { name: "刷新状态", exact: true }).click();
+    await echoedStatusResponse;
+    const configuredGoalId = api.goalSubagentPreviews.at(-1)?.goal_id;
+    if (!configuredGoalId) throw new Error("Sub-agent apply did not retain its Goal identity");
+    api.goalSubagentConfigurations.set(configuredGoalId, {
+      mode: "multi_subagent",
+      spawn_allowed: true,
+      max_children: 3,
+      allowed_domains: ["validation"],
+    });
+    const supersedingStatusResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/status.json",
+    );
+    await page.getByRole("button", { name: "刷新状态", exact: true }).click();
+    await supersedingStatusResponse;
+    const maxChildrenInput = page.getByLabel("最多子代理数");
+    try {
+      await waitForInputValue(maxChildrenInput, "3");
+    } catch (error) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; preview=${JSON.stringify(api.goalSubagentPreviews.at(-1))}; authoritative=${JSON.stringify(api.goalSubagentConfigurations.get(configuredGoalId))}`,
+      );
+    }
+    const supersededMaxChildren = await maxChildrenInput.inputValue();
+    if (supersededMaxChildren !== "3") {
+      throw new Error(
+        `A later authoritative status did not supersede the verified apply receipt: max_children=${supersededMaxChildren}, status_requests=${api.statusRequestCount}, preview=${JSON.stringify(api.goalSubagentPreviews.at(-1))}, authoritative=${JSON.stringify(api.goalSubagentConfigurations.get(configuredGoalId))}`,
+      );
+    }
+    if (!(await page.getByRole("checkbox", { name: /validation/u }).isChecked())) {
+      throw new Error("The superseding authoritative status did not update allowed domains");
+    }
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 1) throw new Error("Status supersession produced a durable write");
+
+    const codeDomain = page.getByRole("checkbox", { name: /code/u });
+    const validationDomain = page.getByRole("checkbox", { name: /validation/u });
+    await codeDomain.waitFor({ state: "visible" });
+    await validationDomain.waitFor({ state: "visible" });
+    await codeDomain.check();
+    await validationDomain.check();
+    await page.getByRole("button", { name: "预览边界调整", exact: true }).click();
+    await page.getByText("预览已锁定，确认后才会写入这个 Goal。", { exact: true }).waitFor({ state: "visible" });
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 1) throw new Error("Restricted sub-agent preview mutated durable Goal state");
+    if ([...(api.goalSubagentPreviews.at(-1)?.allowed_domains ?? [])].sort((a, b) => a.localeCompare(b)).join(",") !== "code,validation") throw new Error("Sub-agent preview lost the bounded task domains");
+    await page.locator(".personal-subagent-preview").getByRole("button", { name: "确认", exact: true }).click();
+    await page.getByText("已写入，并通过共享 Goal 状态读回校验。", { exact: true }).waitFor({ state: "visible" });
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 2) throw new Error("Restricted sub-agent apply did not produce exactly one additional Goal write");
+    await page.screenshot({ path: resolve(outputDir, "goal-subagent-toggle.png"), fullPage: false, animations: "disabled" });
+
+    await enabledSubagentSwitch.click();
+    await page.locator(".personal-subagent-preview").getByRole("button", { name: "确认", exact: true }).click();
+    const disabledSubagentSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
+    await disabledSubagentSwitch.waitFor({ state: "visible" });
+    if (await disabledSubagentSwitch.getAttribute("aria-checked") !== "false") throw new Error("Verified status readback did not turn the per-Goal switch off");
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 3) throw new Error("Sub-agent disable did not produce exactly one additional durable Goal write");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    const productReleaseGoal = page.locator(".personal-goal-link", { hasText: "Product Release" }).first();
+    if (!await productReleaseGoal.isVisible()) {
+      const stoppedGoals = page.locator(".personal-stopped-goals");
+      if (await stoppedGoals.getAttribute("open") === null) await stoppedGoals.locator("summary").click();
+    }
+    await productReleaseGoal.waitFor({ state: "visible" });
+    await productReleaseGoal.click();
+    await page.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
+    await page.getByRole("group", { name: "Goal 设置" }).getByRole("button", { name: /Goal 详情/ }).click();
+    await page.getByText("当前没有开放的 advancement Todo 声明 task_domain", { exact: false }).waitFor({ state: "visible" });
+    const emptyDomainSwitch = page.getByRole("switch", { name: "预览开启子代理执行" });
+    if (!(await emptyDomainSwitch.isEnabled())) throw new Error("A Goal without projected task domains could not enable unrestricted sub-agent execution");
+    api.failNextGoalSubagentResponse = true;
+    await emptyDomainSwitch.click();
+    await page.getByText("LoopX Chat 服务暂时不可用（HTTP 502）。请确认 Dashboard 与 Chat 服务已启动且来自同一版本。", { exact: true }).waitFor({ state: "visible" });
+    if ((await page.locator(".personal-goal-subagents").innerText()).includes("Unexpected end of JSON input")) {
+      throw new Error("Empty Chat API responses still expose a raw JSON parser failure");
+    }
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 3) throw new Error("A failed Goal sub-agent preview wrote Goal state");
+    await emptyDomainSwitch.click();
+    await page.getByText("预览已锁定，确认后才会写入这个 Goal。", { exact: true }).waitFor({ state: "visible" });
+    if (api.goalSubagentPreviews.at(-1)?.allowed_domains.length !== 0) throw new Error("A Goal without task-domain candidates invented a restriction");
+    await page.locator(".personal-subagent-preview").getByRole("button", { name: "取消", exact: true }).click();
+    if (api.durableWriteCount !== writesBeforeSubagentPreview + 3) throw new Error("Canceling an unrestricted preview wrote Goal state");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    api.freezeGoalSubagentStatusProjection = false;
+    pass(22, "Per-Goal sub-agent execution supports unrestricted and restricted policies, previews before writing, verifies shared-state readback, leaves no-domain Goals usable, and can be disabled again.");
 
     if (await page.locator("html").getAttribute("lang") !== "zh-CN") throw new Error("Desktop did not start in Simplified Chinese");
     await page.getByRole("button", { name: "设置", exact: true }).click();
@@ -832,7 +1620,8 @@ async function main() {
     await page.getByText("LoopX Manager", { exact: true }).first().waitFor({ state: "visible" });
     if (await page.locator("html").getAttribute("lang") !== "en") throw new Error("English locale did not survive reload");
     await page.locator(".personal-goal-link").first().click();
-    await page.getByRole("button", { name: "Goal details" }).click();
+    await page.getByRole("button", { name: "Open Goal details or capability settings" }).click();
+    await page.getByRole("group", { name: "Goal settings" }).getByRole("button", { name: /Goal details/ }).click();
     await page.getByText("Repository", { exact: true }).waitFor({ state: "visible" });
     await page.getByText("Execution Session", { exact: true }).waitFor({ state: "visible" });
     await page.getByText("Read only", { exact: true }).waitFor({ state: "visible" });
@@ -897,7 +1686,8 @@ async function main() {
     if (api.durableWriteCount !== writesBeforeEnglishPreviews) throw new Error("English write previews mutated durable state before confirmation");
     await page.getByRole("button", { name: "Close", exact: true }).click();
 
-    await page.getByRole("button", { name: "Goal details" }).click();
+    await page.getByRole("button", { name: "Open Goal details or capability settings" }).click();
+    await page.getByRole("group", { name: "Goal settings" }).getByRole("button", { name: /Goal details/ }).click();
     await page.getByRole("button", { name: "Set up Heartbeat", exact: true }).click();
     const englishHeartbeatDraft = await page.getByLabel("Send a message to LoopX").inputValue();
     for (const field of ["Frequency: Daily", "Stop condition: Goal completes", "Notification: Only notify me when needed"]) {
@@ -1053,12 +1843,61 @@ async function main() {
     if (api.durableWriteCount !== writesBeforeGoalCreate + 1) throw new Error("Repeated proposal apply duplicated durable state");
     pass(9, "A repeated apply request kept one durable resource and one first-turn resource key.");
     await page.getByRole("button", { name: /关闭详情/ }).click();
+    const actionReceiptClose = page.getByRole("button", { name: "关闭操作回执", exact: true });
+    if (await actionReceiptClose.isVisible().catch(() => false)) await actionReceiptClose.click();
 
     const goalButton = page.locator(".personal-goal-link").first();
     await goalButton.click();
     const goalNavigation = page.getByRole("navigation", { name: "Goal 视图" });
     const defaultTasksTab = goalNavigation.getByRole("button", { name: "Tasks" });
     if (await defaultTasksTab.getAttribute("aria-current") !== "page") throw new Error("Selecting a Goal did not prioritize its Tasks view");
+    await page.screenshot({ path: resolve(outputDir, "goal-tasks-loopx-theme.png"), fullPage: false, animations: "disabled" });
+    await goalNavigation.getByRole("button", { name: "Files" }).click();
+    const publicFiles = page.locator(".personal-files-list > button");
+    await publicFiles.first().waitFor({ state: "visible" });
+    await page.screenshot({ path: resolve(outputDir, "goal-files-loopx-theme.png"), fullPage: false, animations: "disabled" });
+    await goalNavigation.getByRole("button", { name: "Chat" }).click();
+    await page.locator(".personal-channel-timeline").waitFor({ state: "visible" });
+    await page.screenshot({ path: resolve(outputDir, "goal-chat-loopx-theme.png"), fullPage: false, animations: "disabled" });
+    await defaultTasksTab.click();
+    const desktopNavigationTrigger = page.locator(".personal-mobile-menu");
+    if (await desktopNavigationTrigger.isVisible()) {
+      throw new Error("Mobile-only Goal navigation trigger leaked into the persistent desktop sidebar layout");
+    }
+    const fullDesktopViewport = page.viewportSize();
+    await page.setViewportSize({ width: 900, height: 720 });
+    const compactHeaderButtons = [
+      page.locator(".personal-mobile-menu"),
+      page.locator(".personal-refresh-control .personal-icon-button"),
+    ];
+    for (const button of compactHeaderButtons) {
+      const box = await button.boundingBox();
+      if (!box || Math.abs(box.width - 36) > 0.5 || Math.abs(box.height - 36) > 0.5) {
+        throw new Error(`Compact header icon button was compressed: ${JSON.stringify(box)}`);
+      }
+    }
+    const compactGoalSettingsBox = await page.locator(".personal-goal-tools-trigger").boundingBox();
+    if (!compactGoalSettingsBox || compactGoalSettingsBox.width < 40 || compactGoalSettingsBox.height < 36) {
+      throw new Error(`Compact Goal settings trigger was compressed: ${JSON.stringify(compactGoalSettingsBox)}`);
+    }
+    const compactHeaderLayout = await page.evaluate(() => {
+      const live = document.querySelector(".personal-live-indicator");
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        liveHeight: live?.getBoundingClientRect().height ?? 0,
+        liveScrollWidth: live?.scrollWidth ?? 0,
+        liveWidth: live?.getBoundingClientRect().width ?? 0,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    if (compactHeaderLayout.liveScrollWidth > compactHeaderLayout.liveWidth + 1 || compactHeaderLayout.liveHeight > 36) {
+      throw new Error(`Compact header live status wrapped: ${JSON.stringify(compactHeaderLayout)}`);
+    }
+    if (compactHeaderLayout.documentWidth > compactHeaderLayout.viewportWidth + 1) {
+      throw new Error(`Compact header caused horizontal overflow: ${JSON.stringify(compactHeaderLayout)}`);
+    }
+    await page.screenshot({ path: resolve(outputDir, "goal-header-compact-width.png"), fullPage: false, animations: "disabled" });
+    if (fullDesktopViewport) await page.setViewportSize(fullDesktopViewport);
     await page.locator(".personal-goal-link", { hasText: "Progress Projection" }).click();
     await page.getByRole("heading", { name: "Progress Projection" }).waitFor({ state: "visible" });
     const progressHeader = page.locator(".personal-channel-title p");
@@ -1066,9 +1905,48 @@ async function main() {
     const progressColumn = page.locator(".personal-object-list", { hasText: "待执行 / 进行中" });
     if ((await progressColumn.locator(".personal-task-card").count()) !== 2) throw new Error("Id-less long Todo was duplicated across compact and full projections");
     const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
-    await completedColumn.getByText("42", { exact: true }).waitFor({ state: "visible" });
+    const taskLaneScrollers = page.locator('.personal-task-kanban .personal-task-lane-scroll');
+    if (await taskLaneScrollers.count() !== 4) throw new Error('Every desktop Task lane must own a scroll region');
+    for (let laneIndex = 0; laneIndex < 4; laneIndex += 1) {
+      if (await taskLaneScrollers.nth(laneIndex).evaluate(element => getComputedStyle(element).overflowY) !== 'auto') {
+        throw new Error(`Task lane ${laneIndex + 1} does not support independent scrolling`);
+      }
+    }
+    await completedColumn.getByText("4087", { exact: true }).waitFor({ state: "visible" });
     await completedColumn.getByText("Completed A", { exact: true }).waitFor({ state: "visible" });
     if (await completedColumn.getByText("Completed Monitor", { exact: true }).count()) throw new Error("Completed continuous monitor leaked into the completed Tasks column");
+    const historyScroll = completedColumn.locator('.personal-task-lane-scroll');
+    for (let batch = 1; batch < 103; batch += 1) {
+      const response = page.waitForResponse(response => response.url().includes('/api/chat/completed-todos?') && response.url().includes(`cursor=${batch * 40}`));
+      await historyScroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      await response;
+      await page.waitForFunction(minimum => {
+        const window = document.querySelector('[data-testid="completed-task-lane"] .personal-completed-window');
+        return window && Number.parseFloat(window.style.height) >= minimum;
+      }, Math.min(4087, (batch + 1) * 40) * 148);
+      if (await completedColumn.locator('.personal-completed-row').count() > 20) throw new Error('Completed history DOM grew with accumulated pages');
+    }
+    await historyScroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await completedColumn.getByText('Completed historical Task 4087', { exact: true }).waitFor();
+    await completedColumn.getByText('已显示全部完成记录', { exact: true }).waitFor();
+    await page.screenshot({ path: resolve(outputDir, 'completed-history-4087.png'), fullPage: false, animations: 'disabled' });
+    await historyScroll.evaluate(element => { element.scrollTop = 0; });
+    await completedColumn.getByText('Completed A', { exact: true }).waitFor();
+    // Both presentations retain one snapshot, including archived history and evidence.
+    let historyRequests = 0;
+    page.on('request', request => { if (request.url().includes('/api/chat/completed-todos?')) historyRequests += 1; });
+    await page.getByRole('button', { name: '列表', exact: true }).click();
+    const listHistory = page.getByTestId('completed-task-lane');
+    await listHistory.getByRole('button', { name: '已完成', exact: false }).click();
+    await listHistory.getByText('4087', { exact: true }).waitFor();
+    await listHistory.getByText('Completed A', { exact: true }).waitFor();
+    await listHistory.locator('.personal-task-lane-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await listHistory.getByText('Completed historical Task 4087', { exact: true }).waitFor();
+    if (await listHistory.locator('.personal-completed-row').count() > 20) throw new Error('List history DOM grew with accumulated pages');
+    await page.screenshot({ path: resolve(outputDir, 'completed-history-list.png'), fullPage: false, animations: 'disabled' });
+    await page.getByRole('button', { name: '看板', exact: true }).click();
+    await completedColumn.getByText('Completed A', { exact: true }).waitFor();
+    if (historyRequests) throw new Error('Switching presentation replaced the completed-history snapshot');
     await page.locator(".personal-goal-link", { hasText: "Multi Agent Projection" }).click();
     const multiAgentHeader = await page.locator(".personal-channel-title p").innerText();
     if (!multiAgentHeader.includes("2 个工作 Agent") || multiAgentHeader.includes("codex-older-lane ·")) {
@@ -1146,7 +2024,82 @@ async function main() {
     await page.waitForTimeout(200);
     await selectFirstGoal();
     await page.locator(".personal-object-list").first().waitFor({ state: "visible" });
-    await page.getByRole("button", { name: "Goal 详情" }).click();
+    if (await page.locator(".personal-task-capability-callout").count()) throw new Error("Goal capability settings still consume a full-width Tasks row");
+    await page.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
+    const goalSettingsMenu = page.getByRole("group", { name: "Goal 设置" });
+    const capabilityMenuItem = goalSettingsMenu.getByRole("button", { name: /能力配置/ });
+    await capabilityMenuItem.waitFor({ state: "visible" });
+    await page.screenshot({ path: resolve(outputDir, "goal-settings-unified-menu.png"), fullPage: false, animations: "disabled" });
+    await capabilityMenuItem.click();
+    await page.getByRole("heading", { level: 1, name: "Goal 能力", exact: true }).waitFor({ state: "visible" });
+    if (await page.locator(".personal-workspace-shell").count()) throw new Error("Unified Goal capability action did not open the Settings surface");
+    await page.getByRole("heading", { level: 2, name: "周期报告", exact: true }).waitFor({ state: "visible" });
+    const goalCapabilityOrder = await page.locator(".personal-capability-list button small").allTextContents();
+    if (await page.locator(".personal-capability-editor-status").count()) throw new Error("Editable Goal settings must not show internal editor-contract notices");
+    const expectedGoalCapabilities = [
+      "change_quality_qualification", "explore_graph", "explore_harness", "lark_event_inbox",
+      "lark_kanban_heartbeat_sync", "local_authority_shadow", "multi_subagent",
+      "peer_task_coordination", "periodic_report", "reward_memory",
+    ];
+    if (JSON.stringify([...goalCapabilityOrder].sort()) !== JSON.stringify(expectedGoalCapabilities)) {
+      throw new Error(`Goal capability workbench did not render the complete catalog: ${JSON.stringify(goalCapabilityOrder)}`);
+    }
+    const capabilityIndex = (capabilityId) => goalCapabilityOrder.indexOf(capabilityId);
+    if (capabilityIndex("periodic_report") >= capabilityIndex("explore_harness")
+      || capabilityIndex("multi_subagent") <= capabilityIndex("explore_harness")
+      || capabilityIndex("multi_subagent") >= capabilityIndex("local_authority_shadow")
+      || capabilityIndex("multi_subagent") >= capabilityIndex("reward_memory")) {
+      throw new Error(`Goal capability maturity ordering drifted: ${JSON.stringify(goalCapabilityOrder)}`);
+    }
+    for (const label of [/^启用$/u, /^报告 Profile/u, /^Goal Channel 路由/u, /^时区/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.screenshot({ path: resolve(outputDir, "goal-capability-zh-cn.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: "预览变更", exact: true }).click();
+    await page.getByText("锁定 revision 的变更预览", { exact: true }).waitFor({ state: "visible" });
+    const goalConfigurationPreview = api.goalConfigurationRequests.find((item) => item.phase === "preview");
+    const projectedKeys = Object.keys(goalConfigurationPreview?.configuration ?? {}).sort((left, right) => left.localeCompare(right));
+    if (JSON.stringify(projectedKeys) !== JSON.stringify(["enabled", "profile_preset", "route_ref", "timezone"])) {
+      throw new Error(`Goal configuration preview leaked hidden machine fields: ${JSON.stringify(goalConfigurationPreview)}`);
+    }
+    await page.getByRole("button", { name: "应用此预览", exact: true }).click();
+    await page.getByText("Goal 值已保存；共享投影仍需修复", { exact: true }).waitFor({ state: "visible" });
+    if (!(await page.getByText(/loopx sync-global --goal-id/u).isVisible())) throw new Error("Partial Goal write did not expose its reconciliation action");
+    const goalConfigurationApply = api.goalConfigurationRequests.find((item) => item.phase === "apply");
+    if (goalConfigurationApply?.expected_plan_revision !== "sha256:goal-plan-periodic_report") throw new Error("Goal configuration apply lost its reviewed plan revision");
+
+    await page.getByRole("button", { name: /自适应子 Agent 容量/u }).click();
+    await page.getByRole("heading", { level: 2, name: "自适应子 Agent 容量", exact: true }).waitFor({ state: "visible" });
+    const multiSubagentEnabled = page.getByLabel(/^启用$/u);
+    const multiSubagentMaxChildren = page.getByLabel(/^最大子 Agent 数/u);
+    const multiSubagentDomains = page.getByLabel(/^允许的职责域/u);
+    await multiSubagentEnabled.waitFor({ state: "visible" });
+    await waitForInputValue(multiSubagentMaxChildren, "4");
+    await multiSubagentEnabled.check();
+    await multiSubagentMaxChildren.fill("3");
+    await multiSubagentDomains.fill("code\nvalidation");
+    await page.screenshot({ path: resolve(outputDir, "goal-subagent-capability-zh-cn.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: "预览变更", exact: true }).click();
+    await page.getByText("锁定 revision 的变更预览", { exact: true }).waitFor({ state: "visible" });
+    const multiSubagentPreview = api.goalConfigurationRequests.findLast((item) => item.phase === "preview" && item.capability_id === "multi_subagent");
+    if (JSON.stringify(multiSubagentPreview?.configuration) !== JSON.stringify({
+      enabled: true,
+      max_children: 3,
+      allowed_domains: ["code", "validation"],
+    })) {
+      throw new Error(`Unified Goal capability preview lost the sub-agent boundary: ${JSON.stringify(multiSubagentPreview)}`);
+    }
+    await page.getByRole("button", { name: "应用此预览", exact: true }).click();
+    const multiSubagentApply = api.goalConfigurationRequests.findLast((item) => item.phase === "apply" && item.capability_id === "multi_subagent");
+    if (multiSubagentApply?.expected_plan_revision !== "sha256:goal-plan-multi_subagent") {
+      throw new Error(`Unified Goal capability apply lost its reviewed sub-agent revision: ${JSON.stringify(multiSubagentApply)}`);
+    }
+    await page.locator(".personal-capability-raw-values > summary").click();
+    await page.locator(".personal-capability-value-grid section").first().getByText(/validation/u).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+    await page.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
+    await page.getByRole("group", { name: "Goal 设置" }).getByRole("button", { name: /Goal 详情/ }).click();
     await page.getByText("仓库", { exact: true }).waitFor({ state: "visible" });
     await page.getByText("执行 Session", { exact: true }).waitFor({ state: "visible" });
     await page.getByText("只读", { exact: true }).waitFor({ state: "visible" });
@@ -1159,6 +2112,84 @@ async function main() {
     if (await page.locator(".personal-channel-composer").count()) throw new Error("Workspace Settings left the chat composer visible");
     if (await page.locator("[data-context-drawer]").count()) throw new Error("Workspace Settings left the context drawer visible");
     await page.screenshot({ path: resolve(outputDir, "workspace-settings.png"), fullPage: false, animations: "disabled" });
+
+    await page.getByRole("button", { name: /机器配置/ }).click();
+    await page.getByRole("heading", { level: 1, name: "机器配置", exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("heading", { level: 2, name: "周期报告", exact: true }).waitFor({ state: "visible" });
+    const machineCatalog = page.getByRole("navigation", { name: "机器能力目录" });
+    if (await page.locator(".personal-capability-editor-status").count()) throw new Error("Editable machine settings must not show internal editor-contract notices");
+    if (await machineCatalog.getByRole("button").count() !== goalCapabilityCatalog().length) {
+      throw new Error("Machine settings hid Goal-only capabilities from the shared catalog");
+    }
+    const requestsBeforeReadOnly = api.machineConfigurationRequests.length;
+    await machineCatalog.getByRole("button", { name: /multi_subagent/ }).click();
+    await page.getByText(/此能力目前仅支持 Goal 级配置/u).waitFor({ state: "visible" });
+    if (await page.getByRole("button", { name: "预览变更", exact: true }).count()
+        || await page.locator("#machine-configuration-json").count()
+        || await page.getByLabel(/^启用$/u).count()
+        || api.machineConfigurationRequests.length !== requestsBeforeReadOnly) {
+      throw new Error("Goal-only capability exposed a machine mutation path");
+    }
+    await machineCatalog.getByRole("button", { name: /periodic_report/ }).click();
+    for (const label of [/^启用$/u, /^报告 Profile/u, /^Goal Channel 路由/u, /^时区/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.getByText("开启后将在已验证的阶段节点自动投递", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText(/启用此订阅即授予持续投递权/u).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "预览变更", exact: true }).click();
+    await page.getByText("审阅机器配置变更", { exact: true }).waitFor({ state: "visible" });
+    const machineConfigurationPreview = api.machineConfigurationRequests.find((item) => item.phase === "preview");
+    const machineKeys = Object.keys(machineConfigurationPreview?.namespace_configuration ?? {}).sort((left, right) => left.localeCompare(right));
+    if (JSON.stringify(machineKeys) !== JSON.stringify(["enabled", "inheritance", "profile_preset", "route_ref", "schema_version", "timezone"])) {
+      throw new Error(`Machine guided editor lost capability-owned hidden fields: ${JSON.stringify(machineConfigurationPreview)}`);
+    }
+    await page.getByRole("button", { name: "应用已审阅预览", exact: true }).click();
+    await page.getByText("机器策略已应用，并通过回读校验。", { exact: true }).waitFor({ state: "visible" });
+    const machineConfigurationApply = api.machineConfigurationRequests.find((item) => item.phase === "apply");
+    if (machineConfigurationApply?.expected_plan_revision !== "sha256:machine-plan") throw new Error("Machine configuration apply lost its reviewed plan revision");
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-behavior-zh-cn.png"), fullPage: false, animations: "disabled" });
+
+    await page.getByRole("button", { name: /语言/ }).click();
+    await page.getByRole("radio", { name: /English/ }).click();
+    await page.getByRole("button", { name: /Machine configuration/ }).click();
+    await page.getByRole("heading", { level: 2, name: "Periodic reports", exact: true }).waitFor({ state: "visible" });
+    const rawValues = page.locator(".personal-capability-raw-values");
+    if (await rawValues.getAttribute("open") !== null) throw new Error("Raw JSON must be collapsed by default");
+    if (!await page.locator(".personal-capability-actions").evaluate((actions) => Boolean(actions.compareDocumentPosition(document.querySelector(".personal-capability-raw-values")) & Node.DOCUMENT_POSITION_FOLLOWING))) {
+      throw new Error("Readable configuration actions must precede raw JSON diagnostics");
+    }
+    await rawValues.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await rawValues.locator("pre").first().waitFor({ state: "visible" });
+    await page.keyboard.press("Enter");
+    if (await rawValues.getAttribute("open") !== null) throw new Error("Raw JSON keyboard collapse failed");
+    for (const label of [/^Enabled$/u, /^Report profile/u, /^Goal Channel route/u, /^Timezone/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.getByText("Enabled means automatic delivery at validated stage boundaries", { exact: true }).waitFor({ state: "visible" });
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-en.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: /Goal capabilities/ }).click();
+    await page.getByRole("button", { name: /Adaptive child capacity/ }).click();
+    await page.getByRole("heading", { level: 2, name: "Adaptive child capacity", exact: true }).waitFor({ state: "visible" });
+    for (const label of [/^Enabled$/u, /^Maximum children/u, /^Allowed responsibility domains/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.screenshot({ path: resolve(outputDir, "goal-subagent-capability-en.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: /Language/ }).click();
+    await page.getByRole("radio", { name: /Simplified Chinese/ }).click();
+    await page.getByRole("button", { name: /机器配置/ }).click();
+    await page.locator(".personal-settings-body").evaluate((element) => element.scrollTo({ top: 0 }));
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-zh-cn.png"), fullPage: false, animations: "disabled" });
+    const settingsViewport = page.viewportSize();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(200);
+    const machineOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (machineOverflow > 1) throw new Error(`Machine capability settings overflow the mobile viewport by ${machineOverflow}px`);
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-mobile-zh-cn.png"), fullPage: false, animations: "disabled" });
+    await page.setViewportSize(settingsViewport);
+    await page.waitForTimeout(200);
+    await page.getByRole("button", { name: /Lark/ }).click();
+
     await page.getByRole("button", { name: /连接 Lark App/ }).click();
     const connectDialog = page.getByRole("dialog", { name: "连接 Lark App" });
     await connectDialog.waitFor({ state: "visible" });
@@ -1170,6 +2201,10 @@ async function main() {
     if (JSON.stringify(ingressOptions) !== JSON.stringify(["live_steering", "session_queue", "async_inbox"])) throw new Error(`Lark Agent ingress modes drifted: ${JSON.stringify(ingressOptions)}`);
     await ingressGroup.getByLabel("异步收件箱").check();
     await connectDialog.getByLabel("目标 Agent").waitFor({ state: "visible" });
+    await connectDialog.getByLabel("绑定到 Goal").selectOption("multi-agent-projection");
+    const agentOptions = await connectDialog.getByLabel("目标 Agent").locator("option").evaluateAll((items) => items.map((item) => item.value));
+    if (JSON.stringify([...agentOptions].sort((left, right) => left.localeCompare(right))) !== JSON.stringify(["codex-latest-lane", "codex-older-lane"])) throw new Error(`Lark omitted a peer Agent: ${JSON.stringify(agentOptions)}`);
+    await connectDialog.getByLabel("目标 Agent").selectOption("codex-older-lane");
     await connectDialog.getByLabel("回复方式").selectOption("topic_reply");
     await page.screenshot({ path: resolve(outputDir, "lark-routing-modes.png"), fullPage: false, animations: "disabled" });
     await connectDialog.getByRole("button", { name: "连接", exact: true }).click();
@@ -1188,6 +2223,7 @@ async function main() {
     if (api.larkWrites.length !== 1 || api.larkWrites[0].execute !== true) throw new Error("Lark connect did not perform exactly one approved external write");
     if (api.larkWrites[0].capture_scope !== "configured_chat_all" || api.larkWrites[0].incoming_mode !== "all") throw new Error(`Lark capture mode was not projected: ${JSON.stringify(api.larkWrites[0])}`);
     if (api.larkWrites[0].ingress_mode !== "async_inbox" || !api.larkWrites[0].agent_id) throw new Error(`Lark Agent inbox mode lost its Agent binding: ${JSON.stringify(api.larkWrites[0])}`);
+    if (api.larkWrites[0].agent_id !== "codex-older-lane" || api.larkWrites[0].goal_id !== "multi-agent-projection") throw new Error("Lark replaced the selected peer with the default Agent");
     if (api.larkWrites[0].reply_mode !== "topic_reply") throw new Error(`Lark reply mode was not projected: ${JSON.stringify(api.larkWrites[0])}`);
     Object.assign(api.larkConnections[0], {
       event_count: 1,
@@ -1216,7 +2252,22 @@ async function main() {
     if (await editDialog.getByLabel("接收范围").inputValue() !== "configured_chat_all") throw new Error("Lark edit mode did not restore capture_scope");
     if (!await editDialog.getByRole("group", { name: "Agent 入站方式" }).getByLabel("异步收件箱").isChecked()) throw new Error("Lark edit mode did not restore ingress_mode");
     if (await editDialog.getByLabel("目标 Agent").inputValue() !== api.larkWrites[0].agent_id) throw new Error("Lark edit mode did not restore agent_id");
+    await editDialog.getByLabel("目标 Agent").selectOption("codex-latest-lane");
+    await editDialog.getByRole("button", { name: "保存连接", exact: true }).click();
+    await editDialog.waitFor({ state: "hidden" });
+    if (api.larkWrites.length !== 2 || api.larkConnections.length !== 2) throw new Error("Peer Agent route did not coexist");
+    if (!api.larkConnections.some((item) => item.agent_id === "codex-older-lane") || !api.larkConnections.some((item) => item.agent_id === "codex-latest-lane")) throw new Error("One-click Goal Channel lost a peer Agent route");
+    const removedConnection = api.larkConnections.find((item) => item.agent_id === "codex-older-lane");
+    const originalAgent = removedConnection.agent_id;
+    removedConnection.agent_id = "removed-peer";
+    await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await page.locator(".personal-lark-table-row", { hasText: "removed-peer" }).getByRole("button", { name: /配置/ }).click();
+    await editDialog.getByRole("alert").filter({ hasText: "不会自动替换" }).waitFor({ state: "visible" });
+    if (!(await editDialog.getByRole("button", { name: "保存连接", exact: true }).isDisabled())) throw new Error("Removed recipient remained connectable");
+    if (await editDialog.getByLabel("目标 Agent").inputValue() !== "removed-peer") throw new Error("Removed recipient silently fell back to another Agent");
     await editDialog.getByRole("button", { name: "取消" }).click();
+    removedConnection.agent_id = originalAgent;
     await page.screenshot({ path: resolve(outputDir, "lark-goal-connections.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
     await selectProductReleaseGoal();
@@ -1364,7 +2415,8 @@ async function main() {
     if (!heartbeatPreview) throw new Error("Continuation intent did not map to heartbeat.bind");
     await page.getByRole("button", { name: "关闭", exact: true }).click();
 
-    await page.getByRole("button", { name: "Goal 详情" }).click();
+    await page.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
+    await page.getByRole("group", { name: "Goal 设置" }).getByRole("button", { name: /Goal 详情/ }).click();
     await page.getByRole("button", { name: "Tasks" }).click();
     const taskCards = page.locator(".personal-object-list", { hasText: "进行中" }).locator(".personal-task-card");
     const taskRow = taskCards.first().locator(":scope > button");
@@ -1484,17 +2536,28 @@ async function main() {
     }
     pass(10, "Continuation mapped to heartbeat.bind and bounded monitoring mapped to monitor.create/continuous_monitor UI.");
 
-    const agentSelect = page.getByLabel("选择聊天 Runtime");
-    const unavailableAgent = agentSelect.locator('option[value="offline-agent"]');
-    if ((await unavailableAgent.count()) !== 1) throw new Error(`Unavailable Agent missing; options=${await agentSelect.locator("option").allTextContents()}`);
-    const unavailableDisabled = (await unavailableAgent.getAttribute("disabled")) !== null;
+    const agentSelect = page.getByRole("combobox", { name: "选择聊天 Runtime" });
+    await agentSelect.click();
+    const agentListbox = page.getByRole("listbox", { name: "选择聊天 Runtime" });
+    const unavailableAgent = agentListbox.getByRole("option", { name: /Offline Agent · 不可用/ });
+    if ((await unavailableAgent.count()) !== 1) throw new Error(`Unavailable Agent missing; options=${await agentListbox.getByRole("option").allTextContents()}`);
+    const unavailableDisabled = await unavailableAgent.isDisabled();
     const unavailableLabel = await unavailableAgent.textContent();
     if (!unavailableDisabled || !unavailableLabel?.includes("不可用")) {
       throw new Error(`Unavailable Agent is selectable or lacks explanation; disabled=${unavailableDisabled}; label=${unavailableLabel}`);
     }
+    await page.screenshot({ path: resolve(outputDir, "agent-select-open.png"), fullPage: false, animations: "disabled" });
+    await page.keyboard.press("ArrowDown");
+    const focusedAgentOption = await page.locator(":focus").textContent();
+    if (!focusedAgentOption?.includes("Claude Code")) throw new Error(`Agent keyboard navigation did not advance: ${focusedAgentOption}`);
+    await page.keyboard.press("Escape");
+    if (await agentListbox.isVisible().catch(() => false)) throw new Error("Agent menu did not close on Escape");
+    if (!(await agentSelect.evaluate((element) => element === document.activeElement))) throw new Error("Agent menu did not restore trigger focus");
     pass(14, "Codex remained the healthy default and the unavailable Agent option was disabled with explanation.");
-    await agentSelect.selectOption("claude-code");
-    if ((await agentSelect.inputValue()) !== "claude-code") throw new Error("Healthy Agent selection did not update");
+    await agentSelect.click();
+    const reopenedAgentListbox = page.getByRole("listbox", { name: "选择聊天 Runtime" });
+    await reopenedAgentListbox.getByRole("option", { name: "Claude Code", exact: true }).click();
+    if ((await agentSelect.getAttribute("data-value")) !== "claude-code") throw new Error("Healthy Agent selection did not update");
     await page.getByRole("button", { name: "刷新状态" }).click();
 
     await page.locator(".personal-run-row").first().click();
@@ -1609,15 +2672,17 @@ async function main() {
     await remote.getByLabel("名称").fill("Remote build host");
     await remote.getByLabel("本地转发 URL").fill("http://127.0.0.1:8976/status.json");
     await remote.getByRole("button", { name: "添加只读来源" }).click();
-    const remoteSourceSelect = remote.getByLabel("选择控制面来源");
-    // 3 saved sources (本机 + remote-lab + Remote build host) plus the
-    // quick-add optgroup exposing the remaining configured host (remote-build).
-    if (await remoteSourceSelect.locator("option").count() !== 4) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
-    if (await remoteSourceSelect.locator("optgroup").count() !== 1) throw new Error("Configured SSH Host quick-add group is missing");
-    await remoteSourceSelect.selectOption({ label: "remote-build" });
+    const remoteSourceSelect = remote.getByRole("combobox", { name: "选择控制面来源" });
+    await remoteSourceSelect.click();
+    const remoteSourceListbox = remote.getByRole("listbox", { name: "选择控制面来源" });
+    if (await remoteSourceListbox.getByRole("option").count() !== 4) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
+    if (await remoteSourceListbox.locator(".personal-select-group-label").count() !== 1) throw new Error("Configured SSH Host quick-add group is missing");
+    await remote.screenshot({ path: resolve(outputDir, "control-plane-select-open.png"), fullPage: false, animations: "disabled" });
+    await remoteSourceListbox.getByRole("option", { name: "remote-build", exact: true }).click();
     await remote.locator(".personal-read-only-source", { hasText: "remote-build" }).waitFor({ state: "visible", timeout: 10_000 });
     pass(21, "Quick-add configured SSH host from the control-plane source dropdown.");
-    await remoteSourceSelect.selectOption({ label: "remote-lab" });
+    await remoteSourceSelect.click();
+    await remote.getByRole("listbox", { name: "选择控制面来源" }).getByRole("option", { name: "remote-lab", exact: true }).click();
     await remote.locator(".personal-read-only-source", { hasText: "remote-lab" }).waitFor({ state: "visible", timeout: 10_000 });
     await remote.locator(".personal-channel-composer").waitFor({ state: "detached", timeout: 3_000 });
     await remote.screenshot({ path: resolve(outputDir, "remote-read-only-source.png"), fullPage: false, animations: "disabled" });
@@ -1649,6 +2714,14 @@ async function main() {
     await installApi(mobile);
     await mobile.goto(url, { waitUntil: "networkidle" });
     await mobile.getByTestId("personal-goal-home").waitFor({ state: "visible" });
+    const mobileLaneSeparators = await mobile.locator(".personal-home-lane").evaluateAll((lanes) => lanes.map((lane) => {
+      const style = getComputedStyle(lane);
+      return { borderLeftWidth: style.borderLeftWidth, borderTopWidth: style.borderTopWidth };
+    }));
+    if (mobileLaneSeparators.some((lane) => lane.borderLeftWidth !== "0px")
+      || mobileLaneSeparators.slice(1).some((lane) => lane.borderTopWidth !== "1px")) {
+      throw new Error(`Mobile lanes did not switch to horizontal separators: ${JSON.stringify(mobileLaneSeparators)}`);
+    }
     const mobileOverflow = await mobile.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (mobileOverflow > 1) throw new Error(`Mobile workspace has ${mobileOverflow}px horizontal overflow`);
     await mobile.screenshot({ path: resolve(outputDir, "mobile-first-screen.png"), fullPage: false, animations: "disabled" });
@@ -1705,18 +2778,93 @@ async function main() {
     }
     await mobileManagerLink.click();
     await mobile.locator(".personal-home-board").waitFor({ state: "visible" });
+    await mobileNavigationTrigger.click();
+    await mobile.getByRole("dialog", { name: "Goal 导航" }).waitFor({ state: "visible" });
+    await mobile.locator(".personal-goal-link").first().click();
+    await mobile.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
+    await mobile.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
+    const mobileGoalToolsMenu = mobile.getByRole("group", { name: "Goal 设置" });
+    await mobileGoalToolsMenu.waitFor({ state: "visible" });
+    const mobileMenuBox = await mobileGoalToolsMenu.boundingBox();
+    if (!mobileMenuBox || mobileMenuBox.x < 0 || mobileMenuBox.x + mobileMenuBox.width > 390) {
+      throw new Error(`Mobile Goal settings menu escaped the viewport: ${JSON.stringify(mobileMenuBox)}`);
+    }
+    const mobileGoalOverflow = await mobile.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (mobileGoalOverflow > 1) throw new Error(`Mobile Goal header has ${mobileGoalOverflow}px horizontal overflow`);
+    await mobile.screenshot({ path: resolve(outputDir, "mobile-goal-settings-menu.png"), fullPage: false, animations: "disabled" });
     await mobile.close();
-    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "paper") throw new Error("Personal workspace did not start with the default theme");
+    const progressive = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    const progressiveApi = await installApi(progressive);
+    progressiveApi.nextFullStatusDelayMs = 1_500;
+    await progressive.goto(url, { waitUntil: "domcontentloaded" });
+    await progressive.getByTestId("personal-goal-home").waitFor({ state: "visible", timeout: 10_000 });
+    const progressiveActiveVisibleBeforeStopped = await progressive.waitForFunction(
+      () => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 5,
+      null,
+      { timeout: 3_000 },
+    );
+    const stoppedLoadingVisible = await progressive.locator(".personal-stopped-goals summary svg.is-spinning, .personal-stopped-goals summary svg[class*='spinning']").count();
+    if (!progressiveActiveVisibleBeforeStopped) throw new Error("Active Goals did not render first while the stopped archive was still loading");
+    if (stoppedLoadingVisible === 0) throw new Error("Stopped Goals archive did not expose an accessible loading state");
+    await progressive.locator(".personal-stopped-goals .personal-goal-row").first().waitFor({ state: "attached", timeout: 6_000 });
+    const progressiveStoppedCount = await progressive.locator(".personal-stopped-goals .personal-goal-row").count();
+    if (progressiveStoppedCount !== 2) throw new Error(`Stopped Goals archive loaded the wrong count: ${progressiveStoppedCount}`);
+    if ((await progressive.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Active Goal directory regressed after the stopped archive loaded");
+    pass(23, "The stopped archive loads after active Goals: active Goals are interactive first, the stopped section shows an accessible loading state, then stopped Goals arrive without replacing the page.");
+    await progressive.close();
+
+    const revisionRace = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    const revisionRaceApi = await installApi(revisionRace);
+    revisionRaceApi.captureNextStatusGeneration = true;
+    revisionRaceApi.activationChangeAfterCapturedActive = {
+      goalId: "product-release",
+      activationState: "stopped",
+    };
+    revisionRaceApi.nextFullStatusDelayMs = 800;
+    await revisionRace.goto(url, { waitUntil: "domcontentloaded" });
+    await revisionRace.getByTestId("personal-goal-home").waitFor({ state: "visible", timeout: 10_000 });
+    await revisionRace.locator(".personal-stopped-goals .personal-goal-row").first().waitFor({ state: "attached", timeout: 6_000 });
+    await revisionRace.waitForFunction(() => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 4, null, { timeout: 6_000 });
+    if (await revisionRace.locator(".personal-stopped-goal-error").count()) {
+      throw new Error("Registry revision mismatch did not converge after the bounded automatic resync");
+    }
+    if (await revisionRace.locator(".personal-goal-row").filter({ hasText: "Product Release" }).count() !== 1) {
+      throw new Error("Registry revision race duplicated or omitted Product Release");
+    }
+    await revisionRace.close();
+
+    const progressiveError = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    const errorApi = await installApi(progressiveError);
+    errorApi.failNextFullStatus = true;
+    await progressiveError.goto(url, { waitUntil: "domcontentloaded" });
+    await progressiveError.getByTestId("personal-goal-home").waitFor({ state: "visible", timeout: 10_000 });
+    await progressiveError.locator(".personal-stopped-goal-error").waitFor({ state: "visible", timeout: 4_000 });
+    if ((await progressiveError.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("A failed stopped archive replaced the active workspace");
+    await progressiveError.getByText("重试", { exact: true }).click();
+    await progressiveError.locator(".personal-stopped-goals .personal-goal-row").first().waitFor({ state: "attached", timeout: 6_000 });
+    const errorRecoveredCount = await progressiveError.locator(".personal-stopped-goals .personal-goal-row").count();
+    if (errorRecoveredCount !== 2) throw new Error(`Retry did not recover the stopped archive: ${errorRecoveredCount}`);
+    pass(24, "A stopped-archive failure keeps active Goals usable and offers a retry that restores the stopped section without a full-page error.");
+    await progressiveError.close();
+
+    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "loopx") throw new Error("Personal workspace did not start with the LoopX standard theme");
     if (await page.getByRole("button", { name: /切换到野兽主题|切换到默认主题/ }).count()) throw new Error("Workspace header still exposes the old theme toggle");
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await page.getByRole("button", { name: /外观/ }).click();
     await page.getByRole("radio", { name: /高对比/ }).click();
     if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "brutal") throw new Error("Settings did not enable the high-contrast theme");
-    await page.getByRole("radio", { name: /默认/ }).click();
-    if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "paper") throw new Error("Settings did not restore the default theme");
+    await page.getByRole("radio", { name: /纸张/ }).click();
+    if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "paper") throw new Error("Settings did not enable the paper theme");
+    await page.getByRole("radio", { name: /LoopX 标准/ }).click();
+    if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "loopx") throw new Error("Settings did not restore the LoopX standard theme");
+    if (await page.evaluate(() => localStorage.getItem("loopx-pw-theme")) !== "loopx") throw new Error("LoopX standard theme was not persisted");
+    await page.screenshot({ path: resolve(outputDir, "desktop-settings-loopx-theme.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
-    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "paper") throw new Error("Workspace did not apply the Settings theme readback");
-    pass(16, "The Settings appearance tab toggles the high-contrast theme and returns to the default theme.");
+    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "loopx") throw new Error("Workspace did not apply the LoopX standard theme readback");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByTestId("personal-goal-home").waitFor({ state: "visible" });
+    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "loopx") throw new Error("LoopX standard theme did not survive reload");
+    pass(16, "The Settings appearance tab switches among all three themes and restores the LoopX standard default.");
     await page.locator(".personal-manager-link").first().click();
     await page.waitForTimeout(600);
     const workerCards = await page.locator(".personal-worker-strip > button").count();
