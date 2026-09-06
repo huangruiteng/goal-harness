@@ -438,15 +438,27 @@ def assert_codex_app_automation_is_discovered(registry_path: Path, codex_home: P
         codex_home,
         prompt=rendered,
     )
+    invalid_path = codex_home / "automations" / "invalid-legacy" / "automation.toml"
+    invalid_path.parent.mkdir(parents=True)
+    invalid_path.write_text(
+        'kind = "heartbeat"\nprompt = "C:\\Users\\alice"\n',
+        encoding="utf-8",
+    )
     payload = build_upgrade_plan(registry_path=registry_path, cli_bin="loopx")
     assert payload["installed_manifest"]["source"] == "codex_app_automations", payload
     assert payload["installed_manifest"]["available"] is True, payload
+    assert payload["installed_manifest"]["parse_error_count"] == 1, payload
+    assert payload["installed_manifest"]["parse_errors"] == [
+        {"automation_id": "invalid-legacy", "reason": "invalid_toml"}
+    ], payload
+    assert payload["installed_manifest"]["parse_errors_complete"] is True, payload
     auto_entry = payload["installed_manifest"]["entries"][0]
     assert "task_body" not in auto_entry, payload
     assert auto_entry["prompt_sha256"] == expected_sha, payload
     assert auto_entry["prompt_policy_audit"]["status"] == "clean", payload
     assert auto_entry["prompt_policy_audit"]["warning_count"] == 0, payload
     assert payload["summary"]["installed_manifest_entry_count"] == 1, payload
+    assert payload["summary"]["installed_manifest_parse_error_count"] == 1, payload
     assert payload["summary"]["installed_manifest_task_body_count"] == 0, payload
     assert payload["summary"]["installed_manifest_has_task_body"] is False, payload
     assert payload["summary"]["installed_prompt_policy_warning_count"] == 0, payload
@@ -463,6 +475,9 @@ def assert_codex_app_automation_is_discovered(registry_path: Path, codex_home: P
     assert installed["automation_id"] == GOAL_ID, payload
     assert installed["installed"] is True, payload
     assert payload["summary"]["ready_for_default_promotion"] is True, payload
+    markdown = render_upgrade_plan_markdown(payload)
+    assert "installed_manifest_parse_error_count: `1`" in markdown, markdown
+    assert "parse_error automation_id=`invalid-legacy` reason=`invalid_toml`" in markdown, markdown
 
 
 def assert_codex_app_stale_policy_prompt_is_flagged(registry_path: Path, codex_home: Path) -> None:

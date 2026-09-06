@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -427,7 +428,9 @@ def test_apply_creates_missing_automation_toml_and_sqlite(
     toml_text = toml_path.read_text(encoding="utf-8")
     assert 'rrule = "FREQ=MINUTELY;INTERVAL=5"' in toml_text
     assert 'target_thread_id = "thread-1"' in toml_text
-    assert 'prompt = """Advance `goal` from active state.' in toml_text
+    assert tomllib.loads(toml_text)["prompt"] == (
+        "Advance `goal` from active state. Agent: `agent`."
+    )
 
     connection = sqlite3.connect(str(db_path))
     try:

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,7 @@ STAGE_DEFERRED_ATTENTION_STATUSES = {
 STAGE_DEFERRED_ADAPTER_STATUSES = {
     "planned",
 }
+_AUTOMATION_PARSE_ERROR_LIMIT = 20
 
 
 def prompt_digest(text: str) -> str:
@@ -177,27 +179,7 @@ def codex_home() -> Path:
 
 
 def parse_automation_toml(path: Path) -> dict[str, Any]:
-    values: dict[str, Any] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, raw_value = line.split("=", 1)
-        key = key.strip()
-        value = raw_value.strip()
-        if value.startswith('"') and value.endswith('"'):
-            try:
-                values[key] = json.loads(value)
-            except json.JSONDecodeError:
-                values[key] = value[1:-1]
-        elif value in {"true", "false"}:
-            values[key] = value == "true"
-        else:
-            try:
-                values[key] = int(value)
-            except ValueError:
-                values[key] = value
-    return values
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def infer_goal_id_from_prompt(prompt: str) -> str | None:
@@ -252,13 +234,34 @@ def load_codex_app_automation_manifest(root: Path | None = None) -> dict[str, An
             "entries": [],
             "reason": "no installed automation manifest provided and Codex App automations directory does not exist",
             "source": "codex_app_automations",
+            "parse_error_count": 0,
+            "parse_errors": [],
+            "parse_errors_complete": True,
         }
 
     entries: list[dict[str, Any]] = []
+    parse_errors: list[dict[str, str]] = []
+    parse_error_count = 0
     for path in sorted(automations_root.glob("*/automation.toml")):
         try:
             automation = parse_automation_toml(path)
         except OSError:
+            parse_error_reason = "unreadable"
+        except UnicodeError:
+            parse_error_reason = "invalid_utf8"
+        except tomllib.TOMLDecodeError:
+            parse_error_reason = "invalid_toml"
+        else:
+            parse_error_reason = None
+        if parse_error_reason is not None:
+            parse_error_count += 1
+            if len(parse_errors) < _AUTOMATION_PARSE_ERROR_LIMIT:
+                parse_errors.append(
+                    {
+                        "automation_id": path.parent.name,
+                        "reason": parse_error_reason,
+                    }
+                )
             continue
         if automation.get("kind") != "heartbeat":
             continue
@@ -299,7 +302,18 @@ def load_codex_app_automation_manifest(root: Path | None = None) -> dict[str, An
         "path": str(automations_root),
         "entries": entries,
         "source": "codex_app_automations",
-        "reason": None if entries else "no LoopX heartbeat automations discovered",
+        "reason": (
+            None
+            if entries
+            else (
+                "no readable LoopX heartbeat automations discovered"
+                if parse_error_count
+                else "no LoopX heartbeat automations discovered"
+            )
+        ),
+        "parse_error_count": parse_error_count,
+        "parse_errors": parse_errors,
+        "parse_errors_complete": parse_error_count == len(parse_errors),
     }
 
 
@@ -332,7 +346,7 @@ def resolve_codex_app_automation_rrule(
         and str(entry.get("rrule") or "").strip()
     ]
     if len(candidates) != 1:
-        return {
+        result = {
             "available": False,
             "reason": (
                 "Codex App heartbeat RRULE is ambiguous"
@@ -341,6 +355,14 @@ def resolve_codex_app_automation_rrule(
             ),
             "candidate_count": len(candidates),
         }
+        parse_error_count = int(manifest.get("parse_error_count") or 0)
+        if parse_error_count:
+            result["manifest_parse_error_count"] = parse_error_count
+            result["manifest_parse_errors"] = manifest.get("parse_errors") or []
+            result["manifest_parse_errors_complete"] = (
+                manifest.get("parse_errors_complete") is True
+            )
+        return result
     entry = candidates[0]
     return {
         "available": True,
@@ -905,6 +927,9 @@ def build_upgrade_plan(
         "installed_manifest_available": manifest.get("available"),
         "installed_manifest_source": manifest.get("source"),
         "installed_manifest_entry_count": len(manifest_entries),
+        "installed_manifest_parse_error_count": int(
+            manifest.get("parse_error_count") or 0
+        ),
         "installed_manifest_task_body_count": manifest_task_body_count,
         "installed_manifest_has_task_body": manifest_task_body_count > 0,
         "installed_prompt_policy_warning_count": policy_warning_count,
@@ -954,6 +979,7 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
         f"- stage_deferred_goal_count: `{summary.get('stage_deferred_goal_count')}`",
         f"- installed_manifest_source: `{summary.get('installed_manifest_source')}`",
         f"- installed_manifest_entry_count: `{summary.get('installed_manifest_entry_count')}`",
+        f"- installed_manifest_parse_error_count: `{summary.get('installed_manifest_parse_error_count')}`",
         f"- installed_manifest_has_task_body: `{summary.get('installed_manifest_has_task_body')}`",
         f"- installed_prompt_policy_warning_count: `{summary.get('installed_prompt_policy_warning_count')}`",
         f"- installed_prompt_policy_warning_prompt_count: `{summary.get('installed_prompt_policy_warning_prompt_count')}`",
@@ -971,8 +997,17 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
             f"- available: `{manifest.get('available')}`",
             f"- path: `{manifest.get('path')}`",
             f"- reason: `{manifest.get('reason')}`",
+            f"- parse_error_count: `{manifest.get('parse_error_count')}`",
+            f"- parse_errors_complete: `{manifest.get('parse_errors_complete')}`",
         ]
     )
+    for error in manifest.get("parse_errors") or []:
+        if not isinstance(error, dict):
+            continue
+        lines.append(
+            f"- parse_error automation_id=`{error.get('automation_id')}` "
+            f"reason=`{error.get('reason')}`"
+        )
     propagation = (
         payload.get("default_upgrade_propagation")
         if isinstance(payload.get("default_upgrade_propagation"), dict)

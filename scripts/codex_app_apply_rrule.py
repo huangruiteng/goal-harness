@@ -26,6 +26,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -131,9 +132,13 @@ def _heartbeat_task_body(
     body = payload.get("task_body") if isinstance(payload, dict) else None
     if not isinstance(body, str) or not body.strip():
         raise SystemExit("loopx heartbeat-prompt returned no task_body")
-    if '"""' in body:
-        raise SystemExit("loopx heartbeat-prompt task_body contains triple quotes")
     return body
+
+
+def _toml_string(value: str) -> str:
+    """Encode a string in the JSON-compatible subset of TOML basic strings."""
+
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _write_automation_toml(
@@ -148,17 +153,26 @@ def _write_automation_toml(
     path.parent.mkdir(parents=True, exist_ok=True)
     text = (
         "version = 1\n"
-        f'id = "{automation_id}"\n'
+        f"id = {_toml_string(automation_id)}\n"
         'kind = "heartbeat"\n'
-        f'name = "{name}"\n'
-        f'prompt = """{prompt}"""\n'
+        f"name = {_toml_string(name)}\n"
+        f"prompt = {_toml_string(prompt)}\n"
         'status = "ACTIVE"\n'
-        f'rrule = "{rrule}"\n'
-        f'target_thread_id = "{thread_id}"\n'
+        f"rrule = {_toml_string(rrule)}\n"
+        f"target_thread_id = {_toml_string(thread_id)}\n"
         f"created_at = {_now_ms()}\n"
         f"updated_at = {_now_ms()}\n"
     )
     path.write_text(text, encoding="utf-8")
+
+
+def _read_automation_prompt(path: Path) -> str | None:
+    try:
+        automation = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raise SystemExit(f"automation TOML is unreadable or invalid: {path}") from exc
+    prompt = automation.get("prompt")
+    return prompt if isinstance(prompt, str) and prompt.strip() else None
 
 
 def _sqlite_row_exists(db_path: Path, automation_id: str) -> bool:
@@ -287,9 +301,7 @@ def _ensure_automation(
     cwd = str(goal.get("repo") or "")
     name = f"{goal_id} LoopX"
     if toml_path.exists():
-        text = toml_path.read_text(encoding="utf-8")
-        match = re.search(r'prompt = """(.*?)"""', text, re.DOTALL)
-        prompt = match.group(1) if match else _heartbeat_task_body(
+        prompt = _read_automation_prompt(toml_path) or _heartbeat_task_body(
             loopx=loopx,
             registry=registry,
             goal_id=goal_id,
@@ -380,8 +392,9 @@ def _update_toml(toml_path: Path, rrule: str) -> None:
     pattern = re.compile(r'^rrule\s*=\s*".*?"', re.MULTILINE)
     if not pattern.search(text):
         raise SystemExit(f"automation TOML has no rrule field: {toml_path}")
+    replacement = f"rrule = {_toml_string(rrule)}"
     toml_path.write_text(
-        pattern.sub(f'rrule = "{rrule}"', text),
+        pattern.sub(lambda _: replacement, text),
         encoding="utf-8",
     )
 
