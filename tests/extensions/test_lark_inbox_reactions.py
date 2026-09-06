@@ -1009,13 +1009,18 @@ def test_bot_mention_rejects_ambiguous_app_id_mapping(tmp_path: Path) -> None:
     config, _, project = _fixture(tmp_path, lifecycle=False)
     runner = ReplyRunner(
         member_bucket="bots",
-        readback_text="@_user_1 please review",
+        readback_text="@_user_1 and @_user_2 please review",
         readback_mentions=[
             {
                 "key": "@_user_1",
                 "name": "Public Reviewer",
                 "id": "cli_public_reviewer",
-            }
+            },
+            {
+                "key": "@_user_2",
+                "name": "Other Reviewer",
+                "id": "cli_public_reviewer",
+            },
         ],
     )
 
@@ -1026,7 +1031,7 @@ def test_bot_mention_rejects_ambiguous_app_id_mapping(tmp_path: Path) -> None:
             payload["data"]["bots"].append(
                 {
                     "app_id": "cli_public_reviewer",
-                    "member_id": "ou_someone_else",
+                    "member_id": "ou_other_reviewer",
                 }
             )
             result["stdout"] = json.dumps(payload)
@@ -1035,12 +1040,78 @@ def test_bot_mention_rejects_ambiguous_app_id_mapping(tmp_path: Path) -> None:
     result = send_lark_inbox_message(
         project=project,
         config_path=config,
-        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        text=(
+            '<at open_id="ou_public_reviewer">Public Reviewer</at> and '
+            '<at open_id="ou_other_reviewer">Other Reviewer</at> please review'
+        ),
         execute=True,
         runner=ambiguous_runner,
     )
     assert result["status"] == "sent_unverified"
     assert result["reply_verified"] is False
+
+
+def test_bot_alias_is_scoped_to_its_declared_identity_kind(tmp_path: Path) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="@_user_1 please review with @_user_2",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Review Bot",
+                "id": "cli_review_bot",
+            },
+            {
+                "key": "@_user_2",
+                "name": "Human Reviewer",
+                "id": {"user_id": "u_human_reviewer"},
+            },
+        ],
+    )
+
+    def mixed_identity_runner(args: Sequence[str]) -> dict[str, Any]:
+        if "+chat-members-list" not in args:
+            return runner(args)
+        runner.calls.append(list(args))
+        identity_kind = args[args.index("--member-id-type") + 1]
+        member_data = {
+            "open_id": {
+                "users": [],
+                "bots": [
+                    {"app_id": "cli_review_bot", "member_id": "ou_review_bot"}
+                ],
+            },
+            "user_id": {
+                "users": [{"member_id": "u_human_reviewer"}],
+                "bots": [
+                    {"app_id": "cli_review_bot", "member_id": "u_review_bot"}
+                ],
+            },
+        }
+        return {
+            "returncode": 0,
+            "stdout": json.dumps({"ok": True, "data": member_data[identity_kind]}),
+            "stderr": "",
+        }
+
+    result = send_lark_inbox_message(
+        project=project,
+        config_path=config,
+        text=(
+            '<at open_id="ou_review_bot">Review Bot</at> please review with '
+            '<at user_id="u_human_reviewer">Human Reviewer</at>'
+        ),
+        execute=True,
+        runner=mixed_identity_runner,
+    )
+
+    assert result["status"] == "sent_verified"
+    assert result["reply_verified"] is True
+    assert {
+        call[call.index("--member-id-type") + 1]
+        for call in runner.calls
+        if "+chat-members-list" in call
+    } == {"open_id", "user_id"}
 
 
 def test_plain_reply_rejects_unexpected_provider_mention(tmp_path: Path) -> None:

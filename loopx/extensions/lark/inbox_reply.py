@@ -280,6 +280,11 @@ def _deliver_lark_inbox_outbound(
         member_identity_sets: dict[str, set[str]] = {}
         membership_failed = False
         for identity_kind in sorted(set(expected_mentions.values())):
+            expected_identities = {
+                identity
+                for identity, declared_kind in expected_mentions.items()
+                if declared_kind == identity_kind
+            }
             members = _call(
                 runner,
                 base
@@ -312,7 +317,12 @@ def _deliver_lark_inbox_outbound(
                 if not isinstance(member, Mapping):
                     continue
                 app_id, member_id = member.get("app_id"), member.get("member_id")
-                if isinstance(app_id, str) and app_id and isinstance(member_id, str):
+                if (
+                    isinstance(app_id, str)
+                    and app_id
+                    and isinstance(member_id, str)
+                    and member_id in expected_identities
+                ):
                     bot_alias_candidates.setdefault(app_id, set()).add(member_id)
         if membership_failed or any(
             identity not in member_identity_sets.get(identity_kind, set())
@@ -482,7 +492,7 @@ def _deliver_lark_inbox_outbound(
             outbound_text=reply_text,
             message=readback_message,
             # mget may report a bot's app_id instead of its member_id. Only
-            # accept an unambiguous mapping from this chat's verified bot bucket.
+            # accept an unambiguous mapping verified for the mention's declared kind.
             verified_bot_aliases={
                 app_id: next(iter(identities))
                 for app_id, identities in bot_alias_candidates.items()
