@@ -196,6 +196,7 @@ impl ServiceSet {
         }
 
         let mut command = Command::new(&executable);
+        configure_runtime_environment(&mut command);
         command
             .args(kind.command_args())
             .stdin(Stdio::null())
@@ -540,6 +541,43 @@ pub(crate) fn loopx_executable() -> String {
         .or_else(|| resolve_executable_path("loopx", env::var_os("PATH").as_deref()))
         .map(|candidate| candidate.to_string_lossy().into_owned())
         .unwrap_or_else(|| "loopx".to_string())
+}
+
+// Finder/launchd do not load a user's interactive shell profile. Use the same
+// bounded tool search for installation and owned services, without sourcing
+// arbitrary shell startup files or changing the parent process environment.
+pub(crate) fn configure_runtime_environment(command: &mut Command) {
+    command.env(
+        "PATH",
+        runtime_search_path(env::var_os("HOME"), env::var_os("PATH")),
+    );
+}
+
+fn runtime_search_path(
+    home: Option<std::ffi::OsString>,
+    inherited: Option<std::ffi::OsString>,
+) -> std::ffi::OsString {
+    let mut paths = Vec::new();
+    if let Some(home) = home {
+        paths.push(PathBuf::from(home).join(".local/bin"));
+    }
+    if cfg!(target_os = "macos") {
+        paths.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ]);
+    }
+    for path in inherited
+        .as_deref()
+        .map(env::split_paths)
+        .into_iter()
+        .flatten()
+    {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    env::join_paths(paths).unwrap_or_else(|_| inherited.unwrap_or_default())
 }
 
 fn resolve_executable_path(executable: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {

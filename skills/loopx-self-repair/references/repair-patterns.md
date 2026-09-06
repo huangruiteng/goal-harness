@@ -194,6 +194,16 @@ teaches a reusable control-plane lesson.
 
 ## Minimal Evidence Packet
 
+Desktop runtime preparation failures must remain inside the live startup
+supervisor. Compare the App's bundled revision, selected CLI revision and
+listener identities independently; a working terminal CLI is not proof of a
+working Finder launch. Reproduce installer validation with Finder's minimal
+PATH and isolated install/registry/runtime directories. Use a shared bounded
+tool search for installer and child services, retain exact revision checks,
+bound automatic installation retries, and prove failed preparation followed by
+repair reaches service startup without recreating the App process. Only an App
+binary replacement requires restart; runtime repair resumes the same window.
+
 For most repairs, capture:
 
 ```text

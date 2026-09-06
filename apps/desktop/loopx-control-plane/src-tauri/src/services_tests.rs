@@ -1,5 +1,30 @@
 use super::*;
 
+#[test]
+#[cfg(target_os = "macos")]
+fn finder_runtime_path_includes_tools_without_loading_shell_profiles() {
+    let path = runtime_search_path(
+        Some("/fixture/user".into()),
+        Some("/usr/bin:/bin:/usr/sbin:/sbin".into()),
+    );
+    let paths: Vec<_> = env::split_paths(&path).collect();
+    assert_eq!(paths[0], PathBuf::from("/fixture/user/.local/bin"));
+    assert!(
+        paths
+            .iter()
+            .position(|p| p == Path::new("/opt/homebrew/bin"))
+            .unwrap()
+            < paths
+                .iter()
+                .position(|p| p == Path::new("/usr/bin"))
+                .unwrap()
+    );
+    assert!(paths.contains(&PathBuf::from("/usr/local/bin")));
+    assert!(paths.contains(&PathBuf::from("/sbin")));
+    let again = runtime_search_path(Some("/fixture/user".into()), Some(path.clone()));
+    assert_eq!(again, path, "tool search must be idempotent");
+}
+
 #[cfg(not(windows))]
 fn spawn_listener_fixture(
     executable: &Path,
