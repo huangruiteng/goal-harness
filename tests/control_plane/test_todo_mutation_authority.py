@@ -12,6 +12,7 @@ from loopx.control_plane.scheduler.monitor_poll_writeback import (
 from loopx.control_plane.todos.event_writeback import (
     complete_event_projected_goal_todo,
 )
+import loopx.control_plane.todos.mutation_authority as mutation_authority_module
 import loopx.control_plane.work_items.task_lease as task_lease_module
 from loopx.control_plane.work_items.task_lease import (
     TaskLeaseError,
@@ -360,6 +361,197 @@ def test_owner_actor_update_returns_typed_receipt(tmp_path: Path) -> None:
         "registered_agent_count": 3,
     }
     assert _agent_todo(state, todo["todo_id"])["note"] == "owner-attributed update"
+
+
+@pytest.mark.parametrize("status", ["deferred", "blocked", "done"])
+def test_claim_rejection_preserves_status_suffix(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    """Claim rejections keep the legacy todo_id/status diagnostic suffix."""
+
+    registry, state = _write_fixture(tmp_path)
+    if status == "deferred":
+        todo = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="Wait for external capacity before claim.",
+            status="deferred",
+            resume_when="capacity_available:network",
+        )
+    else:
+        todo = _add_agent_todo(registry)
+        if status == "done":
+            complete_goal_todo(
+                registry_path=registry,
+                goal_id=GOAL_ID,
+                todo_id=todo["todo_id"],
+                agent_id=AUTHOR_AGENT,
+                evidence="finished before the contested claim",
+            )
+        else:
+            update_goal_todo(
+                registry_path=registry,
+                goal_id=GOAL_ID,
+                todo_id=todo["todo_id"],
+                agent_id=AUTHOR_AGENT,
+                status=status,
+            )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claim_only=True,
+            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
+        )
+
+    assert str(excinfo.value) == (
+        f"todo claim requires status=open; todo_id '{todo['todo_id']}' "
+        f"is status='{status}'"
+    )
+    assert state.read_text(encoding="utf-8") == before
+
+
+def test_claim_user_todo_rejection_preserves_binding_hint(
+    tmp_path: Path,
+) -> None:
+    """Claiming a user Todo keeps the legacy --bound-agent remediation hint."""
+
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Owner reviews the delivered change.",
+        task_class="user_action",
+        bound_agent=AUTHOR_AGENT,
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claim_only=True,
+            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
+        )
+
+    assert str(excinfo.value) == (
+        "claimed_by is execution ownership for agent todos, not a user-todo "
+        "binding; use --bound-agent or --goal-bound"
+    )
+    assert state.read_text(encoding="utf-8") == before
+
+
+def test_claim_rejection_preserves_removed_policy_repair_hint(
+    tmp_path: Path,
+) -> None:
+    """Claiming a removed-policy Todo keeps the legacy repair instructions."""
+
+    registry, state = _write_fixture(tmp_path)
+    todo = _add_agent_todo(registry, claimed_by=None)
+    text = state.read_text(encoding="utf-8")
+    marker = f"todo_id={todo['todo_id']} "
+    assert marker in text
+    state.write_text(
+        text.replace(
+            marker,
+            f"{marker}removed_continuation_policy=primary_review ",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claim_only=True,
+            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
+        )
+
+    assert str(excinfo.value) == (
+        f"todo_id '{todo['todo_id']}' uses removed continuation_policy="
+        "primary_review; repair it before claiming"
+    )
+    assert state.read_text(encoding="utf-8") == before
+
+
+def test_claim_archived_todo_rejection_preserves_not_found_message(
+    tmp_path: Path,
+) -> None:
+    """Archived-Todo claim rejections keep the legacy not-found message."""
+
+    registry, _state = _write_fixture(tmp_path)
+
+    with pytest.raises(ValueError) as excinfo:
+        mutation_authority_module.authorize_todo_lifecycle_mutation(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            command="claim",
+            todo={
+                "todo_id": "todo_archivedprobe",
+                "role": "agent",
+                "status": "open",
+                "archive_state": "archive",
+            },
+            actor_agent_id=AUTHOR_AGENT,
+            requested_claimed_by=AUTHOR_AGENT,
+        )
+
+    assert str(excinfo.value) == (
+        "todo_id 'todo_archivedprobe' was not found in active user or agent todos"
+    )
+
+
+def test_claim_role_mismatch_rejection_preserves_not_found_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Role-mismatch claim rejections keep the legacy not-found message."""
+
+    registry, _state = _write_fixture(tmp_path)
+
+    def fake_typescript_decision(_command: str, _payload: dict) -> dict:
+        return {
+            "status": "rejected",
+            "reason_code": "todo_role_mismatch",
+            "reason": "Todo does not have the requested role",
+        }
+
+    monkeypatch.setattr(
+        mutation_authority_module,
+        "effect_runtime_result",
+        fake_typescript_decision,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        mutation_authority_module.authorize_todo_lifecycle_mutation(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            command="claim",
+            todo={
+                "todo_id": "todo_rolemismatchprobe",
+                "role": "agent",
+                "status": "open",
+            },
+            actor_agent_id=AUTHOR_AGENT,
+            requested_claimed_by=AUTHOR_AGENT,
+        )
+
+    assert str(excinfo.value) == (
+        "todo_id 'todo_rolemismatchprobe' was not found in active user or agent todos"
+    )
 
 
 def test_advancement_todo_preserves_public_target_key(tmp_path: Path) -> None:
