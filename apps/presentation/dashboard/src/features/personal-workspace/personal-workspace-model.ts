@@ -63,6 +63,7 @@ export type WorkspaceGoalSubagentConfiguration = {
 };
 
 export type WorkspaceGoal = {
+  loadState?: "loading" | "error";
   activationState: "active" | "stopped";
   agentId: string;
   agentLanes?: Array<{

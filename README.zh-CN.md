@@ -2,19 +2,17 @@
 
 <h1 align="center">LoopX</h1>
 
-<img src="docs/assets/loopx-social-preview.png" alt="LoopX Loop Engineering 展示图" width="560">
+<img src="docs/assets/loopx-social-preview.png" alt="LoopX Loop Engineering 展示图" width="420">
 
 **面向长程 Agent 的开放、有状态、Provider-neutral 控制面。**
 
-<sub>LoopX 运行在任何 agent harness 之上，提供长程状态、语义决策、治理、恢复与人机协同；目标、gate、todo、证据、quota 和交接跨轮次保持稳定，有界执行仍由 harness 负责。</sub>
+<sub>在 Codex、Claude Code、Cursor 等 agent harness 之上，持久保存目标、gate、todo、证据、quota 与交接状态。LoopX 负责跨轮次的状态与执行边界，harness 负责有界执行。</sub>
 
 <a href="https://trendshift.io/repositories/102379?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-102379"><img src="https://trendshift.io/api/badge/repositories/102379" alt="huangruiteng/loopx 在 Trendshift 的趋势排名" width="220" height="48"></a>
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20active-brightgreen.svg)](docs/product/release-readiness.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?filter=v*&display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20active-brightgreen.svg)](docs/product/release-readiness.md)
 
 [产品首页](https://huangruiteng.github.io/loopx/) · [文档](https://huangruiteng.github.io/loopx/docs/) · [开发者手册](https://huangruiteng.github.io/loopx/docs/book/) · [试用 LoopX](#试用-loopx) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
-
-**把会干活的 Agent，接成可管理、可复盘、可持续改进的数字员工。**
 
 </div>
 
@@ -36,16 +34,19 @@ LoopX 是开放且 Provider-neutral 的轻量 state kernel，也是 local-first
 ## 认识个人 Agent 工作区
 
 把长程目标收进同一个 local-first 工作区。Goal、待关注事项、对话、任务、
-文件、定时计划与恢复状态跨天数、跨重启、跨 harness 保持持久，上周开始的工作
-会从上一次有界 Turn 停止的地方精确恢复，而不是活在聊天记忆里。
+文件、定时计划与恢复状态跨天数、跨重启、跨 harness 保持持久。重新打开项目时，
+可以检查上一轮的状态与证据，再继续下一项允许执行的工作。
 
 <a href="docs/assets/personal-workspace/loopx-dashboard-launch.mp4">
-  <img src="docs/assets/personal-workspace/loopx-dashboard-tour.webp" alt="LoopX 个人 Agent 工作区动画导览：从一键启动，到管家总览、Goal 任务看板、受保护操作预览和 Goal 详情" width="960">
+  <img src="docs/assets/personal-workspace/workspace-1.0.webp" alt="LoopX 工作区：用户决策、Agent 任务、持续监控与完成记录" width="960">
 </a>
 
-你可以在一个页面中：
+LoopX 1.0 将这些长程控制状态汇入 Personal Workspace。你可以在一个页面中：
 
 - 看清哪些事项正在等你、执行中、观察中、已安排或已停止；
+- 配置 Goal 的 Capability，区分机器默认值与 Goal 覆盖，预览变更后再应用；
+- 从关联的飞书会话进行实时 steering、消息排队或异步收件，不丢失 Goal/Agent/Session 路由；
+- 查看交付文件、周期报告与关联证据；
 - 在 Codex、Claude Code、direct-model 等已注册 Agent 会话之间延续工作，
   不丢失 Goal 状态与证据；
 - 通过 typed preview、显式确认与 receipt 审阅受保护变更；浏览器只负责投影，
@@ -55,18 +56,18 @@ LoopX 是开放且 Provider-neutral 的轻量 state kernel，也是 local-first
 loopx dashboard
 ```
 
-`loopx dashboard` 是受支持的浏览器 / PWA 启动方式。若希望使用原生窗口，
-可从源码运行实验性 Tauri shell；它复用同一组 loopback status 与 Chat 服务，
-不会成为新的状态权威：
+`loopx dashboard` 是受支持的浏览器 / PWA 启动方式。也可从
+[1.0 Release](https://github.com/huangruiteng/loopx/releases/tag/v1.0.0) 下载桌面预览版，
+复用同一组 loopback 服务与 Goal 状态。Apple Silicon macOS 支持签名 App 更新，
+将桌面壳与内置运行时配套升级，并提供修复与恢复入口；需要 Python 3.11+，
+App 为 ad-hoc 签名，尚未 notarize。Windows 预览版目前手动更新，需单独安装 CLI。
+[桌面安装、更新与源码开发指南](apps/desktop/loopx-control-plane/README.md)。
 
-```bash
-cd apps/desktop/loopx-control-plane
-npm install
-npm run dev
-```
+<img src="docs/assets/personal-workspace/capability-1.0.webp" alt="工作区实录：配置子任务数量上限与允许的职责范围" width="960">
 
-[阅读桌面 shell 指南](apps/desktop/loopx-control-plane/README.md)。关闭窗口时，
-shell 只停止由自己启动的服务进程；已有 LoopX 服务与持久化 Goal 状态不会受影响。
+在源码 checkout 中运行 `python -m demo.workspace serve`，可探索社区活动、家庭能源比较
+和社区网站发布三个复杂项目；每个项目有四个工作角色、18 项任务、两项决策与两项观察。
+上图来自这份可复现工作区。[场景与回放说明](demo/workspace/README.md)。
 
 [观看 32 秒完整演示](docs/assets/personal-workspace/loopx-dashboard-launch.mp4)
 · [阅读工作区指南](docs/guides/personal-workspace-user-guide.md)
@@ -128,19 +129,17 @@ LoopX 不是生产自动化控制器。危险权限、生产写入、公开发�
 
 ## 证据
 
-这些不是单轮 demo。OpenViking 的公开贡献序列与经过脱敏的 owner-run Auto ML
-showcase 各自跨越 **200+ 小时自然时长**，持续保留多轮 todo、决策和证据更新。
-这里的自然时长是项目从启动到最新证据的 wall-clock 时间。
-不等于 200 小时连续模型执行，也不代表无人值守的生产自治。点击原图可以检查
-public-safe graph、
-证据分支和跨轮决策。
+OpenViking 的公开贡献序列与脱敏的 owner-run Auto ML showcase 各自跨越
+**200+ 小时自然时长**，保留多轮 Todo、决策和证据更新。这里衡量的是项目经过的
+wall-clock 时间，不是连续模型执行时长或无人值守的生产自治。点击原图查看
+公开安全的任务图、证据分支和跨轮决策；各案例分别说明来源与可复现边界。
 
 ### 开源 Issue Fix
 
 **超过 200 小时的公开贡献轨迹：Focused PR 交付与可复用修复知识互相反哺。**
 
 <a href="docs/assets/long-running-loop-openviking-trajectory.png">
-  <img src="docs/assets/long-running-loop-openviking-trajectory.png" alt="开源 Issue Fix 轨迹：连接 Focused PR 交付与 LoopX 通用能力沉淀" width="420">
+  <img src="docs/assets/long-running-loop-openviking-trajectory.png" alt="开源 Issue Fix 轨迹：连接 Focused PR 交付与 LoopX 通用能力沉淀" width="760">
 </a>
 
 LoopX 的创建者以
@@ -208,9 +207,10 @@ creator dogfooding、reproducible demo 和证据强度标签见
 
 ## 试用 LoopX
 
-要求：Python 3.11+。使用 console scripts 已加入 `PATH` 的 Python 环境；macOS
-和 Linux 使用 POSIX shell，原生 Windows 使用 PowerShell 7。普通用户不需要
-Git，package 除标准库外没有 runtime 依赖。
+要求：Python 3.11+ 与 Node.js 22.6+。使用 console scripts 已加入 `PATH` 的
+Python 环境；macOS 和 Linux 使用 POSIX shell，原生 Windows 使用 PowerShell 7。
+Node.js 运行 LoopX 自动启动、空闲退出的 TypeScript Effect core，无需手工维护 daemon。
+Git 仅用于源码贡献与 clone/canary 工作流。
 
 无需 clone，直接从 PyPI 安装：
 

@@ -2,19 +2,17 @@
 
 <h1 align="center">LoopX</h1>
 
-<img src="docs/assets/loopx-social-preview.png" alt="LoopX loop engineering social preview banner" width="560">
+<img src="docs/assets/loopx-social-preview.png" alt="LoopX loop engineering social preview banner" width="420">
 
 **The open, provider-neutral, stateful control plane for long-horizon agents.**
 
-<sub>Runs on top of any agent harness — Codex App, Claude Code, Cursor, dsh, or your own — providing long-horizon state, semantic decisions, governance, recovery, and human-agent collaboration. Objectives, gates, todos, evidence, quota, and handoffs stay stable while the harness executes bounded turns.</sub>
+<sub>Runs on top of Codex, Claude Code, Cursor, and other agent harnesses. LoopX preserves objectives, gates, todos, evidence, quota, and handoffs across turns; the harness executes bounded work.</sub>
 
 <a href="https://trendshift.io/repositories/102379?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-102379"><img src="https://trendshift.io/api/badge/repositories/102379" alt="huangruiteng/loopx on Trendshift" width="220" height="48"></a>
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20active-brightgreen.svg)](docs/product/release-readiness.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?filter=v*&display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20active-brightgreen.svg)](docs/product/release-readiness.md)
 
 [Public website](https://huangruiteng.github.io/loopx/) · [Docs](https://huangruiteng.github.io/loopx/docs/) · [Developer Book](https://huangruiteng.github.io/loopx/docs/book/) · [Try LoopX](#try-loopx) · [See real loops](#evidence) · [How it works](#why-loopx) · [User manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [简体中文](README.zh-CN.md)
-
-**把会干活的 Agent，接成可管理、可复盘、可持续改进的数字员工。**
 
 </div>
 
@@ -41,17 +39,22 @@ to hand off across turns, tools, and agents.
 
 Keep long-horizon goals in one local-first workspace. Goals, attention,
 conversations, tasks, files, schedules, and recovery stay durable across days,
-restarts, and harnesses, so work that began last week resumes exactly where
-the last bounded turn stopped instead of living in chat memory.
+restarts, and harnesses. Reopen a project, inspect the previous turn’s state
+and evidence, and continue the next permitted action.
 
 <a href="docs/assets/personal-workspace/loopx-dashboard-launch.mp4">
-  <img src="docs/assets/personal-workspace/loopx-dashboard-tour.webp" alt="Animated tour of the LoopX personal Agent workspace, from one-command launch to Manager overview, Goal task board, protected action preview, and Goal details" width="960">
+  <img src="docs/assets/personal-workspace/workspace-1.0.webp" alt="LoopX Workspace: owner decisions, Agent tasks, scheduled watches and completed work" width="960">
 </a>
 
-The workspace gives you one place to:
+LoopX 1.0 brings these long-horizon control states into the Personal Workspace. It gives you one place to:
 
 - see what needs you, what is running, what is being watched, and what is
   scheduled or stopped;
+- configure Goal capabilities, distinguish machine defaults from Goal overrides,
+  and preview changes before applying them;
+- steer a live turn, queue a message, or use the async inbox from a connected
+  Lark conversation with explicit Goal/Agent/session routing;
+- inspect deliverable files, periodic reports, and their supporting evidence;
 - continue across Codex, Claude Code, direct-model, and other registered Agent
   sessions without losing Goal state or evidence;
 - review protected changes through typed preview, explicit confirmation, and
@@ -61,22 +64,20 @@ The workspace gives you one place to:
 loopx dashboard
 ```
 
-`loopx dashboard` is the supported browser/PWA launch path. For a native
-window, the experimental source-built Tauri shell reuses the same loopback
-status and Chat services without becoming another state authority:
+`loopx dashboard` is the supported browser/PWA launch path. You can also download
+native desktop previews from the [1.0 release](https://github.com/huangruiteng/loopx/releases/tag/v1.0.0);
+they reuse the same loopback services and Goal state. Apple Silicon macOS supports
+signed App updates that pair the shell with its bundled runtime, plus repair and
+recovery. Python 3.11+ is required; the App is ad-hoc signed, not notarized.
+Windows preview installers currently use manual updates and a separately installed CLI.
+[Desktop installation, updates, and source development](apps/desktop/loopx-control-plane/README.md).
 
-```bash
-cd apps/desktop/loopx-control-plane
-npm install
-npm run dev
-```
+<img src="docs/assets/personal-workspace/capability-1.0.webp" alt="Real Workspace recording: configure child-task capacity and allowed responsibility domains" width="960">
 
-[Read the desktop shell guide](apps/desktop/loopx-control-plane/README.md).
-Closing the window stops only the service processes that the shell started;
-existing LoopX services and durable Goal state remain intact. Both entry
-points share the same loopback services and can be started in either order:
-`loopx dashboard` reuses an already-running LoopX Chat service instead of
-starting a second one.
+From a source checkout, run `python -m demo.workspace serve` to explore a community
+event, a home-energy comparison, and a neighborhood website release. Each has four
+work roles, 18 tasks, two decisions, and two watches. The screenshot above comes
+from this reproducible workspace. [Scenarios and replay instructions](demo/workspace/README.md).
 
 [Watch the full 32-second walkthrough](docs/assets/personal-workspace/loopx-dashboard-launch.mp4)
 · [Read the workspace guide](docs/guides/personal-workspace-user-guide.md)
@@ -143,14 +144,12 @@ publishing, production writes, and final ownership stay with the human.
 
 ## Evidence
 
-These are not one-turn demos. The public OpenViking contribution sequence and
-the redacted, owner-run Auto ML showcase each span
-**200+ hours of elapsed loop lifetime** across many bounded turns, decisions,
-and evidence updates. Elapsed lifetime is wall-clock project time. It is
-not 200 hours of continuous model execution or a claim of unattended
-production autonomy. Open each visual to
-inspect the public-safe graph, evidence branches, and decisions preserved
-across turns.
+The public OpenViking contribution sequence and the redacted, owner-run
+Auto ML showcase each span **200+ hours of elapsed loop lifetime**, preserving
+bounded turns, decisions, and evidence updates. This measures wall-clock project
+time, not continuous model execution or unattended production autonomy. Open
+each visual to inspect the public-safe task graph, evidence branches, and
+cross-turn decisions; each case states its source and reproducibility boundary.
 
 ### Open-Source Issue Fix
 
@@ -158,7 +157,7 @@ across turns.
 evolve together.**
 
 <a href="docs/assets/long-running-loop-openviking-trajectory.png">
-  <img src="docs/assets/long-running-loop-openviking-trajectory.png" alt="Open-source issue-fix trajectory linking focused PR delivery with reusable LoopX capabilities" width="420">
+  <img src="docs/assets/long-running-loop-openviking-trajectory.png" alt="Open-source issue-fix trajectory linking focused PR delivery with reusable LoopX capabilities" width="760">
 </a>
 
 LoopX's creator uses this path as an
@@ -234,10 +233,11 @@ More inspectable surfaces:
 
 ## Try LoopX
 
-Requirements: Python 3.11+. Use an active Python environment whose console
-scripts are on `PATH`; macOS and Linux use a POSIX shell, while native Windows
-uses PowerShell 7. Git is only needed for contributor clone/canary workflows.
-The package has no runtime dependencies outside the standard library.
+Requirements: Python 3.11+ and Node.js 22.6+. Use an active Python environment
+whose console scripts are on `PATH`; macOS and Linux use a POSIX shell, while
+native Windows uses PowerShell 7. Node.js runs the managed, idle-exiting
+TypeScript Effect core; LoopX starts it automatically. Git is only needed for
+contributor clone/canary workflows.
 
 Install from PyPI without cloning:
 
