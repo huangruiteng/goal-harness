@@ -17,6 +17,7 @@ pub struct Maintenance {
     supervision: tauri::async_runtime::Mutex<()>,
     snapshot: Mutex<Value>,
     pending: Mutex<Option<(String, Update)>>,
+    last_failure: Mutex<Value>,
 }
 impl Maintenance {
     fn acquire(&self) -> Result<BusyGuard<'_>, String> {
@@ -27,6 +28,9 @@ impl Maintenance {
     }
     fn publish(&self, phase: &str, details: Value) -> Value {
         let value = json!({"phase": phase, "details": details});
+        if matches!(phase, "error" | "runtime_required" | "service_error") {
+            *self.last_failure.lock().unwrap() = value.clone();
+        }
         *self.snapshot.lock().unwrap() = value.clone();
         value
     }
@@ -107,7 +111,9 @@ fn check_error(error: tauri_plugin_updater::Error) -> &'static str {
 }
 #[tauri::command]
 pub fn desktop_update_status(app: AppHandle, state: State<'_, Maintenance>) -> Value {
-    json!({"state": state.snapshot.lock().unwrap().clone(), "app_version": app.package_info().version.to_string(), "runtime": bundled_runtime::identity(&app).ok(), "rollback_available": crate::update_backup::available(&app)})
+    let snapshot = state.snapshot.lock().unwrap().clone();
+    let last_failure = state.last_failure.lock().unwrap().clone();
+    json!({"state": snapshot, "last_failure": last_failure, "app_version": app.package_info().version.to_string(), "runtime": bundled_runtime::identity(&app).ok(), "rollback_available": crate::update_backup::available(&app)})
 }
 #[tauri::command]
 pub async fn desktop_update(
@@ -247,6 +253,17 @@ async fn perform(
     Ok(state.publish("restart_required", json!({"version":target})))
 }
 pub fn resume(app: &AppHandle) -> Result<(), String> {
+    let result = resume_runtime(app);
+    if let Err(error) = &result {
+        if error != "runtime_setup_required" {
+            app.state::<Maintenance>()
+                .publish("error", json!({"code":error}));
+        }
+    }
+    result
+}
+
+fn resume_runtime(app: &AppHandle) -> Result<(), String> {
     // Development intentionally pairs a live frontend with a developer-selected
     // runtime; it must neither replace itself nor force release installation.
     if cfg!(dev) || !cfg!(target_os = "macos") {
@@ -263,7 +280,14 @@ pub fn resume(app: &AppHandle) -> Result<(), String> {
             if installed.as_ref().map(|v| &v["source_revision"])
                 != Some(&bundled["source_revision"])
             {
-                state.publish("runtime_required", json!({}));
+                state.publish(
+                    "runtime_required",
+                    json!({
+                        "code":"runtime_setup_required",
+                        "installed_identity_available": installed.is_some(),
+                        "revision_matches": false
+                    }),
+                );
                 return Err("runtime_setup_required".into());
             }
         }
@@ -290,6 +314,16 @@ pub fn start_services(app: &AppHandle) -> Result<Option<crate::services::Service
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagnostics_retain_failure_after_successful_update_check() {
+        let state = Maintenance::default();
+        let failure = state.publish("error", json!({"code":"runtime_install_exit_23"}));
+        state.publish("checking", json!({}));
+        state.publish("up_to_date", json!({}));
+        assert_eq!(*state.last_failure.lock().unwrap(), failure);
+        let next = state.publish("runtime_required", json!({"code":"runtime_setup_required"}));
+        assert_eq!(*state.last_failure.lock().unwrap(), next);
+    }
     #[test]
     fn check_failures_preserve_actionable_categories_without_diagnostics() {
         use tauri_plugin_updater::Error;

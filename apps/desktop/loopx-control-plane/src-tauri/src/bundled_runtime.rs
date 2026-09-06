@@ -153,7 +153,13 @@ fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
                         Err("runtime_identity_mismatch".into())
                     }
                 } else {
-                    Err("runtime_install_failed".into())
+                    Err(format!(
+                        "runtime_install_exit_{}",
+                        status
+                            .code()
+                            .map(|code| code.to_string())
+                            .unwrap_or_else(|| "signal".into())
+                    ))
                 }
             }
             Ok(None) if started.elapsed() < Duration::from_secs(600) => {

@@ -10,6 +10,7 @@ summary { cursor: pointer; padding: 10px 0; }
 button, select { min-height: 44px; padding: 8px 12px; margin-top: 8px; border: 1px solid #8f8f8f; border-radius: 6px; font: inherit; color: inherit; background: transparent; }
 label { display: block; margin-top: 12px; }
 button { cursor: pointer; }
+textarea { width: 100%; margin-top: 12px; padding: 12px; border: 1px solid #8f8f8f; border-radius: 6px; background: transparent; color: inherit; font: 12px/1.5 "Geist Mono", monospace; resize: vertical; }
 button:disabled { cursor: wait; opacity: .6; }
 :focus-visible { outline: 2px solid #0070f3; outline-offset: 2px; }
 p { margin: 16px 0 0; color: #4d4d4d; font-size: 14px; line-height: 1.55; }
