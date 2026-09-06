@@ -982,6 +982,10 @@ def test_dashboard_command_in_installed_mode_resolves_packaged_web_bundle(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "loopx.dashboard_launcher._probe_existing_chat",
+        lambda *args, **kwargs: "unavailable",
+    )
     served: list[dict[str, object]] = []
 
     monkeypatch.setattr(

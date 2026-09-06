@@ -203,7 +203,7 @@ assert "loopx.cli" not in sys.modules
 		(["diagnose", "--help"], "loopx.cli_commands.status_registration", "loopx.cli_commands.status"),
 		(["review-packet", "--help"], "loopx.cli_commands.status_registration", "loopx.cli_commands.status"),
 		(["quota", "--help"], "loopx.cli_commands.quota_registration", "loopx.cli_commands.quota"),
-		(["todo", "--help"], "loopx.cli_commands.todo", "loopx.cli_commands.todo"),
+		(["todo", "--help"], "loopx.cli_commands.todo_registration", "loopx.cli_commands.todo"),
 	],
 )
 def test_common_command_help_loads_only_its_owner(

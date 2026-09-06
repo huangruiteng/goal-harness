@@ -29,9 +29,15 @@ try {
   const calls = [];
   let nativeState = null;
   let failUpdate = false;
+  let checkFailure = null;
+  let statusFailure = false;
   await page.exposeFunction("nativeInvoke", async (command, args) => {
-    if (command === "desktop_update_status") return { state: nativeState, app_version: "0.5.4", rollback_available: true };
+    if (command === "desktop_update_status") {
+      if (statusFailure) throw new Error("Command desktop_update_status not allowed by ACL");
+      return { state: nativeState, app_version: "0.5.4", rollback_available: true };
+    }
     calls.push({ command, args });
+    if (checkFailure && args.action === "check") return { phase: "error", details: { code: checkFailure } };
     if (failUpdate) throw new Error("private diagnostic must not be displayed");
     await new Promise((done) => setTimeout(done, 150));
     nativeState = { phase: args.action === "check" ? "available" : "restart_required", details: { version: "0.5.5", channel: args.channel } };
@@ -66,7 +72,7 @@ try {
   await page.reload();
   await page.getByRole("button", { name: "有可用更新" }).click();
   await page.getByRole("button", { name: "更新并准备重启", exact: true }).click();
-  await page.getByText("更新未完成。请检查网络后重试；启动失败可尝试修复当前版本。").waitFor();
+  await page.getByText("更新未完成。请重试；启动失败可尝试修复当前版本。").waitFor();
   assert.ok(!(await page.locator("body").innerText()).includes("private diagnostic"));
   assert.equal(await page.getByRole("button", { name: "更新并准备重启", exact: true }).count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -74,6 +80,23 @@ try {
   await page.getByRole("button", { name: "更新需重试" }).waitFor({ state: "visible" });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: resolve(output, "update-mobile.png") });
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  statusFailure = true;
+  await page.reload();
+  await page.getByRole("button", { name: "更新需重试" }).click();
+  await page.getByText("无法读取 App 更新状态。请重启 App 后再试；若仍失败，请重新安装最新 App。").waitFor();
+  assert.ok(!(await page.locator("body").innerText()).includes("not allowed by ACL"));
+  statusFailure = false;
+  failUpdate = false;
+  checkFailure = "update_feed_unavailable";
+  await page.getByRole("button", { name: "检查更新", exact: true }).click();
+  await page.getByText("此通道的更新源尚未就绪或暂时不可用。可稍后重新检查，当前版本仍可继续使用。").waitFor();
+  await page.getByText("0.5.4 · 稳定版", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "更新并准备重启", exact: true }).count(), 0);
+  checkFailure = null;
+  await page.getByRole("button", { name: "检查更新", exact: true }).click();
+  await page.getByRole("button", { name: "更新并准备重启", exact: true }).waitFor();
 
   const missing = await browser.newPage();
   await missing.route("**/assets/*.js", (route) => route.abort());

@@ -7,6 +7,19 @@ type UpdateState = { phase: Phase; details?: { version?: string; channel?: strin
 type DesktopWindow = Window & { __TAURI__?: { core: { invoke: <T>(command: string, args?: Record<string, string>) => Promise<T> } } };
 const workingPhases: Phase[] = ["checking", "connecting", "downloading", "installing_app", "installing_runtime"];
 
+const updateErrors: Record<string, [string, string]> = {
+  desktop_status_unavailable: ["无法读取 App 更新状态。请重启 App 后再试；若仍失败，请重新安装最新 App。", "Cannot read the App update status. Restart the App; if this persists, reinstall the latest App."],
+  update_feed_unavailable: ["此通道的更新源尚未就绪或暂时不可用。可稍后重新检查，当前版本仍可继续使用。", "This channel's update feed is not ready or temporarily unavailable. Check again later; you can keep using this version."],
+  update_feed_invalid: ["更新源格式异常。请稍后重新检查。", "The update feed is invalid. Check again later."],
+  update_platform_unavailable: ["此通道尚无适用于本机的更新包。", "This channel has no update package for this platform."],
+  update_check_timeout: ["检查更新超时。请稍后重试。", "The update check timed out. Try again later."],
+  update_network_failed: ["无法连接更新服务器。请检查网络后重试。", "Cannot reach the update server. Check your connection and retry."],
+  update_download_or_signature_failed: ["更新包下载或签名校验失败，尚未安装。请重新检查更新。", "Download or signature verification failed; the update was not installed. Check for updates again."],
+};
+function failedUpdate(error: unknown, fallback = "update_failed"): UpdateState {
+  return { phase: "error", details: { code: typeof error === "string" && Object.hasOwn(updateErrors, error) ? error : fallback } };
+}
+
 export function DesktopUpdate() {
   const { locale } = useWorkspaceI18n();
   const zh = locale === "zh-CN";
@@ -39,9 +52,9 @@ export function DesktopUpdate() {
       const selected = value.state?.details?.channel ?? (value.app_version.includes("-main.") ? "main" : "stable");
       setChannel(selected);
       if (!value.state?.phase) {
-        void invoke<UpdateState>("desktop_update", { action: "check", channel: selected }).then((next) => { if (alive) setState(next); }).catch(() => { if (alive) setState({ phase: "error" }); });
+        void invoke<UpdateState>("desktop_update", { action: "check", channel: selected }).then((next) => { if (alive) setState(next); }).catch((error: unknown) => { if (alive) setState(failedUpdate(error)); });
       }
-    }).catch(() => { if (alive) setState({ phase: "error" }); });
+    }).catch(() => { if (alive) setState(failedUpdate(null, "desktop_status_unavailable")); });
     return () => { alive = false; };
   }, [invoke]);
 
@@ -57,8 +70,15 @@ export function DesktopUpdate() {
     if (!invoke || busy.current) return;
     busy.current = true;
     setState({ phase: action === "check" ? "checking" : action === "repair" ? "installing_runtime" : "downloading" });
-    try { setState(await invoke<UpdateState>("desktop_update", { action, channel })); }
-    catch { setState({ phase: "error" }); }
+    try {
+      if (!version) {
+        const current = await invoke<{ app_version: string; rollback_available?: boolean }>("desktop_update_status");
+        setVersion(current.app_version);
+        setRollbackAvailable(current.rollback_available === true);
+      }
+      setState(await invoke<UpdateState>("desktop_update", { action, channel }));
+    }
+    catch (error: unknown) { setState(failedUpdate(error, version ? "update_failed" : "desktop_status_unavailable")); }
     finally { busy.current = false; }
   }
   const message: Record<Phase, string> = {
@@ -74,7 +94,7 @@ export function DesktopUpdate() {
     installing_runtime: zh ? "正在安装匹配的运行时，请稍候…" : "Installing the matching runtime…",
     restart_required: zh ? "重启后将自动完成运行时安装与服务连接。" : "Restart to finish runtime installation and reconnect services.",
     ready: zh ? "更新完成，服务已就绪。" : "Update completed; services are ready.",
-    error: zh ? "更新未完成。请检查网络后重试；启动失败可尝试修复当前版本。" : "Update incomplete. Check the connection and retry; repair this version if startup fails.",
+    error: updateErrors[state.details?.code ?? ""]?.[zh ? 0 : 1] ?? (zh ? "更新未完成。请重试；启动失败可尝试修复当前版本。" : "Update incomplete. Retry; repair this version if startup fails."),
   };
   const label = working ? (zh ? "正在更新…" : "Updating…") : state.phase === "available" ? (zh ? "有可用更新" : "Update available") : state.phase === "restart_required" ? (zh ? "重启完成更新" : "Restart to finish") : state.phase === "error" ? (zh ? "更新需重试" : "Retry update") : (zh ? "更新 LoopX" : "Update LoopX");
   return <div className="personal-desktop-update">

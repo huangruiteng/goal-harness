@@ -10,7 +10,7 @@ import pytest
 
 from loopx.cli import main as cli_main
 from loopx.cli_commands import turn as turn_command
-from loopx.cli_commands import turn_rendering
+from loopx.cli_commands import turn_rendering, turn_todo_writeback
 from loopx.control_plane.turn_driver import executor
 from loopx.control_plane.turn_driver import turn_journal_runtime
 
@@ -302,10 +302,10 @@ def test_inspect_journal_cli_branches_before_live_or_write_paths(
         "run_loopx_turn_once",
         "spend_quota_slot",
         "refresh_state_run",
-        "complete_goal_todo",
-        "update_goal_todo",
     ):
         monkeypatch.setattr(turn_command, name, unexpected_call)
+    for name in ("complete_goal_todo", "update_goal_todo"):
+        monkeypatch.setattr(turn_todo_writeback, name, unexpected_call)
     monkeypatch.setattr(executor, "execute_turn_driver_settlement", unexpected_call)
     monkeypatch.setattr(executor, "_write_journal", unexpected_call)
 

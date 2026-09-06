@@ -35,6 +35,14 @@ const labels = {
   ready: "更新完成，正在打开工作区。",
   error: "更新未完成。请重试检查，或修复当前版本。Goal 数据不会被删除。",
 };
+const errors = {
+  update_feed_unavailable: "此通道的更新源尚未就绪或暂时不可用。可稍后重新检查。",
+  update_feed_invalid: "更新源格式异常。请稍后重新检查。",
+  update_platform_unavailable: "此通道尚无适用于本机的更新包。",
+  update_check_timeout: "检查更新超时。请稍后重试。",
+  update_network_failed: "无法连接更新服务器。请检查网络后重试。",
+  update_download_or_signature_failed: "更新包下载或签名校验失败，尚未安装。请重新检查更新。",
+};
 function render(state) {
   if (!state?.phase) return;
   if (state.phase === "available" && state.details?.channel !== channel.value) state = {phase:"idle"};
@@ -45,13 +53,13 @@ function render(state) {
   channel.disabled = working || state.phase === "restart_required";
   nextAction = state.phase === "available" ? "apply" : state.phase === "restart_required" ? "restart" : "check";
   update.textContent = nextAction === "apply" ? "更新并准备重启 / Install update" : nextAction === "restart" ? "重启完成更新 / Restart" : "检查更新 / Check for updates";
-  updateStatus.textContent = labels[state.phase] || "";
+  updateStatus.textContent = state.phase === "error" && Object.hasOwn(errors, state.details?.code) ? errors[state.details.code] : labels[state.phase] || "";
 }
 async function run(action) {
   if (working) return;
   render({phase: action === "check" ? "checking" : action === "repair" ? "installing_runtime" : "downloading"});
   try { render(await window.__TAURI__.core.invoke("desktop_update", {action,channel:channel.value})); }
-  catch { render({phase:"error"}); }
+  catch (error) { render({phase:"error", details:{code: typeof error === "string" && Object.hasOwn(errors, error) ? error : "update_failed"}}); }
 }
 update.onclick = () => run(nextAction);
 repair.onclick = () => run("repair");

@@ -15,6 +15,12 @@ use tauri_plugin_notification::NotificationExt;
 
 const APP_IDENTIFIER: &str = "io.loopx.control-plane";
 
+fn maintenance_origin(url: &Url) -> String {
+    // Custom-protocol IPC carries the HTTP Origin header (no /chat/ path).
+    // postMessage carries the page URL. Both must match the same exact origin.
+    url.origin().ascii_serialization()
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -54,7 +60,7 @@ pub fn run() {
             let origin: Url = web_origin.parse()?;
             app.add_capability(
                 CapabilityBuilder::new("desktop-loopx-chat")
-                    .remote(origin.to_string())
+                    .remote(maintenance_origin(&origin))
                     .permission("allow-desktop-update")
                     .permission("allow-desktop-update-status")
                     .window("main"),
@@ -148,6 +154,29 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn maintenance_acl_accepts_both_transports_only_on_the_app_origin() {
+        use tauri::utils::acl::RemoteUrlPattern;
+        let page: tauri::Url = "http://127.0.0.1:8767/chat/".parse().unwrap();
+        let old: RemoteUrlPattern = page.to_string().parse().unwrap();
+        assert!(!old.test(&"http://127.0.0.1:8767".parse().unwrap()));
+        let pattern: RemoteUrlPattern = super::maintenance_origin(&page).parse().unwrap();
+        for allowed in [
+            "http://127.0.0.1:8767",
+            "http://127.0.0.1:8767/chat/?goal=x",
+        ] {
+            assert!(pattern.test(&allowed.parse().unwrap()), "{allowed}");
+        }
+        for denied in [
+            "http://127.0.0.1:8766/chat/",
+            "http://localhost:8767/chat/",
+            "https://127.0.0.1:8767/chat/",
+            "https://example.com/chat/",
+        ] {
+            assert!(!pattern.test(&denied.parse().unwrap()), "{denied}");
+        }
+    }
+
     #[test]
     fn startup_surface_is_visible_and_names_automatic_recovery() {
         let html = include_str!("../../static/index.html");
