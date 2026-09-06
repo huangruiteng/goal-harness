@@ -701,7 +701,7 @@ function personalTodoText(todo: TodoItem) {
 function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): PersonalAgentTodoItem {
   return {
     claimedBy: todo.claimed_by ?? null,
-    // Legacy Todo summaries mark deferred entries checked; they are not completed work.
+    // Legacy summaries mark deferred entries checked; they are not completed work.
     done: todo.status === "deferred" ? false : todo.done,
     evidence: todo.evidence ? compactShareText(todo.evidence, 96) : null,
     index: todo.index,
