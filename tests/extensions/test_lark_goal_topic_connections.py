@@ -1396,9 +1396,7 @@ def test_disconnect_async_inbox_unregisters_only_selected_agent(
 
     assert result["ok"] is True
     assert result["details"]["agent_inbox_unregistered"] is True
-    remaining = bindings_for_goal(
-        read_goal_channel_binding(binding_path), "goal-alpha"
-    )
+    remaining = bindings_for_goal(read_goal_channel_binding(binding_path), "goal-alpha")
     assert [item["agent_id"] for item in remaining] == ["agent-beta"]
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     goal = registry["goals"][0]
@@ -1409,9 +1407,12 @@ def test_disconnect_async_inbox_unregisters_only_selected_agent(
     assert alpha_boundary is None or "lark_event_inbox" not in alpha_boundary.get(
         "capabilities", {}
     )
-    assert goal_boundary(
-        goal, agent_id="agent-beta", registry_path=registry_path
-    )["capabilities"]["lark_event_inbox"]["enabled"] is True
+    assert (
+        goal_boundary(goal, agent_id="agent-beta", registry_path=registry_path)[
+            "capabilities"
+        ]["lark_event_inbox"]["enabled"]
+        is True
+    )
 
 
 def test_disconnect_reports_agent_inbox_cleanup_failure(
@@ -1464,11 +1465,14 @@ def test_disconnect_reports_agent_inbox_cleanup_failure(
         "agent_inbox_unregistered": False,
         "agent_id": "agent-alpha",
     }
-    assert binding_for_goal(
-        read_goal_channel_binding(binding_path),
-        "goal-alpha",
-        connection_id=str(connection["connection_id"]),
-    ) is None
+    assert (
+        binding_for_goal(
+            read_goal_channel_binding(binding_path),
+            "goal-alpha",
+            connection_id=str(connection["connection_id"]),
+        )
+        is None
+    )
 
 
 def _legacy_v0_binding_payload(
@@ -1623,3 +1627,5 @@ def test_set_connection_reconnect_reuses_root_without_resend(tmp_path: Path) -> 
     )
     assert connection is not None
     assert str(connection["topic"]["root_message_id"]) == "om_topic_alpha"
+    assert connection.get("connection_id", "").startswith("lark_")
+    assert connection.get("receipts"), "a reused root must keep its topic receipt"
