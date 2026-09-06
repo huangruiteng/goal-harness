@@ -205,7 +205,7 @@ def _build_selected_parser(command: str) -> LoopXArgumentParser:
 
 		register_status_commands(subparsers, add_subcommand_format)
 	elif command == "todo":
-		from .cli_commands.todo import register_todo_command
+		from .cli_commands.todo_registration import register_todo_command
 
 		register_todo_command(subparsers, add_subcommand_format)
 	elif command == "quota":
