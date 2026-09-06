@@ -145,7 +145,6 @@ function larkErrorMessage(cause: unknown, fallback: string, t: WorkspaceTranslat
       lark_app_required: t("lark.error.appRequired"),
       invalid_lark_app: t("lark.error.invalidApp"),
       lark_group_lookup_failed: t("lark.error.groupLookup"),
-      goal_topic_agent_conflict: t("lark.error.agentConflict"),
       provider_api_failed: t("lark.error.provider"),
     };
     return messages[code] ?? cause.message;
