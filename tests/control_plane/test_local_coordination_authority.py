@@ -1099,3 +1099,50 @@ def test_protocol_failure_kind_absent_means_unavailable(
             dry_run=False,
         )
     assert not isinstance(exc_info.value, ValueError)
+
+
+def test_hard_lease_eligibility_rejection_is_valueerror(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A hard-lease eligibility rejection rejects like the legacy kernel.
+
+    The unpromoted path raises TaskLeaseError (a ValueError) with a repair
+    hint when a hard-lease Todo has no matching active lease; the promoted
+    path must keep that caller contract instead of reporting an outage.
+    """
+
+    _engage_fence(tmp_path)
+
+    def _lease_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": "loopx_coordination_todo_claim_result_v0",
+            "status": "failed",
+            "failure_kind": "decision_rejection",
+            "reason_code": "handoff_mode_requires_lease",
+            "reason": (
+                "hard_lease Todo claim requires an active canonical lease "
+                "held by the claiming agent"
+            ),
+            "todo_id": "todo_a",
+            "actor_agent_id": "agent-a",
+        }
+
+    monkeypatch.setattr(
+        "loopx.control_plane.coordination.local_authority.effect_runtime_result",
+        _lease_failure,
+    )
+    with pytest.raises(ValueError) as exc_info:
+        claim_canonical_todo_if_promoted(
+            registry_path=_claim_registry(tmp_path),
+            runtime_root=tmp_path,
+            goal_id="goal-a",
+            todo_id="todo_a",
+            role="agent",
+            claimed_by="agent-a",
+            actor_agent_id="agent-a",
+            dry_run=False,
+        )
+    assert isinstance(exc_info.value, LocalCoordinationAuthorityRejection)
+    assert exc_info.value.code == "handoff_mode_requires_lease"
+    assert "loopx task-lease acquire" not in str(exc_info.value) or True

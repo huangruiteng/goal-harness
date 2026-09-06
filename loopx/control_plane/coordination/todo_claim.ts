@@ -381,6 +381,7 @@ export async function executeCoordinationTodoClaim(
       "handoff_mode_requires_lease",
       "hard_lease Todo claim requires an active canonical lease held by the claiming agent",
       { todo_id: input.todo_id, actor_agent_id: authority.owner },
+      "decision_rejection",
     );
   }
 
