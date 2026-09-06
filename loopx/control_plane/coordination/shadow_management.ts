@@ -252,24 +252,84 @@ async function replay(request: ManagementRequest, state: ShadowManagementState |
   const digest = requestDigest(request);
   if (state?.operation.operation_id === request.operation_id) {
     if (state.operation.request_digest !== digest) throw new ShadowManagementError("management_operation_identity_mismatch");
-    return state.result ? { ...state.result, status: "replayed", current_management_status: state.status, current_capture_lineage_id: state.binding?.capture_lineage_id ?? null } : null;
+    if (!state.result) return null;
+    await validateReplayResult(request, await loadManifest(request, state), state.result, state);
+    return { ...state.result, status: "replayed", current_management_status: state.status, current_capture_lineage_id: state.binding?.capture_lineage_id ?? null };
   }
   const prior = await readJson(resultPath(request));
   if (!prior) return null;
   if (prior.request_digest !== digest) throw new ShadowManagementError("management_operation_identity_mismatch");
   if (!isAuthorityJsonObject(prior.result)) throw new ShadowManagementError("shadow_management_state_invalid");
+  const manifest = await loadManifest(request, { operation: { manifest_digest: prior.manifest_digest } });
+  await validateReplayResult(request, manifest, prior.result, state);
   return { ...prior.result, status: "replayed", current_management_status: state?.status ?? "missing", current_capture_lineage_id: state?.binding?.capture_lineage_id ?? null };
 }
-async function loadManifest(request: ManagementRequest, state: ShadowManagementState): Promise<JsonObject> {
+async function loadManifest(request: ManagementRequest, state: { operation: JsonObject }): Promise<JsonObject> {
   const manifest = await readJson(manifestPath(request));
   if (!manifest || managementDigest(manifest) !== state.operation.manifest_digest
       || manifest.schema_version !== SHADOW_MANAGEMENT_MANIFEST_SCHEMA
+      || manifest.kind !== ("expected_provider_revision" in request ? "rollback" : "bootstrap")
       || manifest.goal_id !== request.goal_id || manifest.operation_id !== request.operation_id
       || manifest.source_root_digest !== shadowSourceRootDigest(request.runtime_root)
-      || manifest.request_digest !== requestDigest(request)) {
+      || manifest.request_digest !== requestDigest(request)
+      || !isAuthorityJsonObject(manifest.request)
+      || manifest.request.runtime_root !== request.runtime_root || manifest.request.goal_id !== request.goal_id
+      || manifest.request.operation_id !== request.operation_id
+      || requestDigest(manifest.request as ManagementRequest) !== manifest.request_digest) {
     throw new ShadowManagementError("shadow_management_manifest_invalid");
   }
   return manifest;
+}
+
+/** A cached result is historical evidence, not an independent authority. */
+async function validateReplayResult(request: ManagementRequest, manifest: JsonObject, result: JsonObject, state: ShadowManagementState | null): Promise<void> {
+  const invalid = () => { throw new ShadowManagementError("shadow_management_result_invalid"); };
+  if (result.operation_id !== request.operation_id || result.capture_lineage_id !== manifest.capture_lineage_id
+      || result.primary_writeback_preserved !== true || result.decision_read_from_shadow !== false) return invalid();
+  if (manifest.kind === "rollback") {
+    const candidate = manifest.candidate;
+    if (candidate !== null && !isAuthorityJsonObject(candidate)) return invalid();
+    const store = provider(request);
+    if (!["applied", "recovered"].includes(String(result.status))
+        || result.archive_id !== store.authorityArchiveId(request.operation_id)
+        || result.archived_provider_revision !== (candidate?.provider_revision ?? null)
+        || result.archived_cursor !== (candidate?.cursor ?? null)
+        || result.candidate_archive_path !== (candidate ? store.authorityArchivePath(request.operation_id) : null)
+        || result.outbox_archive_path !== (manifest.outbox ? archiveOutboxPath(request) : null)
+        || result.active_shadow_removed !== true || result.archive_retained !== true
+        || result.capture_status !== "bootstrap_required") return invalid();
+    return;
+  }
+  if (result.status === "aborted") {
+    if (result.reason_code !== "bootstrap_aborted" || !text(result.rollback_operation_id)) return invalid();
+    const locator = { ...request, operation_id: result.rollback_operation_id };
+    const raw = await readJson(manifestPath(locator));
+    if (!raw || !isAuthorityJsonObject(raw.request)) return invalid();
+    const rollbackRequest = requestOf(raw.request);
+    if (rollbackRequest.goal_id !== request.goal_id || rollbackRequest.runtime_root !== request.runtime_root
+        || rollbackRequest.operation_id !== result.rollback_operation_id
+        || rollbackRequest.expected_bootstrap_operation_id !== request.operation_id) return invalid();
+    const terminal = state?.operation.operation_id === result.rollback_operation_id
+      ? { ...state.operation, result: state.result } : await readJson(resultPath(locator));
+    if (!terminal || terminal.request_digest !== requestDigest(rollbackRequest)
+        || !isAuthorityJsonObject(terminal.result)) return invalid();
+    const rollback = await loadManifest(rollbackRequest, { operation: { manifest_digest: terminal.manifest_digest } });
+    if (!same(rollback.aborted_bootstrap, manifest)) return invalid();
+    await validateReplayResult(rollbackRequest, rollback, terminal.result, state);
+    return;
+  }
+  if (!["applied", "recovered"].includes(String(result.status))
+      || result.capture_profile !== SHADOW_CAPTURE_PROFILE || result.source_root_digest !== manifest.source_root_digest
+      || result.bootstrap_operation_id !== request.operation_id || result.cursor !== "1"
+      || result.provider_revision !== result.bootstrap_provider_revision
+      || !/^file:1:[0-9a-f]{24}$/.test(String(result.bootstrap_provider_revision))
+      || !/^file:[0-9a-f]{32}$/.test(String(result.store_identity))
+      || result.bootstrap_receipts_empty !== true || result.mode_declaration !== "legacy_canonical_shadow") return invalid();
+  // The active binding is an exact anchor when this bootstrap is still current.
+  // A historical manifest predates provider identity/revision assignment; its
+  // cached revision shape alone does not establish live candidate authority.
+  if (state?.binding?.bootstrap_operation_id === request.operation_id
+      && Object.entries(state.binding).some(([key, value]) => result[key] !== value)) return invalid();
 }
 function initialState(request: ManagementRequest, kind: "bootstrap" | "rollback", manifest: JsonObject, prior: ShadowManagementState | null): ShadowManagementState {
   return {
