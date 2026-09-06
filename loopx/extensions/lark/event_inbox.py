@@ -37,6 +37,8 @@ REACTION_EMOJI_PATTERN = re.compile(r"[A-Za-z0-9_]{1,64}")
 REPLY_PLACEMENT_POLICIES = {"source_thread", "source_context"}
 REPLY_EDITORIAL_STYLES = {"concise", "bullet_points_preferred"}
 ROUTE_KEY_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}")
+SENDER_TYPE_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+ADDRESSING_SOURCES = {"provider_mention", "verified_reply", "legacy_text"}
 LARK_OPERATOR_INBOX_SOURCE_CONTRACT = OperatorInboxSourceContract(
     config_schema_version=CONFIG_SCHEMA_VERSION,
     event_schema_version=EVENT_SCHEMA_VERSION,
@@ -259,6 +261,11 @@ def _event_from_payload(
         "content": content,
         "attachment_count": raw_attachment_count,
     }
+    sender_type = str(payload.get("sender_type") or "").strip().lower()
+    if sender_type:
+        if not SENDER_TYPE_PATTERN.fullmatch(sender_type):
+            return None
+        event["sender_type"] = sender_type
     if "route_key" in payload:
         route_key = str(payload.get("route_key") or "").strip()
         if not ROUTE_KEY_PATTERN.fullmatch(route_key):
@@ -277,7 +284,7 @@ def _event_from_payload(
         and "parent_id" in event
         and payload.get("reply_to_bot") is True
     )
-    event["addressed_to_bot"] = bool(
+    addressed_to_bot = bool(
         event["reply_to_bot"]
         or (
             bot_display_name is not None
@@ -289,6 +296,52 @@ def _event_from_payload(
         )
         or (bot_display_name is None and payload.get("addressed_to_bot") is True)
     )
+    event["addressed_to_bot"] = addressed_to_bot
+
+    mentions = payload.get("mentions")
+    provider_mention_count = 0
+    target_mention_count = 0
+    if isinstance(mentions, list):
+        provider_mentions = [item for item in mentions if isinstance(item, Mapping)]
+        provider_mention_count = len(provider_mentions)
+        expected = _normalized_mention_name(bot_display_name)
+        if expected:
+            target_mention_count = sum(
+                _normalized_mention_name(item.get("name")) == expected
+                for item in provider_mentions
+            )
+        elif payload.get("mentioned") is True and provider_mention_count == 1:
+            # Provider history may identify the current Bot with a typed
+            # `mentioned` flag while an inbox route intentionally has no
+            # reply/display-name configuration. Preserve the exact single-
+            # mention proof without persisting the provider identity.
+            target_mention_count = 1
+    else:
+        raw_provider_count = payload.get("provider_mention_count")
+        raw_target_count = payload.get("target_mention_count")
+        if (
+            type(raw_provider_count) is int
+            and type(raw_target_count) is int
+            and 0 <= raw_target_count <= raw_provider_count <= 50
+        ):
+            provider_mention_count = raw_provider_count
+            target_mention_count = raw_target_count
+    event["provider_mention_count"] = provider_mention_count
+    event["target_mention_count"] = target_mention_count
+
+    stored_addressing_source = str(payload.get("addressing_source") or "").strip()
+    if stored_addressing_source and stored_addressing_source not in ADDRESSING_SOURCES:
+        return None
+    if event["reply_to_bot"]:
+        addressing_source = "verified_reply"
+    elif target_mention_count:
+        addressing_source = "provider_mention"
+    elif addressed_to_bot:
+        addressing_source = stored_addressing_source or "legacy_text"
+    else:
+        addressing_source = ""
+    if addressing_source:
+        event["addressing_source"] = addressing_source
     return event
 
 
@@ -526,7 +579,11 @@ def inspect_lark_event_inbox(
         "instruction": (
             "For an actionable item, first run `loopx lark-inbox processing` for "
             "its message_id, then translate it into a todo, vision correction, PR "
-            "update, or no-follow-up rationale. Send and verify any required reply "
+            "update, or no-follow-up rationale. If the message semantically asks "
+            "this Agent for a periodic report, invoke `loopx periodic-report "
+            "request --goal-id <goal-id> --agent-id <agent-id> --source-ref "
+            "<message_id> --execute`; the Agent owns that semantic decision and "
+            "must not delegate it to keyword matching. Send and verify any required reply "
             "before acknowledging the message_id. Follow reply_guidance for "
             "placement and editorial style. If no reply is required, run "
             "`loopx lark-inbox material-review` with a committed effect receipt "

@@ -46,6 +46,7 @@ _EVENT_PROJECTION = (
     "event_id:(.event_id // .message_id // .id),"
     "message_id:(.message_id // .id),"
     "create_time:.create_time,content:.content,sender_id:.sender_id,"
+    "sender_type:(.sender_type // .sender.sender_type // .event.sender.sender_type),"
     "chat_id:.chat_id,"
     "root_id:(.root_id // .message.root_id // .event.message.root_id),"
     "parent_id:(.parent_id // .reply_to // .message.parent_id // .message.reply_to "
@@ -852,6 +853,7 @@ def process_lark_goal_topic_event(
         "message_id": str(event.get("message_id") or ""),
         "create_time": str(event.get("create_time") or ""),
         "content": str(event.get("content") or ""),
+        "sender_type": str(event.get("sender_type") or ""),
         "root_id": str(event.get("root_id") or ""),
         "parent_id": str(event.get("parent_id") or ""),
         "mentions": event.get("mentions")

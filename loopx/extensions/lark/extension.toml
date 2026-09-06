@@ -1,6 +1,6 @@
 schema_version = "loopx_extension_manifest_v0"
 id = "loopx-lark"
-version = "1.5.0"
+version = "1.6.0"
 requires_loopx_api = ">=1,<2"
 permissions = [
   "lark.inbox.read",
@@ -20,6 +20,18 @@ args = []
 doctor_args = ["--doctor"]
 required_permissions = []
 timeout_seconds = 30
+
+[[hook_adapters]]
+id = "lark-periodic-report-source"
+capability_id = "periodic-report"
+target_hook_id = "periodic_report.request"
+phase = "capability_action"
+factory = "loopx.extensions.lark.periodic_report_request:build_lark_periodic_report_hook_adapter"
+required_permissions = ["lark.inbox.read", "lark.inbox.write"]
+ports = [
+  "periodic_report.request.bind_source",
+  "periodic_report.request.settle_source",
+]
 
 [documentation]
 source_root = "loopx/extensions/lark"

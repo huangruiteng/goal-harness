@@ -40,6 +40,11 @@ REQUIRED_EXPORTS = {
     "loopx.extensions.lark.periodic_report_delivery": (
         "deliver_periodic_report_to_goal_channel",
     ),
+    "loopx.extensions.lark.periodic_report_request": (
+        "bind_lark_periodic_report_source",
+        "build_lark_periodic_report_hook_adapter",
+        "settle_lark_periodic_report_source",
+    ),
     "loopx.extensions.lark.presentation.kanban": (
         "lark_kanban_doctor",
         "sync_loopx_projection_to_lark_kanban",

@@ -29,6 +29,7 @@ from .incremental import read_periodic_report_publication_cursor
 from .machine_defaults import resolve_goal_periodic_report_subscription
 from .machine_store import read_periodic_report_machine_defaults
 from .triggers import build_periodic_report_trigger_decision
+from .request_action import REQUEST_ACTION_SCHEMA
 
 
 PERIODIC_REPORT_POST_WRITEBACK_HOOK_ID = "periodic_report.runtime_trigger"
@@ -419,12 +420,79 @@ def evaluate_periodic_report_trigger_evaluation_intent(
         or payload.get("external_delivery_authorized") is not False
     ):
         raise ValueError("periodic-report trigger intent authority is invalid")
-    stage = payload.get("stage_completion")
     profile_ref = payload.get("profile_ref")
     trigger_policy = payload.get("trigger_policy")
-    if not all(
-        isinstance(value, Mapping) for value in (stage, profile_ref, trigger_policy)
+    if not isinstance(profile_ref, Mapping) or not isinstance(
+        trigger_policy, Mapping
     ):
+        raise ValueError("periodic-report trigger intent is missing typed facts")
+    report_request = payload.get("report_request")
+    if isinstance(report_request, Mapping):
+        expected = {
+            "schema_version",
+            "request_id",
+            "goal_id",
+            "agent_id",
+            "requested_at",
+            "source_digest",
+            "requester_kind",
+            "addressing_source",
+        }
+        if (
+            set(report_request) != expected
+            or report_request.get("schema_version") != REQUEST_ACTION_SCHEMA
+            or report_request.get("requester_kind") != "user"
+            or report_request.get("addressing_source")
+            not in {"provider_mention", "verified_reply"}
+            or any(
+                not str(report_request.get(field) or "").strip()
+                for field in (
+                    "request_id",
+                    "goal_id",
+                    "agent_id",
+                    "requested_at",
+                    "source_digest",
+                )
+            )
+        ):
+            raise ValueError("periodic-report typed request is invalid")
+        requested_at = str(report_request["requested_at"])
+        request_id = str(report_request["request_id"])
+        evidence_digest = "sha256:" + hashlib.sha256(
+            json.dumps(
+                {
+                    "request_id": request_id,
+                    "goal_id": report_request["goal_id"],
+                    "agent_id": report_request["agent_id"],
+                    "source_digest": report_request["source_digest"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        return build_periodic_report_trigger_decision(
+            {
+                "schema_version": "periodic_report_trigger_request_v0",
+                "evaluated_at": requested_at,
+                "profile": {
+                    "profile_id": profile_ref.get("profile_id"),
+                    "profile_version": profile_ref.get("profile_version"),
+                },
+                "trigger_policy": dict(trigger_policy),
+                "candidates": [
+                    {
+                        "trigger_kind": "manual",
+                        "observed_at": requested_at,
+                        "source_ref": f"request:{request_id}",
+                        "evidence_digest": evidence_digest,
+                        "facts": {"authorized": True},
+                    }
+                ],
+            }
+        )
+
+    stage = payload.get("stage_completion")
+    if not isinstance(stage, Mapping):
         raise ValueError("periodic-report trigger intent is missing typed facts")
     required_stage_fields = (
         "stage_identity",
