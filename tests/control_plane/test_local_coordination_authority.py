@@ -4,6 +4,7 @@ import json
 import hashlib
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ from loopx.control_plane.todos.active_state_editing import TODO_SECTION_HEADINGS
 from loopx.control_plane.coordination.legacy_writer_fence import (
     legacy_coordination_writer_fence_path,
 )
-from loopx.todos import add_goal_todo, list_goal_todos, update_goal_todo
+from loopx.todos import add_goal_todo, list_goal_todos
 
 
 def _engage_fence(runtime_root: Path, goal_id: str = "goal-a") -> None:
@@ -505,14 +506,23 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     assert by_id["todo_successor"]["completion_continuation"] == "no_followup"
     assert result["authority_read"]["todo_read_model"]["todo_count"] == 3
 
-    claimed = update_goal_todo(
-        registry_path=registry_path,
-        goal_id="goal-a",
-        todo_id="todo_claimable",
-        claimed_by="agent-a",
-        agent_id="agent-a",
-        claim_only=True,
-    )
+    claim_command = [
+        sys.executable, "-m", "loopx.cli", "--format", "json",
+        "--registry", str(registry_path), "todo", "claim", "--goal-id", "goal-a",
+        "--todo-id", "todo_claimable", "--claimed-by", "agent-a", "--agent-id", "agent-a",
+        "--claim-operation-id", "initial-cli-claim",
+    ]
+    # Duplicate callers race from separate processes, but one operation must
+    # produce exactly one accepted claim and the same durable receipt.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        attempts = [pool.submit(subprocess.run, claim_command,
+            capture_output=True, text=True, check=True, timeout=30) for _ in range(2)]
+        claims = [json.loads(attempt.result().stdout) for attempt in attempts]
+    assert sum(item["status"] == "applied" for item in claims) == 1
+    assert all(item["status"] in {"applied", "recovered", "replayed"} for item in claims)
+    assert claims[0]["original_receipt"] == claims[1]["original_receipt"]
+    assert claims[0]["provider_revision"] == claims[1]["provider_revision"]
+    claimed = next(item for item in claims if item["status"] == "applied")
     assert claimed["ok"] is True
     assert claimed["source_authority"] == "file_v0"
     assert claimed["legacy_fallback_used"] is False
@@ -526,12 +536,7 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
 
     # Separate CLI processes must replay one durable operation, not mint a
     # fresh receipt for every retry. Preview does not consume that identity.
-    claim_command = [
-        sys.executable, "-m", "loopx.cli", "--format", "json",
-        "--registry", str(registry_path), "todo", "claim", "--goal-id", "goal-a",
-        "--todo-id", "todo_claimable", "--claimed-by", "agent-a", "--agent-id", "agent-a",
-        "--claim-operation-id", "retryable-cli-claim",
-    ]
+    claim_command = [*claim_command[:-1], "retryable-cli-claim"]
     preview = json.loads(subprocess.run(
         [*claim_command, "--dry-run"], capture_output=True, text=True, check=True,
     ).stdout)
