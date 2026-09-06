@@ -18,10 +18,22 @@
       content="LoopX 个人 Agent 工作区：在同一个频道里查看、纠偏并推进 Goal。"
     />
     <title>LoopX 个人 Agent 工作区</title>
-    <script type="module" crossorigin src="/chat/assets/index-Z33f5-Wp.js"></script>
-    <link rel="stylesheet" crossorigin href="/chat/assets/index-CWu9Zb0m.css">
+    <script type="module" crossorigin src="/chat/assets/index-DC5HFDv1.js"></script>
+    <link rel="stylesheet" crossorigin href="/chat/assets/index-9d1S9bUM.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- This surface survives missing/invalid JS chunks. React replaces it
+           only when the application actually renders, not on HTTP readiness. -->
+      <main style="max-width:440px;margin:18vh auto;padding:32px;font:14px/1.6 system-ui;color:#171717;background:#fafafa;border:1px solid #ebebeb;border-radius:12px" aria-live="polite" aria-busy="true">
+        <h1 style="font-size:20px">LoopX</h1>
+        <p>正在加载工作区… / Loading workspace…</p>
+        <p>若长时间停留在这里，可能是页面资源未加载完成或升级后连接中断。重新加载不会执行任务。</p>
+        <p>If this screen persists, page assets may be unavailable. Reloading does not execute tasks.</p>
+        <a href="" style="display:inline-block;padding:10px 16px;color:#0070f3">重新加载 / Reload</a>
+        <p>仍无法打开？请重新打开 LoopX App，或运行 <code>loopx doctor</code>。</p>
+        <noscript>请启用 JavaScript / Enable JavaScript to open the workspace.</noscript>
+      </main>
+    </div>
   </body>
 </html>

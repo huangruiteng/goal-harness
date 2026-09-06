@@ -1,0 +1,113 @@
+import { ChevronUp, Download, RefreshCw, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useWorkspaceI18n } from "./i18n";
+
+type Phase = "idle" | "runtime_required" | "connecting" | "service_error" | "checking" | "available" | "up_to_date" | "downloading" | "installing_app" | "installing_runtime" | "restart_required" | "ready" | "error";
+type UpdateState = { phase: Phase; details?: { version?: string; channel?: string; received?: number; total?: number; code?: string } };
+type DesktopWindow = Window & { __TAURI__?: { core: { invoke: <T>(command: string, args?: Record<string, string>) => Promise<T> } } };
+const workingPhases: Phase[] = ["checking", "connecting", "downloading", "installing_app", "installing_runtime"];
+
+export function DesktopUpdate() {
+  const { locale } = useWorkspaceI18n();
+  const zh = locale === "zh-CN";
+  const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  const [channel, setChannel] = useState("stable");
+  const [state, setState] = useState<UpdateState>({ phase: "idle" });
+  const [version, setVersion] = useState("");
+  const [rollbackAvailable, setRollbackAvailable] = useState(false);
+  const busy = useRef(false);
+  const invoke = (window as DesktopWindow).__TAURI__?.core.invoke;
+  const working = workingPhases.includes(state.phase);
+
+  useEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    const sync = () => setOpen(element.matches(":popover-open"));
+    element.addEventListener("toggle", sync);
+    return () => element.removeEventListener("toggle", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!invoke) return;
+    let alive = true;
+    void invoke<{ state: UpdateState | null; app_version: string; rollback_available?: boolean }>("desktop_update_status").then((value) => {
+      if (!alive) return;
+      setVersion(value.app_version);
+      setRollbackAvailable(value.rollback_available === true);
+      if (value.state?.phase) setState(value.state);
+      const selected = value.state?.details?.channel ?? (value.app_version.includes("-main.") ? "main" : "stable");
+      setChannel(selected);
+      if (!value.state?.phase) {
+        void invoke<UpdateState>("desktop_update", { action: "check", channel: selected }).then((next) => { if (alive) setState(next); }).catch(() => { if (alive) setState({ phase: "error" }); });
+      }
+    }).catch(() => { if (alive) setState({ phase: "error" }); });
+    return () => { alive = false; };
+  }, [invoke]);
+
+  useEffect(() => {
+    if (!invoke || !working) return;
+    const timer = window.setInterval(() => {
+      void invoke<{state: UpdateState}>("desktop_update_status").then((value) => { if (value.state?.phase) setState(value.state); }).catch(() => {});
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [invoke, working]);
+
+  async function run(action: "check" | "apply" | "repair" | "restart" | "rollback") {
+    if (!invoke || busy.current) return;
+    busy.current = true;
+    setState({ phase: action === "check" ? "checking" : action === "repair" ? "installing_runtime" : "downloading" });
+    try { setState(await invoke<UpdateState>("desktop_update", { action, channel })); }
+    catch { setState({ phase: "error" }); }
+    finally { busy.current = false; }
+  }
+  const message: Record<Phase, string> = {
+    service_error: zh ? "运行时已安装，但服务尚未连接。可重试更新、修复或恢复上版。" : "Runtime installed, but services are unavailable. Retry updates, repair, or restore the previous version.",
+    idle: zh ? "App 会检查可用更新，不会自动安装。" : "Updates are checked automatically, never installed without confirmation.",
+    runtime_required: zh ? "请完成匹配组件安装，或检查 App 更新。" : "Install matching components or check for an App update.",
+    connecting: zh ? "正在连接更新后的服务…" : "Connecting to updated services…",
+    checking: zh ? "正在检查更新…" : "Checking for updates…",
+    available: zh ? "新版本已就绪，一次更新 App 与匹配的运行时。" : "Update the App and its matching runtime together.",
+    up_to_date: zh ? "当前通道暂无更新。" : "No newer update on this channel.",
+    downloading: zh ? "正在下载并校验签名…" : "Downloading and verifying signature…",
+    installing_app: zh ? "正在安装 App，请保持窗口打开。" : "Installing the App. Keep this window open.",
+    installing_runtime: zh ? "正在安装匹配的运行时，请稍候…" : "Installing the matching runtime…",
+    restart_required: zh ? "重启后将自动完成运行时安装与服务连接。" : "Restart to finish runtime installation and reconnect services.",
+    ready: zh ? "更新完成，服务已就绪。" : "Update completed; services are ready.",
+    error: zh ? "更新未完成。请检查网络后重试；启动失败可尝试修复当前版本。" : "Update incomplete. Check the connection and retry; repair this version if startup fails.",
+  };
+  const label = working ? (zh ? "正在更新…" : "Updating…") : state.phase === "available" ? (zh ? "有可用更新" : "Update available") : state.phase === "restart_required" ? (zh ? "重启完成更新" : "Restart to finish") : state.phase === "error" ? (zh ? "更新需重试" : "Retry update") : (zh ? "更新 LoopX" : "Update LoopX");
+  return <div className="personal-desktop-update">
+    <button className="personal-update-trigger" type="button" aria-expanded={open} aria-controls="desktop-update-panel" onClick={(event) => {
+      panel.current?.style.setProperty("bottom", `${window.innerHeight - event.currentTarget.getBoundingClientRect().top + 8}px`);
+      panel.current?.togglePopover();
+    }}>
+      <Download size={16} aria-hidden="true" />
+      <span>{label}</span><ChevronUp size={14} aria-hidden="true" />
+    </button>
+    <section ref={panel} popover="auto" id="desktop-update-panel" className="personal-update-panel" aria-label={zh ? "LoopX 更新" : "LoopX updates"}>
+      <header><strong>{zh ? "LoopX 更新" : "LoopX updates"}</strong><button type="button" aria-label={zh ? "关闭更新面板" : "Close updates"} onClick={() => panel.current?.hidePopover()}><X size={16} aria-hidden="true" /></button></header>
+      <small>{version} · {channel === "main" ? (zh ? "main 预览版" : "main preview") : (zh ? "稳定版" : "Stable")}</small>
+      {state.details?.version ? <p>{zh ? "目标版本：" : "Target: "}{state.details.version}</p> : null}
+      <p role="status" aria-live="polite">{working ? <RefreshCw className="is-spinning" size={14} aria-hidden="true" /> : null}{message[state.phase]}</p>
+      {state.phase === "downloading" && state.details?.total ? <progress aria-label={zh ? "下载进度" : "Download progress"} max={state.details.total} value={state.details.received ?? 0} /> : null}
+      {invoke ? <div className="personal-update-actions">
+        {state.phase === "restart_required" ? <button type="button" onClick={() => void run("restart")}>{zh ? "重启完成更新" : "Restart to finish"}</button> : <>
+          <button type="button" disabled={working} onClick={() => void run("check")}>{zh ? "检查更新" : "Check for updates"}</button>
+          {state.phase === "available" ? <button type="button" onClick={() => void run("apply")}>{zh ? "更新并准备重启" : "Install update"}</button> : null}
+        </>}
+      </div> : <p>{zh ? "请在 LoopX App 中更新；浏览器自身无需安装包。" : "Update from the LoopX App; the browser needs no installer."}</p>}
+      <details><summary>{zh ? "高级选项" : "Advanced options"}</summary>
+      <label>{zh ? "更新通道" : "Update channel"}
+        <select disabled={working || state.phase === "restart_required"} value={channel} onChange={(event) => { setChannel(event.target.value); setState({ phase: "idle" }); }}>
+          <option value="stable">{zh ? "稳定版（推荐）" : "Stable (recommended)"}</option>
+          <option value="main">{zh ? "main 预览版" : "main preview"}</option>
+        </select>
+      </label>
+      <p>{zh ? "App 与匹配的 CLI 一起更新，服务可能短暂断开。不删除 Goal 数据。" : "Updates the App and matching CLI. Services may briefly disconnect. Goal data is not deleted."}</p>
+      {invoke ? <><p>{zh ? "启动失败时，可重装当前 App 随附的运行时。" : "If startup fails, reinstall this App's bundled runtime."}</p><button disabled={working || state.phase === "restart_required"} type="button" onClick={() => void run("repair")}>{zh ? "修复当前版本" : "Repair this version"}</button></> : null}
+      {invoke && rollbackAvailable ? <details><summary>{zh ? "恢复上个版本" : "Restore previous version"}</summary><p>{zh ? "将恢复已保留的 App 和它的运行时，需要重启。" : "Restore the retained App and its runtime, then restart."}</p><button disabled={working} type="button" onClick={() => void run("rollback")}>{zh ? "确认恢复上版" : "Restore previous version"}</button></details> : null}
+      </details>
+    </section>
+  </div>;
+}

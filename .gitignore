@@ -18,6 +18,7 @@ coverage.xml
 htmlcov/
 .playwright-cli/
 output/playwright/
+apps/desktop/loopx-control-plane/runtime/
 
 # Local/private operator skills. Generic, reusable contracts belong in docs or
 # product code; account-specific creator/operator skills stay outside git.

@@ -1,4 +1,7 @@
+mod bundled_runtime;
+mod maintenance;
 mod services;
+mod update_backup;
 
 use services::ServiceSet;
 use std::sync::{
@@ -34,6 +37,12 @@ pub fn run() {
     let shutting_down_for_setup = Arc::clone(&shutting_down);
 
     let builder = tauri::Builder::default()
+        .manage(maintenance::Maintenance::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            maintenance::desktop_update,
+            maintenance::desktop_update_status
+        ])
         .plugin(
             tauri_plugin_single_instance::Builder::new()
                 .dbus_id(APP_IDENTIFIER)
@@ -46,6 +55,8 @@ pub fn run() {
             app.add_capability(
                 CapabilityBuilder::new("desktop-loopx-chat")
                     .remote(origin.to_string())
+                    .permission("allow-desktop-update")
+                    .permission("allow-desktop-update-status")
                     .window("main"),
             )?;
 
@@ -60,9 +71,21 @@ pub fn run() {
 
             let handle = app.handle().clone();
             std::thread::spawn(move || {
+                if maintenance::resume(&handle).is_err() {
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.eval(
+                            "window.loopxBootFailed('本机组件尚未就绪，请展开恢复与更新，检查更新或修复当前版本。')",
+                        );
+                    }
+                    return;
+                }
                 while !shutting_down_for_setup.load(Ordering::Acquire) {
-                    match ServiceSet::start() {
-                        Ok(mut started) => {
+                    match maintenance::start_services(&handle) {
+                        Ok(None) => {
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                            continue;
+                        }
+                        Ok(Some(mut started)) => {
                             if shutting_down_for_setup.load(Ordering::Acquire) {
                                 started.stop();
                                 return;
@@ -83,8 +106,7 @@ pub fn run() {
                             return;
                         }
                         Err(error) => {
-                            let message =
-                                format!("LoopX 本地服务暂时无法启动：{error}。正在自动重试…");
+                            let message = "本地服务暂时无法启动，请检查安装或端口占用。";
                             eprintln!("LoopX service error: {error}");
                             if let Some(window) = handle.get_webview_window("main") {
                                 if let Ok(encoded) = serde_json::to_string(&message) {
@@ -134,7 +156,7 @@ mod tests {
         assert!(html.contains("正在启动本地控制面"));
         assert!(html.contains("aria-busy=\"true\""));
         assert!(html.contains("aria-live=\"polite\""));
-        assert!(script.contains("正在自动重试"));
+        assert!(script.contains("desktop_update_status"));
         assert!(script.contains("window.loopxBootRetrying"));
     }
 }

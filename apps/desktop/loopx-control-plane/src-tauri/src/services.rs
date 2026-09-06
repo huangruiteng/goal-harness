@@ -518,7 +518,7 @@ fn paths_refer_to_same_file(candidate: &str, expected: &str) -> bool {
             .is_some_and(|(candidate, expected)| candidate == expected)
 }
 
-fn loopx_executable() -> String {
+pub(crate) fn loopx_executable() -> String {
     if let Ok(configured) = env::var("LOOPX_BIN") {
         if !configured.trim().is_empty() {
             return resolve_executable_path(&configured, env::var_os("PATH").as_deref())
@@ -581,7 +581,7 @@ fn runtime_identity_from_manifest(manifest: &serde_json::Value) -> Option<serde_
     }))
 }
 
-fn runtime_identity_for_executable(executable: &str) -> Option<serde_json::Value> {
+pub(crate) fn runtime_identity_for_executable(executable: &str) -> Option<serde_json::Value> {
     runtime_identity_for_executable_with_path(executable, env::var_os("PATH").as_deref())
 }
 

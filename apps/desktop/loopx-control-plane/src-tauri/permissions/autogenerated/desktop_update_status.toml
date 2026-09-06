@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-update-status"
+description = "Enables the desktop_update_status command without any pre-configured scope."
+commands.allow = ["desktop_update_status"]
+
+[[permission]]
+identifier = "deny-desktop-update-status"
+description = "Denies the desktop_update_status command without any pre-configured scope."
+commands.deny = ["desktop_update_status"]
