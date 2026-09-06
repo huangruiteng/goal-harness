@@ -40,7 +40,7 @@ def main() -> int:
         "LoopX loop engineering social preview banner",
         "Loop engineering for long-horizon AI agents and peer agent teams.",
         "The open, provider-neutral, stateful control plane for long-horizon agents.",
-        "Objectives, gates, todos, evidence, quota, and handoffs stay stable",
+        "preserves objectives, gates, todos, evidence, quota, and handoffs across turns",
         "## Why LoopX",
         "objective / issue / project",
         "LoopX state: objective + gates + todos + scope + evidence + quota",
@@ -56,7 +56,7 @@ def main() -> int:
         "200+ hours of elapsed loop lifetime",
         "200+ hour public contribution arc",
         "Redacted owner-run showcase",
-        "not 200 hours of continuous model execution",
+        "not continuous model execution or unattended production autonomy",
         "docs/assets/long-running-loop-openviking-trajectory.png",
         "docs/assets/long-running-loop-ml-experiment-trajectory.png",
         "### Presets and Auto Research",
@@ -100,7 +100,7 @@ def main() -> int:
     ]:
         assert required in compact_readme, required
     for required in [
-        "不等于 200 小时连续模型执行",
+        "不是连续模型执行时长或无人值守的生产自治",
         "公司或雇主背书",
         "第三方独立复现",
     ]:
