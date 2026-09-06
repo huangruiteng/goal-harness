@@ -573,12 +573,31 @@ export function leaseEpoch(lease: LeaseRecord | null): number {
 }
 
 export function parseLeaseTimestamp(value: string): Date | null {
-  let text = value.trim().replace(/z$/u, "Z");
-  if (!text) return null;
-  const hasTime = /[T ]\d{2}:\d{2}/u.test(text);
-  if (hasTime) text = text.replace(/([+-]\d{2})$/u, "$1:00");
-  const hasTimezone = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/u.test(text);
-  const parsed = new Date(hasTime && !hasTimezone ? `${text}Z` : text);
+  const match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|z|[+-]\d{2}(?::?\d{2})?)?$/u.exec(
+    value.trim(),
+  );
+  if (match === null) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction, timezone] = match;
+  const [year, month, day, hour, minute, second, millisecond] = [
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText ?? "0",
+    (fraction ?? "").padEnd(3, "0") || "0",
+  ].map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
+  if (
+    calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day || calendar.getUTCHours() !== hour ||
+    calendar.getUTCMinutes() !== minute || calendar.getUTCSeconds() !== second ||
+    calendar.getUTCMilliseconds() !== millisecond
+  ) return null;
+  let text = value.trim().replace(" ", "T").replace(/z$/u, "Z");
+  if (timezone === undefined) text += "Z";
+  else text = text.replace(/([+-]\d{2})$/u, "$1:00");
+  const parsed = new Date(text);
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
