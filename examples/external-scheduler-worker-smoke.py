@@ -244,24 +244,19 @@ def test_end_to_end_loop_stops_after_limit(tmp_path: Path) -> None:
     _write_fake_cli(fake_cli, [waiting("tok-a"), waiting("tok-a"), waiting("tok-a")])
 
     slept: list[float] = []
-    original_sleep = worker.time.sleep
-    worker.time.sleep = lambda seconds: slept.append(seconds)  # type: ignore[assignment]
-    try:
-        args = argparse.Namespace(
-            cli_bin=str(fake_cli),
-            registry=str(registry),
-            runtime_root=None,
-            runtime_profile="generic_cli",
-            goal_id="g",
-            agent_id="a",
-            state_file=str(state_file),
-            wake_cmd=None,
-            once=False,
-            error_backoff_seconds=5.0,
-        )
-        rc = run_worker(args)
-    finally:
-        worker.time.sleep = original_sleep  # type: ignore[assignment]
+    args = argparse.Namespace(
+        cli_bin=str(fake_cli),
+        registry=str(registry),
+        runtime_root=None,
+        runtime_profile="generic_cli",
+        goal_id="g",
+        agent_id="a",
+        state_file=str(state_file),
+        wake_cmd=None,
+        once=False,
+        error_backoff_seconds=5.0,
+    )
+    rc = run_worker(args, sleep=slept.append)
 
     assert rc == 0
     # Tick 1 waits at progression[0]; tick 2 reaches the limit and stops before
@@ -291,33 +286,27 @@ def test_end_to_end_token_change_resets_count(tmp_path: Path) -> None:
     )
 
     slept: list[float] = []
-    original_sleep = worker.time.sleep
-    worker.time.sleep = lambda seconds: slept.append(seconds)  # type: ignore[assignment]
+    args = argparse.Namespace(
+        cli_bin=str(fake_cli),
+        registry=str(registry),
+        runtime_root=None,
+        runtime_profile="generic_cli",
+        goal_id="g",
+        agent_id="a",
+        state_file=str(state_file),
+        wake_cmd=None,
+        once=False,
+        error_backoff_seconds=5.0,
+    )
+    # Stop after 4 real ticks by raising once sleep budget is exhausted.
+    def stop_after_four(seconds: float) -> None:
+        slept.append(seconds)
+        if len(slept) >= 4:
+            raise KeyboardInterrupt
     try:
-        args = argparse.Namespace(
-            cli_bin=str(fake_cli),
-            registry=str(registry),
-            runtime_root=None,
-            runtime_profile="generic_cli",
-            goal_id="g",
-            agent_id="a",
-            state_file=str(state_file),
-            wake_cmd=None,
-            once=False,
-            error_backoff_seconds=5.0,
-        )
-        # Stop after 4 real ticks by raising once sleep budget is exhausted.
-        def stop_after_four(seconds: float) -> None:
-            slept.append(seconds)
-            if len(slept) >= 4:
-                raise KeyboardInterrupt
-        worker.time.sleep = stop_after_four  # type: ignore[assignment]
-        try:
-            run_worker(args)
-        except KeyboardInterrupt:
-            pass
-    finally:
-        worker.time.sleep = original_sleep  # type: ignore[assignment]
+        run_worker(args, sleep=stop_after_four)
+    except KeyboardInterrupt:
+        pass
 
     # Tick1 marker a -> 10; tick2 marker b resets -> 10; later ticks -> 20.
     assert slept == [10 * 60, 10 * 60, 20 * 60, 20 * 60]
@@ -337,24 +326,19 @@ def test_end_to_end_terminal_stops_immediately(tmp_path: Path) -> None:
     _write_fake_cli(fake_cli, [terminal])
 
     slept: list[float] = []
-    original_sleep = worker.time.sleep
-    worker.time.sleep = lambda seconds: slept.append(seconds)  # type: ignore[assignment]
-    try:
-        args = argparse.Namespace(
-            cli_bin=str(fake_cli),
-            registry=str(registry),
-            runtime_root=None,
-            runtime_profile="generic_cli",
-            goal_id="g",
-            agent_id="a",
-            state_file=str(state_file),
-            wake_cmd=None,
-            once=False,
-            error_backoff_seconds=5.0,
-        )
-        rc = run_worker(args)
-    finally:
-        worker.time.sleep = original_sleep  # type: ignore[assignment]
+    args = argparse.Namespace(
+        cli_bin=str(fake_cli),
+        registry=str(registry),
+        runtime_root=None,
+        runtime_profile="generic_cli",
+        goal_id="g",
+        agent_id="a",
+        state_file=str(state_file),
+        wake_cmd=None,
+        once=False,
+        error_backoff_seconds=5.0,
+    )
+    rc = run_worker(args, sleep=slept.append)
 
     assert rc == 0
     assert slept == []
@@ -378,30 +362,25 @@ def test_end_to_end_should_run_invokes_wake_cmd(tmp_path: Path) -> None:
     marker = tmp_path / "wake" / "marker.txt"
     _write_fake_cli(fake_cli, [active])
 
-    original_sleep = worker.time.sleep
 
     def stop_after_one(seconds: float) -> None:
         raise KeyboardInterrupt
-    worker.time.sleep = stop_after_one  # type: ignore[assignment]
+    args = argparse.Namespace(
+        cli_bin=str(fake_cli),
+        registry=str(registry),
+        runtime_root=None,
+        runtime_profile="generic_cli",
+        goal_id="g",
+        agent_id="a",
+        state_file=str(state_file),
+        wake_cmd=f"echo woke > {shlex.quote(str(marker))}",
+        once=False,
+        error_backoff_seconds=5.0,
+    )
     try:
-        args = argparse.Namespace(
-            cli_bin=str(fake_cli),
-            registry=str(registry),
-            runtime_root=None,
-            runtime_profile="generic_cli",
-            goal_id="g",
-            agent_id="a",
-            state_file=str(state_file),
-            wake_cmd=f"echo woke > {shlex.quote(str(marker))}",
-            once=False,
-            error_backoff_seconds=5.0,
-        )
-        try:
-            run_worker(args)
-        except KeyboardInterrupt:
-            pass
-    finally:
-        worker.time.sleep = original_sleep  # type: ignore[assignment]
+        run_worker(args, sleep=stop_after_one)
+    except KeyboardInterrupt:
+        pass
 
     assert marker.exists()
     assert marker.read_text().strip() == "woke"
@@ -425,25 +404,22 @@ def test_end_to_end_failed_wake_returns_nonzero_once(tmp_path: Path) -> None:
     fake_cli = tmp_path / "wakefail" / "fake-loopx"
     _write_fake_cli(fake_cli, [active])
 
-    original_sleep = worker.time.sleep
-    worker.time.sleep = lambda seconds: None  # type: ignore[assignment]
-    try:
-        args = argparse.Namespace(
-            cli_bin=str(fake_cli),
-            registry=str(registry),
-            runtime_root=None,
-            runtime_profile="generic_cli",
-            goal_id="g",
-            agent_id="a",
-            state_file=str(state_file),
-            wake_cmd="exit 17",
-            once=True,
-            error_backoff_seconds=5.0,
-        )
-        rc = run_worker(args)
-    finally:
-        worker.time.sleep = original_sleep  # type: ignore[assignment]
+    slept: list[float] = []
+    args = argparse.Namespace(
+        cli_bin=str(fake_cli),
+        registry=str(registry),
+        runtime_root=None,
+        runtime_profile="generic_cli",
+        goal_id="g",
+        agent_id="a",
+        state_file=str(state_file),
+        wake_cmd="exit 17",
+        once=True,
+        error_backoff_seconds=5.0,
+    )
+    rc = run_worker(args, sleep=slept.append)
 
+    assert slept == []
     assert rc == 17  # propagate the wake command's non-zero exit
     persisted = json.loads(state_file.read_text())
     # The failed wake must not be counted as successful progress.
