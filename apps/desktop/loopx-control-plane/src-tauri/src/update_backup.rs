@@ -106,11 +106,48 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     // on a failed second rename (including a failed restoration rename).
     let _preserved = staging.keep();
     crate::bundled_runtime::record_pending(app, version.trim(), "rollback")?;
-    fs::rename(&bundle, &failed).map_err(|_| "rollback_failed")?;
-    if fs::rename(&candidate, &bundle).is_err() {
-        let _ = fs::rename(&failed, &bundle);
-        return Err("rollback_failed".into());
-    }
+    replace_bundle(&bundle, &candidate, &failed)?;
     // Keep the failed App recoverable too. Never delete a user's installed App.
     Ok(())
+}
+
+fn replace_bundle(bundle: &Path, candidate: &Path, failed: &Path) -> Result<(), String> {
+    fs::rename(bundle, failed).map_err(|_| "rollback_failed")?;
+    if fs::rename(candidate, bundle).is_err() {
+        let _ = fs::rename(failed, bundle);
+        return Err("rollback_failed".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_replacement_restores_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("installed.app");
+        fs::create_dir(&app).unwrap();
+        fs::write(app.join("original"), "keep").unwrap();
+        assert!(replace_bundle(
+            &app,
+            &dir.path().join("missing.app"),
+            &dir.path().join("failed.app")
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(app.join("original")).unwrap(), "keep");
+    }
+
+    #[test]
+    #[ignore = "requires LOOPX_TEST_APP from a signed macOS build"]
+    fn real_backup_copy_retains_signature() {
+        let source = std::env::var("LOOPX_TEST_APP").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let copied = dir.path().join("LoopX.app");
+        copy(Path::new(&source), &copied).unwrap();
+        assert!(copied
+            .join("Contents/Resources/runtime/identity.json")
+            .is_file());
+    }
 }

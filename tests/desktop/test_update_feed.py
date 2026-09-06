@@ -32,20 +32,26 @@ class FeedTests(unittest.TestCase):
 
     def test_missing_empty_and_duplicate_artifact(self):
         self.artifact.unlink()
-        with self.assertRaises(ValueError): self.build()
+        with self.assertRaises(ValueError):
+            self.build()
         self.artifact.write_bytes(b"")
-        with self.assertRaises(ValueError): self.build()
+        with self.assertRaises(ValueError):
+            self.build()
         self.artifact.write_bytes(b"archive")
         (self.root / "Other.app.tar.gz").write_bytes(b"archive")
-        with self.assertRaises(ValueError): self.build()
+        with self.assertRaises(ValueError):
+            self.build()
 
     def test_missing_or_empty_signature(self):
         self.signature.unlink()
-        with self.assertRaises(FileNotFoundError): self.build()
+        with self.assertRaises(FileNotFoundError):
+            self.build()
         self.signature.write_text(" \n")
-        with self.assertRaises(ValueError): self.build()
+        with self.assertRaises(ValueError):
+            self.build()
 
     def test_untrusted_version_or_tag(self):
         for version, tag in [("v1.0.0", "valid"), ("1.0.0", "../main"), ("1.0.0;command", "main")]:
             with self.subTest(version=version, tag=tag):
-                with self.assertRaises(ValueError): feed.build(self.root, version, tag)
+                with self.assertRaises(ValueError):
+                    feed.build(self.root, version, tag)

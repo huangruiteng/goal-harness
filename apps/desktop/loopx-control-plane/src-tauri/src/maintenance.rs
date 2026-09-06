@@ -60,7 +60,7 @@ pub async fn desktop_update(
     action: String,
     channel: String,
 ) -> Result<Value, String> {
-    if !cfg!(target_os = "macos") {
+    if cfg!(dev) || !cfg!(target_os = "macos") {
         return Err("platform_update_not_supported".into());
     }
     let url = endpoint(&channel)?;
@@ -189,7 +189,9 @@ async fn perform(
     Ok(state.publish("restart_required", json!({"version":target})))
 }
 pub fn resume(app: &AppHandle) -> Result<(), String> {
-    if !cfg!(target_os = "macos") {
+    // Development intentionally pairs a live frontend with a developer-selected
+    // runtime; it must neither replace itself nor force release installation.
+    if cfg!(dev) || !cfg!(target_os = "macos") {
         return Ok(());
     }
     let state = app.state::<Maintenance>();
