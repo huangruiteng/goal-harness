@@ -1,17 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from ...todos.contract import (
-    TODO_TASK_CLASS_ADVANCEMENT,
-    normalize_todo_claimed_by,
     normalize_todo_id,
 )
 from ...todos.deferred_resume import todo_summary_blocked_successor_items
 from ...todos.projection import (
-    todo_item_excludes_agent,
-    todo_item_is_actionable_open,
-    todo_item_task_class,
+    agent_scoped_selectable_advancement_todo_ids,
 )
 from ..goal_vision_state import goal_vision_state_is_closed
 
@@ -40,6 +37,31 @@ VISION_FALLBACK_RECOMMENDED_ACTION = (
 )
 
 
+@dataclass(frozen=True)
+class FallbackDeclaration:
+    """Structured declaration of a fallback direction and its associated work."""
+
+    declaration_id: str
+    target_todo_id: str | None = None
+    successor_todo_id: str | None = None
+
+    @property
+    def candidate_todo_ids(self) -> set[str]:
+        return {
+            todo_id
+            for todo_id in (
+                self.target_todo_id,
+                self.successor_todo_id,
+                self.declaration_id,
+            )
+            if todo_id
+        }
+
+    @property
+    def unresolved_todo_id(self) -> str:
+        return self.target_todo_id or self.declaration_id
+
+
 def _compact_text(value: Any, *, limit: int) -> str:
     return " ".join(str(value or "").strip().split())[:limit]
 
@@ -63,50 +85,134 @@ def parse_vision_todo_delta_entries(entries: Any) -> list[tuple[str, str]]:
     return parsed
 
 
-def agent_scoped_selectable_advancement_todo_ids(
-    agent_todo_summary: dict[str, Any] | None,
-    *,
-    agent_id: str | None,
-) -> set[str]:
-    """Return the ids the agent-scoped selectable advancement frontier holds.
+def parse_fallback_declarations(
+    agent_vision: dict[str, Any] | None,
+    agent_todo_summary: dict[str, Any] | None = None,
+) -> list[FallbackDeclaration]:
+    """Extract structured fallback declarations from vision and linkage contracts."""
 
-    Mirrors the slot order and item predicates of the authoritative
-    ``todo_advancement_frontier_counts`` counter (executable backlog first,
-    unclaimed priority plus agent-claimed advancement items as the slotless
-    fallback), including claim ownership: peer-claimed advancement work is
-    intentionally not part of this agent's selectable frontier.
-    """
+    declarations: list[FallbackDeclaration] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
 
-    if not isinstance(agent_todo_summary, dict):
-        return set()
-    normalized_agent_id = normalize_todo_claimed_by(agent_id)
-    executable_items = agent_todo_summary.get("executable_backlog_items")
-    if isinstance(executable_items, list):
-        slots: tuple[Any, ...] = (executable_items,)
-    else:
-        slots = (
-            agent_todo_summary.get("unclaimed_priority_open_items"),
-            agent_todo_summary.get("claimed_advancement_open_items"),
-        )
-    selectable: set[str] = set()
-    for items in slots:
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
+    def add_declaration(
+        declaration_id: str,
+        target_todo_id: str | None = None,
+        successor_todo_id: str | None = None,
+    ) -> None:
+        key = (declaration_id, target_todo_id, successor_todo_id)
+        if key not in seen:
+            seen.add(key)
+            declarations.append(
+                FallbackDeclaration(
+                    declaration_id=declaration_id,
+                    target_todo_id=target_todo_id,
+                    successor_todo_id=successor_todo_id,
+                )
+            )
+
+    if isinstance(agent_vision, dict):
+        patch = agent_vision.get("vision_patch")
+        patch = patch if isinstance(patch, dict) else {}
+        for source in (
+            agent_vision.get("fallback_declarations"),
+            agent_vision.get("fallback_relationships"),
+            agent_vision.get("fallbacks"),
+            patch.get("fallback_declarations"),
+            patch.get("fallback_relationships"),
+            patch.get("fallbacks"),
+        ):
+            if not isinstance(source, list):
                 continue
-            if not todo_item_is_actionable_open(item):
+            for raw in source:
+                if isinstance(raw, dict):
+                    raw_decl_id = (
+                        raw.get("declaration_id")
+                        or raw.get("fallback_id")
+                        or raw.get("id")
+                        or raw.get("name")
+                        or raw.get("fallback_todo_id")
+                        or raw.get("todo_id")
+                    )
+                    declaration_id = _compact_text(
+                        raw_decl_id,
+                        limit=VISION_TODO_DELTA_ID_LIMIT,
+                    )
+                    target_todo_id = normalize_todo_id(
+                        raw.get("target_todo_id")
+                        or raw.get("fallback_todo_id")
+                        or raw.get("todo_id")
+                    )
+                    successor_todo_id = normalize_todo_id(
+                        raw.get("successor_todo_id") or raw.get("successor_id")
+                    )
+                    if not declaration_id and target_todo_id:
+                        declaration_id = target_todo_id
+                    if not target_todo_id and not successor_todo_id and declaration_id:
+                        target_todo_id = normalize_todo_id(declaration_id)
+                    if declaration_id:
+                        add_declaration(
+                            declaration_id=declaration_id,
+                            target_todo_id=target_todo_id,
+                            successor_todo_id=successor_todo_id,
+                        )
+                elif isinstance(raw, str):
+                    text = _compact_text(raw, limit=VISION_TODO_DELTA_ID_LIMIT)
+                    if not text:
+                        continue
+                    if "->" in text:
+                        decl, _, succ = text.partition("->")
+                        d_id = decl.strip()
+                        s_id = normalize_todo_id(succ.strip())
+                        add_declaration(
+                            declaration_id=d_id,
+                            target_todo_id=normalize_todo_id(d_id),
+                            successor_todo_id=s_id,
+                        )
+                    elif ":" in text and not text.startswith(("todo_", "task_")):
+                        decl, _, succ = text.partition(":")
+                        d_id = decl.strip()
+                        s_id = normalize_todo_id(succ.strip())
+                        add_declaration(
+                            declaration_id=d_id,
+                            target_todo_id=normalize_todo_id(d_id),
+                            successor_todo_id=s_id,
+                        )
+                    else:
+                        t_id = normalize_todo_id(text) or text
+                        add_declaration(
+                            declaration_id=text,
+                            target_todo_id=t_id,
+                            successor_todo_id=t_id,
+                        )
+
+    # Check linkage contract on blocked successor items in agent_todo_summary
+    if isinstance(agent_todo_summary, dict):
+        for slot in (
+            "deferred_items",
+            "deferred_resume_candidates",
+            "current_agent_blocker_items",
+        ):
+            items = agent_todo_summary.get(slot)
+            if not isinstance(items, list):
                 continue
-            if todo_item_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
-                continue
-            claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
-            if normalized_agent_id and claimed_by and claimed_by != normalized_agent_id:
-                continue
-            if todo_item_excludes_agent(item, agent_id=normalized_agent_id):
-                continue
-            if todo_id := normalize_todo_id(item.get("todo_id")):
-                selectable.add(todo_id)
-    return selectable
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if fallback_todo_id := normalize_todo_id(item.get("fallback_todo_id")):
+                    add_declaration(
+                        declaration_id=fallback_todo_id,
+                        target_todo_id=fallback_todo_id,
+                        successor_todo_id=fallback_todo_id,
+                    )
+                if fallback_succ_id := normalize_todo_id(
+                    item.get("fallback_successor_todo_id")
+                ):
+                    add_declaration(
+                        declaration_id=fallback_succ_id,
+                        successor_todo_id=fallback_succ_id,
+                    )
+
+    return declarations
 
 
 def _blocked_successor_todo_ids(
@@ -173,16 +279,19 @@ def declared_fallback_gap_from_agent_vision(
 ) -> dict[str, Any] | None:
     """Project one advisory gap for an unresolved declared fallback.
 
-    A fallback direction is declared structurally: the vision's todo_delta
-    links it to existing Todos via activate/resume/retain entries. Prose
-    mentions never declare a fallback, so negated or non-English vision text
-    cannot invent a gap. The declared direction is resolved when one of:
-    a linked Todo sits on the authoritative agent-scoped selectable
-    advancement frontier (peer-claimed primary-path Todos do not), the
-    todo_delta declares a bounded create/reopen successor, or the vision
-    records an explicit terminal disposition (closed-family state or
-    path_delta.outcome=stop). The primary path's own blocked successors are
-    the wait state itself, not fallback declarations, and are excluded.
+    A fallback direction is declared structurally via the agent vision's
+    ``fallback_declarations`` / ``fallback_relationships`` contract or the
+    task linkage contract on blocked successor items. Prose mentions never
+    declare a fallback, and generic ``todo_delta`` actions are not fallback
+    declarations on their own.
+
+    The declared direction is resolved when one of:
+    1. A linked Todo sits on the authoritative agent-scoped selectable
+       advancement frontier (peer-claimed primary-path Todos do not);
+    2. A bounded successor Todo is created or reopened specifically for
+       this fallback direction; or
+    3. The vision records an explicit terminal disposition (closed-family state
+       or path_delta.outcome=stop).
 
     When the primary path is blocked and none of the resolutions holds, the
     declared fallback would otherwise disappear silently behind the
@@ -200,26 +309,53 @@ def declared_fallback_gap_from_agent_vision(
         agent_id=agent_id,
     ):
         return None
-    todo_delta = parse_vision_todo_delta_entries(agent_vision.get("todo_delta"))
-    if {action for action, _ in todo_delta} & VISION_TODO_DELTA_SUCCESSOR_ACTIONS:
+
+    declarations = parse_fallback_declarations(
+        agent_vision,
+        agent_todo_summary=agent_todo_summary,
+    )
+    if not declarations:
         return None
+
+    selectable_ids = agent_scoped_selectable_advancement_todo_ids(
+        agent_todo_summary,
+        agent_id=agent_id,
+    )
     waiting_todo_ids = _blocked_successor_todo_ids(
         agent_todo_summary,
         agent_id=agent_id,
     )
-    declared_linkage_todo_ids = {
+    todo_delta = parse_vision_todo_delta_entries(agent_vision.get("todo_delta"))
+    created_or_reopened_ids = {
         todo_id
         for action, todo_id in todo_delta
-        if action in VISION_TODO_DELTA_LINKAGE_ACTIONS
-        and todo_id not in waiting_todo_ids
+        if action in VISION_TODO_DELTA_SUCCESSOR_ACTIONS
     }
-    if not declared_linkage_todo_ids:
+
+    unresolved_ids: set[str] = set()
+    for declaration in declarations:
+        candidate_ids = declaration.candidate_todo_ids - waiting_todo_ids
+        if not candidate_ids:
+            continue
+        # Disposition 1: Runnable on authoritative selectable advancement frontier
+        if candidate_ids & selectable_ids:
+            continue
+        # Disposition 2: Bounded successor created/reopened specifically for this fallback
+        if candidate_ids & created_or_reopened_ids:
+            continue
+        if (
+            declaration.successor_todo_id
+            and declaration.successor_todo_id in created_or_reopened_ids
+        ):
+            continue
+
+        unresolved_id = declaration.unresolved_todo_id
+        if unresolved_id not in waiting_todo_ids:
+            unresolved_ids.add(unresolved_id)
+
+    if not unresolved_ids:
         return None
-    if declared_linkage_todo_ids & agent_scoped_selectable_advancement_todo_ids(
-        agent_todo_summary,
-        agent_id=agent_id,
-    ):
-        return None
+
     gap: dict[str, Any] = {
         "kind": VISION_FALLBACK_GAP_TRIGGER,
         "source": "latest_agent_vision",
@@ -228,9 +364,9 @@ def declared_fallback_gap_from_agent_vision(
         "reason_code": VISION_FALLBACK_GAP_REASON_CODE,
         "recommended_action": VISION_FALLBACK_RECOMMENDED_ACTION,
     }
-    unresolved_todo_ids = [
-        todo_id for todo_id in sorted(declared_linkage_todo_ids) if todo_id
-    ][:VISION_FALLBACK_RUNNABLE_ITEM_LIMIT]
+    unresolved_todo_ids = [todo_id for todo_id in sorted(unresolved_ids) if todo_id][
+        :VISION_FALLBACK_RUNNABLE_ITEM_LIMIT
+    ]
     if unresolved_todo_ids:
         gap["unresolved_todo_ids"] = unresolved_todo_ids
     generated_at = _compact_text(agent_vision.get("generated_at"), limit=80)

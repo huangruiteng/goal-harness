@@ -167,6 +167,10 @@ def latest_agent_vision_from_runs(
         }
         if isinstance(vision.get("path_delta"), dict):
             result["path_delta"] = vision["path_delta"]
+        if isinstance(vision.get("fallback_declarations"), list):
+            result["fallback_declarations"] = vision["fallback_declarations"]
+        if isinstance(vision.get("fallback_relationships"), list):
+            result["fallback_relationships"] = vision["fallback_relationships"]
         return result
     return None
 

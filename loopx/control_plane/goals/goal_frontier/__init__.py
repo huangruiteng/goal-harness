@@ -49,8 +49,10 @@ from .ack_policy import (
 )
 from .fallback_disposition import (
     VISION_FRONTIER_TODO_DELTA_ACTIONS,  # noqa: F401
+    FallbackDeclaration,  # noqa: F401
     agent_scoped_selectable_advancement_todo_ids,  # noqa: F401
     declared_fallback_gap_from_agent_vision,
+    parse_fallback_declarations,  # noqa: F401
     parse_vision_todo_delta_entries,
 )
 from .long_todo_chain import (

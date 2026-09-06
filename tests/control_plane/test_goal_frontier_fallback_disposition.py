@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from loopx.control_plane.goals.goal_frontier import (
@@ -36,6 +38,7 @@ def _fallback_vision_run(
     todo_delta: list[str] | None = None,
     acceptance_summary: str = DECLARED_FALLBACK_ACCEPTANCE,
     path_outcome: str | None = None,
+    fallback_declarations: list[Any] | None = None,
 ) -> dict:
     agent_vision: dict = {
         "schema_version": "goal_vision_replan_contract_v0",
@@ -43,13 +46,23 @@ def _fallback_vision_run(
         "state": state,
         "todo_delta": todo_delta
         if todo_delta is not None
-        else [f"retain:{PRIMARY_WAIT_ID}", f"retain:{FALLBACK_ID}"],
+        else [f"retain:{PRIMARY_WAIT_ID}"],
         "vision_patch": {
             "acceptance_summary": acceptance_summary,
             "replan_trigger_summary": "The primary acceptance remains open.",
             "advancement_policy": "repeat_until_closed",
         },
     }
+    if fallback_declarations is not None:
+        agent_vision["fallback_declarations"] = fallback_declarations
+    elif acceptance_summary == DECLARED_FALLBACK_ACCEPTANCE:
+        agent_vision["fallback_declarations"] = [
+            {
+                "declaration_id": "declared_fallback_direction",
+                "target_todo_id": FALLBACK_ID,
+                "successor_todo_id": FALLBACK_ID,
+            }
+        ]
     if path_outcome is not None:
         agent_vision["path_delta"] = {"outcome": path_outcome}
     return {
@@ -187,7 +200,12 @@ def test_retaining_only_the_blocked_primary_successor_is_no_declaration() -> Non
     # not declare a fallback direction, so no gap is invented.
     payload = _status_payload(
         fallback_runnable=False,
-        latest_runs=[_fallback_vision_run(todo_delta=[f"retain:{PRIMARY_WAIT_ID}"])],
+        latest_runs=[
+            _fallback_vision_run(
+                todo_delta=[f"retain:{PRIMARY_WAIT_ID}"],
+                fallback_declarations=[],
+            )
+        ],
     )
 
     frontier = _frontier_projection(payload)
@@ -218,6 +236,27 @@ def test_prose_text_alone_never_declares_a_fallback(
             _fallback_vision_run(
                 acceptance_summary=acceptance_summary,
                 todo_delta=[f"retain:{PRIMARY_WAIT_ID}"],
+                fallback_declarations=[],
+            )
+        ],
+    )
+
+    frontier = _frontier_projection(payload)
+
+    assert "fallback_gaps" not in frontier
+
+
+def test_other_agent_primary_todo_without_fallback_declaration_generates_no_gap() -> (
+    None
+):
+    # Maintainer blocker 2: generic primary-path retain (e.g. peer-held prerequisite)
+    # is not a fallback declaration; without a structured declaration, no gap is invented.
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[
+            _fallback_vision_run(
+                todo_delta=[f"retain:{PRIMARY_WAIT_ID}", f"retain:{PREREQ_ID}"],
+                fallback_declarations=[],
             )
         ],
     )
@@ -228,15 +267,21 @@ def test_prose_text_alone_never_declares_a_fallback(
 
 
 def test_other_agent_primary_todo_does_not_resolve_the_gap() -> None:
-    # Owner probe 3: the vision retains the deferred primary successor and
-    # the peer-held primary prerequisite, and there is no fallback Todo at
-    # all. The peer-claimed prerequisite is not on this agent's selectable
-    # frontier, so the missing-fallback gap must survive.
+    # A peer-claimed prerequisite retained on the primary path is not on this
+    # agent's selectable frontier and is not linked to the declared fallback,
+    # so the declared fallback gap survives for the declared fallback Todo.
     payload = _status_payload(
         fallback_runnable=False,
         latest_runs=[
             _fallback_vision_run(
-                todo_delta=[f"retain:{PRIMARY_WAIT_ID}", f"retain:{PREREQ_ID}"]
+                todo_delta=[f"retain:{PRIMARY_WAIT_ID}", f"retain:{PREREQ_ID}"],
+                fallback_declarations=[
+                    {
+                        "declaration_id": "declared_fallback_direction",
+                        "target_todo_id": FALLBACK_ID,
+                        "successor_todo_id": FALLBACK_ID,
+                    }
+                ],
             )
         ],
     )
@@ -246,7 +291,7 @@ def test_other_agent_primary_todo_does_not_resolve_the_gap() -> None:
     assert frontier["acceptance_gaps"] == []
     gaps = frontier["fallback_gaps"]
     assert len(gaps) == 1
-    assert gaps[0]["unresolved_todo_ids"] == [PREREQ_ID]
+    assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
 
 
 def test_declared_fallback_linked_to_monitor_todo_keeps_the_gap() -> None:
@@ -306,6 +351,83 @@ def test_declared_bounded_successor_delta_resolves_the_gap() -> None:
     payload = _status_payload(
         fallback_runnable=False,
         latest_runs=[_fallback_vision_run(todo_delta=[f"create:{FALLBACK_ID}"])],
+    )
+
+    frontier = _frontier_projection(payload)
+
+    assert "fallback_gaps" not in frontier
+
+
+def test_unrelated_create_does_not_resolve_fallback_gap() -> None:
+    # Maintainer blocker 1: An unrelated create/reopen action must not
+    # resolve the declared fallback direction.
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[
+            _fallback_vision_run(
+                todo_delta=[
+                    f"retain:{PRIMARY_WAIT_ID}",
+                    "create:todo_unrelated_maintenance",
+                ],
+                fallback_declarations=[
+                    {
+                        "declaration_id": "fallback_direction",
+                        "target_todo_id": FALLBACK_ID,
+                        "successor_todo_id": FALLBACK_ID,
+                    }
+                ],
+            )
+        ],
+    )
+
+    frontier = _frontier_projection(payload)
+
+    gaps = frontier["fallback_gaps"]
+    assert len(gaps) == 1
+    assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
+
+
+def test_fallback_declared_via_todo_linkage_contract_projects_gap() -> None:
+    # A fallback declared on a blocked successor item via the task linkage
+    # contract projects an advisory gap when unresolved.
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[
+            _fallback_vision_run(
+                todo_delta=[f"retain:{PRIMARY_WAIT_ID}"],
+                fallback_declarations=[],
+            )
+        ],
+    )
+    item = payload["attention_queue"]["items"][0]
+    agent_todos = item["agent_todos"]
+    for deferred in agent_todos.get("deferred_items") or []:
+        if isinstance(deferred, dict):
+            deferred["fallback_todo_id"] = FALLBACK_ID
+
+    frontier = _frontier_projection(payload)
+
+    gaps = frontier["fallback_gaps"]
+    assert len(gaps) == 1
+    assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
+
+
+def test_typed_declaration_successor_relation_resolves_gap() -> None:
+    # A typed declaration-to-successor relation resolves when its declared
+    # bounded successor is created in todo_delta.
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[
+            _fallback_vision_run(
+                todo_delta=[f"retain:{PRIMARY_WAIT_ID}", "create:todo_typed_successor"],
+                fallback_declarations=[
+                    {
+                        "declaration_id": "fallback_direction",
+                        "successor_todo_id": "todo_typed_successor",
+                    }
+                ],
+            )
+        ],
     )
 
     frontier = _frontier_projection(payload)
