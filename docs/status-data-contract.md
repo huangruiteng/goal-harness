@@ -2323,6 +2323,12 @@ The summary currently reports:
 - `project_share_24h`: per-goal share of observed 24h runs, rounded to three
   decimals.
 
+The Personal Workspace preserves absent measurements through parsing and
+active/stopped Goal merging. Goal details show “Not measured” / “未采集” for
+an absent metric; an observed zero remains `0`, `$0.00`, or `0ms`. Token totals
+require both measured input and output counts. The compact Goal header shows
+only observed metrics, without inferring a cost from token counts.
+
 Because `status --limit` can bound the recent run sample, consumers should
 display `sample_run_count` and treat these values as operational signals for
 finding busy project lines, not as precise historical accounting.
