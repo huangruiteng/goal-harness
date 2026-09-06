@@ -80,15 +80,18 @@ pub fn run() {
                     return;
                 }
                 while !shutting_down_for_setup.load(Ordering::Acquire) {
-                    match ServiceSet::start() {
-                        Ok(mut started) => {
+                    match maintenance::start_services(&handle) {
+                        Ok(None) => {
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                            continue;
+                        }
+                        Ok(Some(mut started)) => {
                             if shutting_down_for_setup.load(Ordering::Acquire) {
                                 started.stop();
                                 return;
                             }
                             let healed = started.healed;
                             *services_for_setup.lock().expect("service state lock") = Some(started);
-                            maintenance::services_ready(&handle);
                             if healed {
                                 let _ = handle
                                     .notification()
