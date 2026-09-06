@@ -23,14 +23,17 @@ from ..paths import resolve_runtime_root
 
 PostWritebackProjectionBuilder = Callable[..., Mapping[str, object]]
 
-_COMPOSITION_HOOK_FIELDS = ("hook_id", "capability_id")
-
-
 def _composition_hook_identities(
     hooks: Sequence[PostWritebackHookRegistration],
 ) -> list[dict[str, str]]:
     return [
-        {field: str(getattr(registration, field) or "") for field in _COMPOSITION_HOOK_FIELDS}
+        {
+            "hook_id": str(registration.hook_id or ""),
+            "capability_id": str(registration.capability_id or ""),
+            "policy_version": str(
+                getattr(registration, "policy_version", "") or ""
+            ),
+        }
         for registration in hooks
     ]
 

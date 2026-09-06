@@ -164,6 +164,7 @@ def test_failed_projection_preserves_actionable_hook_identity(
         {
             "hook_id": "periodic_report.stage_completion",
             "capability_id": "periodic-report",
+            "policy_version": "v0",
         }
     ]
     assert receipt["primary_writeback_preserved"] is True
@@ -697,3 +698,42 @@ def test_later_turn_discovers_and_clears_pending_composition_retries(
     assert replay["intent_count"] == 1
     assert collect_pending_composition_retry_projection(runtime_root, None) is None
     assert pending_composition_retry_receipts(runtime_root, "goal-1") == []
+
+
+def test_receipt_identity_separates_policy_versions(tmp_path: Path) -> None:
+    """A policy-version replacement must not settle the original failure."""
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+
+    def failing_builder(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("transient projection failure")
+
+    assert _dispatch(
+        registry_path, hooks=(_hook(),), projection_builder=failing_builder
+    )["failures"]
+
+    def upgraded_hook() -> PostWritebackHookRegistration:
+        registration = _hook()
+        object.__setattr__(registration, "policy_version", "v1")
+        return registration
+
+    upgraded, upgraded_flag = settle_composition_retry_receipt(
+        composition_retry_receipt_log_path(runtime_root, "goal-1"),
+        goal_id="goal-1",
+        event_kind="todo_complete",
+        identity=_identity(),
+        state_version="2026-09-06T00:00:00Z",
+        committed_at="2026-09-06T00:00:00Z",
+        hook_identities=[
+            {
+                "hook_id": "periodic_report.stage_completion",
+                "capability_id": "periodic-report",
+                "policy_version": "v1",
+            }
+        ],
+    )
+    assert upgraded_flag is False
+    assert upgraded == {}
+    pending = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert len(pending) == 1
+    assert pending[0]["hooks"][0]["policy_version"] == "v0"

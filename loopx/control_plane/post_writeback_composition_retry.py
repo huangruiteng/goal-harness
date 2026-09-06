@@ -61,6 +61,7 @@ def _normalized_hook_set_digest(
             (
                 str(item.get("hook_id") or "")[:200],
                 str(item.get("capability_id") or "")[:200],
+                str(item.get("policy_version") or "")[:64],
             )
             for item in hook_identities
             if str(item.get("hook_id") or "")
@@ -133,10 +134,17 @@ def build_composition_retry_receipt(
     for raw_identity in hook_identities:
         hook_id = str(raw_identity.get("hook_id") or "")[:200]
         capability_id = str(raw_identity.get("capability_id") or "")[:200]
+        policy_version = str(raw_identity.get("policy_version") or "")[:64]
         if not hook_id or hook_id in seen_hook_ids:
             continue
         seen_hook_ids.add(hook_id)
-        bounded_identities.append({"hook_id": hook_id, "capability_id": capability_id})
+        bounded_identities.append(
+            {
+                "hook_id": hook_id,
+                "capability_id": capability_id,
+                "policy_version": policy_version,
+            }
+        )
     return {
         "schema_version": POST_WRITEBACK_COMPOSITION_RETRY_RECEIPT_SCHEMA_VERSION,
         "receipt_id": composition_retry_receipt_id(
