@@ -19,6 +19,22 @@ def test_missing_sonar_token_reaches_a_successful_skip_step() -> None:
 def test_sonar_steps_remain_guarded_by_the_token() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert workflow.count("if: steps.sonar-token.outputs.available == 'true'") == 5
+    assert workflow.count("if: steps.sonar-token.outputs.available == 'true'") == 3
     assert workflow.count("SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}") == 2
     assert "\n    env:\n      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}" not in workflow
+
+
+def test_sonar_reuses_same_run_coverage_without_a_privileged_trigger() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    caller = WORKFLOW.with_name("python-tests.yml").read_text(encoding="utf-8")
+
+    assert "workflow_call:" in workflow
+    assert "workflow_run:" not in workflow
+    assert "pull_request_target:" not in workflow + caller
+    assert "python -m pytest" not in workflow
+    assert "name: python-coverage-xml" in workflow
+    assert "run-id:" not in workflow
+    assert "github-token:" not in workflow
+    assert "needs: pytest\n    uses: ./.github/workflows/sonarcloud.yml" in caller
+    assert '"apps/**"' in caller
+    assert '"sonar-project.properties"' in caller

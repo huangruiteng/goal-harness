@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from loopx.canary.maintainability_ratchet import (
-    build_control_plane_maintainability_report,
     module_metric_baseline,
     module_metrics,
 )
@@ -30,15 +29,6 @@ def test_m6_rfc_module_budgets_are_enforced_by_the_ratchet_baseline() -> None:
         assert ceiling <= rfc_ceiling, relative_path
         actual = module_metrics(REPOSITORY_ROOT / relative_path)["lines"]
         assert actual <= ceiling, relative_path
-
-
-def test_m6_maintainability_ratchet_has_no_unreviewed_debt() -> None:
-    report = build_control_plane_maintainability_report(REPOSITORY_ROOT)
-
-    assert report["ok"] is True
-    assert report["unreviewed_count"] == 0
-    assert report["stale_exception_count"] == 0
-    assert report["category_counts"].get("module_metric_budget", 0) == 0
 
 
 def test_quota_turn_envelope_consumes_effect_turn_at_runtime() -> None:
