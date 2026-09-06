@@ -183,7 +183,7 @@ def test_module_plan() -> None:
     assert payload["plan"]["backup"]["rollback_release_id"] == "20260621T170342Z", payload
     assert "loopx update --rollback 20260621T170342Z" in payload["plan"]["backup"]["rollback_command"], payload
     assert "ln -sfn" not in payload["plan"]["backup"]["rollback_command"], payload
-    assert "LOOPX_ARCHIVE_URL=https://example.invalid/loopx.tar.gz" in payload["plan"]["install_command"], payload
+    assert "--archive-url https://example.invalid/loopx.tar.gz" in payload["plan"]["install_command"], payload
     rendered = render_update_plan_markdown(payload)
     assert "**No update was applied.**" in rendered, rendered
     assert "## Next Action" in rendered, rendered
@@ -199,8 +199,8 @@ def test_default_source_uses_stable_ref() -> None:
     assert payload["source"]["channel"] == "github_archive_stable", payload
     assert payload["source"]["ref_source"] == "default_stable", payload
     assert "/tar.gz/stable" in payload["source"]["archive_url"], payload
-    assert "LOOPX_REF=stable" in payload["plan"]["install_command"], payload
-    assert "LOOPX_ARCHIVE_URL=" not in payload["plan"]["install_command"], payload
+    assert payload["plan"]["install_command"] == "loopx update apply", payload
+    assert "--archive-url" not in payload["plan"]["install_command"], payload
     default_env = _installer_env_for_source(
         payload["source"],
         base_env={"LOOPX_ARCHIVE_URL": "https://stale.invalid/archive.tar.gz"},
@@ -216,47 +216,19 @@ def test_explicit_archive_url_reaches_installer() -> None:
         doctor_payload=fake_doctor_payload(),
     )
     assert payload["source"]["channel"] == "github_archive_url_override", payload
-    assert "LOOPX_ARCHIVE_URL=https://example.invalid/loopx.tar.gz" in payload["plan"]["install_command"], payload
-    assert "set -o errexit -o pipefail" in payload["plan"]["install_command"], payload
-    assert "export LOOPX_REPO=example/loopx" in payload["plan"]["install_command"], payload
-    assert "export LOOPX_REF=fixture" in payload["plan"]["install_command"], payload
+    assert "--archive-url https://example.invalid/loopx.tar.gz" in payload["plan"]["install_command"], payload
+    assert "loopx update apply" in payload["plan"]["install_command"], payload
+    assert "--repo example/loopx" in payload["plan"]["install_command"], payload
+    assert "--ref fixture" in payload["plan"]["install_command"], payload
     installer_env = _installer_env_for_source(payload["source"], base_env={})
     assert installer_env["LOOPX_ARCHIVE_URL"] == "https://example.invalid/loopx.tar.gz", installer_env
 
 
-def test_update_preview_stops_before_doctor_when_download_fails() -> None:
-    payload = build_update_plan(
-        repo="example/loopx",
-        ref="fixture",
-        archive_url="https://example.invalid/loopx.tar.gz",
-        execute=False,
-        doctor_payload=fake_doctor_payload(),
-    )
-    with TemporaryDirectory() as tmpdir:
-        bin_dir = Path(tmpdir)
-        marker_path = bin_dir / "doctor-ran"
-        curl_bin = bin_dir / "curl"
-        curl_bin.write_text("#!/usr/bin/env bash\nexit 22\n", encoding="utf-8")
-        curl_bin.chmod(0o755)
-        loopx_bin = bin_dir / "loopx"
-        loopx_bin.write_text(
-            "#!/usr/bin/env bash\n"
-            f"touch {json.dumps(str(marker_path))}\n"
-            "exit 0\n",
-            encoding="utf-8",
-        )
-        loopx_bin.chmod(0o755)
-        env = dict(os.environ)
-        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-        result = subprocess.run(
-            ["bash", "-c", payload["plan"]["install_command"]],
-            text=True,
-            capture_output=True,
-            env=env,
-        )
-
-        assert result.returncode == 22, result
-        assert not marker_path.exists(), result
+def test_update_preview_uses_managed_download_path() -> None:
+    payload = build_update_plan(doctor_payload=fake_doctor_payload())
+    command = payload["plan"]["install_command"]
+    assert command.startswith("loopx update apply"), command
+    assert "curl" not in command, command
 
 
 def test_execute_update_propagates_installer_download_failure() -> None:
@@ -290,10 +262,13 @@ def test_execute_update_propagates_installer_download_failure() -> None:
 
     assert result["ok"] is False, result
     install_command = run.call_args_list[0].args[0]
-    assert install_command[:2] == ["bash", "-lc"], install_command
-    assert "set -o pipefail" in install_command[2], install_command
+    assert install_command[0] == "curl", install_command
+    assert "--output" in install_command, install_command
     assert result["execution"]["install_returncode"] == 22, result
     assert result["execution"]["doctor_returncode"] == 0, result
+    assert result["execution"]["installer_download"]["stage"] == "installer_download", result
+    assert result["changes_applied"] is False, result
+    assert "Download attempt 1: HTTP `0`, curl `22`" in render_update_plan_markdown(result)
 
 
 def test_active_release_python_reaches_installer() -> None:
@@ -562,7 +537,7 @@ def main() -> int:
     test_module_plan()
     test_default_source_uses_stable_ref()
     test_explicit_archive_url_reaches_installer()
-    test_update_preview_stops_before_doctor_when_download_fails()
+    test_update_preview_uses_managed_download_path()
     test_execute_update_propagates_installer_download_failure()
     test_active_release_python_reaches_installer()
     test_active_release_python_marker_fails_closed()
