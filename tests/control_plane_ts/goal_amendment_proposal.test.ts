@@ -20,6 +20,7 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
       goal_id: "goal-stage2",
       proposer_agent_id: "agent-a",
       amendment_class: "shared_acceptance",
+      base_revision_basis: "state_event_log",
       base_state_event_basis_sequence: 17,
       base_source_basis_digest: DIGEST,
       retained: ["original outcome remains unchanged"],
@@ -93,6 +94,7 @@ test("admits a well-formed proposal with no canonical effect", () => {
   assert.equal(result.goal_id, "goal-stage2");
   assert.equal(result.proposer_agent_id, "agent-a");
   assert.equal(result.amendment_class, "shared_acceptance");
+  assert.equal(result.base_revision_basis, "state_event_log");
   assert.equal(result.admission, "admitted");
   assert.deepEqual(result.admission_facts, []);
   assert.equal(result.canonical_effect, "none");
@@ -179,6 +181,7 @@ test("a markdown basis admits the real sequence 0 as unverifiable", () => {
     baseRequest({
       proposal: {
         ...baseRequest().proposal,
+        base_revision_basis: "markdown_active_state",
         base_state_event_basis_sequence: 0,
       },
       derived_basis: {
@@ -194,6 +197,74 @@ test("a markdown basis admits the real sequence 0 as unverifiable", () => {
   assert.deepEqual(result.admission_facts, ["base_source_basis_unverifiable"]);
 });
 
+test("a real markdown base superseded by a later event log is retained as needs_rebase", () => {
+  // Review round 8 counterexample: a proposal that legitimately bound the
+  // real markdown basis (sequence 0, the only sequence the Stage 1 producer
+  // emits for an event-less Goal) must not be called a fabricated history
+  // after the same Goal later gains its first state event. The proposal
+  // carries its own base_revision_basis identity, so validating the sequence
+  // against the *claimed* basis — not against the current derived basis —
+  // lets this type transition resolve to an explicit, read-back
+  // reconciliation outcome instead of a request rejection.
+  const result = admitGoalAmendmentProposal(
+    baseRequest({
+      proposal: {
+        ...baseRequest().proposal,
+        proposal_id: "gap_stage2_superseded",
+        base_revision_basis: "markdown_active_state",
+        base_state_event_basis_sequence: 0,
+        base_source_basis_digest: MISMATCHED_DIGEST,
+      },
+      // derived_basis stays the default event-log head (17, DIGEST): the
+      // Goal has evolved past the proposal's markdown base.
+    }),
+  );
+
+  assert.equal(result.admission, "needs_rebase");
+  assert.deepEqual(result.admission_facts, ["base_revision_basis_superseded"]);
+  assert.equal(result.canonical_effect, "none");
+  assert.equal(result.base_revision_basis, "markdown_active_state");
+  assert.equal(result.base_state_event_basis_sequence, 0);
+});
+
+test("a claimed state_event_log base of sequence zero still fails closed", () => {
+  // Not every zero under an event-log derived basis is a superseded markdown
+  // base: a proposal claiming revision_basis=state_event_log with sequence 0
+  // asserts an event append that can never have existed (append sequences
+  // start at 1) and stays a request rejection, not a needs_rebase retention.
+  assert.throws(
+    () =>
+      admitGoalAmendmentProposal(
+        baseRequest({
+          proposal: {
+            ...baseRequest().proposal,
+            base_state_event_basis_sequence: 0,
+          },
+        }),
+      ),
+    /must be a positive integer when the proposal's base_revision_basis is state_event_log/,
+  );
+});
+
+test("an event-log proposal against a markdown derived basis fails closed as ahead", () => {
+  // The reverse transition is not a real producer path: an event-log base
+  // can never become markdown, and its positive sequence is ahead of the
+  // markdown derived head (0), so it stays the existing future rejection.
+  assert.throws(
+    () =>
+      admitGoalAmendmentProposal(
+        baseRequest({
+          derived_basis: {
+            state_event_basis_sequence: 0,
+            revision_basis: "markdown_active_state",
+            source_basis_digest: DIGEST,
+          },
+        }),
+      ),
+    /ahead of the derived state event basis head/,
+  );
+});
+
 test("a fabricated positive base sequence under a markdown basis fails closed", () => {
   // The inverse counterexample: 0 is the only markdown sequence the Stage 1
   // producer can emit, so 17 is not a producible base and must be rejected
@@ -204,6 +275,7 @@ test("a fabricated positive base sequence under a markdown basis fails closed", 
         baseRequest({
           proposal: {
             ...baseRequest().proposal,
+            base_revision_basis: "markdown_active_state",
             base_state_event_basis_sequence: 17,
           },
           derived_basis: {
@@ -213,7 +285,7 @@ test("a fabricated positive base sequence under a markdown basis fails closed", 
           },
         }),
       ),
-    /must be 0 when the derived revision_basis is markdown_active_state/,
+    /must be 0 when the proposal's base_revision_basis is markdown_active_state/,
   );
 });
 
@@ -231,7 +303,7 @@ test("a zero base sequence under an event-log basis fails closed", () => {
           },
         }),
       ),
-    /must be a positive integer when the derived revision_basis is state_event_log/,
+    /must be a positive integer when the proposal's base_revision_basis is state_event_log/,
   );
 });
 

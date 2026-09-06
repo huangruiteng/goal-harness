@@ -44,9 +44,23 @@ import {
  * no event log exists the basis is `markdown_active_state` with sequence 0 —
  * the only sequence the markdown producer can emit — and a proposal binding
  * that real 0 is admitted as unverifiable instead of being forced to
- * fabricate a positive sequence; conversely a positive sequence under
- * `markdown_active_state` (or 0 under `state_event_log`) is not a producible
- * base and fails closed as a request rejection.
+ * fabricate a positive sequence.
+ *
+ * The proposal declares its own `base_revision_basis` — the type of the
+ * basis it was actually produced against — so sequence producibility is
+ * validated against the *claimed* basis, never inferred from the current
+ * derived basis: 0 is only producible under `markdown_active_state`, and a
+ * positive sequence is only producible under `state_event_log` (a fabricated
+ * value under either claim fails closed as a request rejection). When a
+ * Goal's basis evolves from markdown to a typed event log, a proposal still
+ * carrying its real markdown base (sequence 0 + the markdown source digest)
+ * is NOT a fabricated history: it is retained as an explicit
+ * `needs_rebase` reconciliation outcome with the
+ * `base_revision_basis_superseded` fact (RFC §7: never silently merged,
+ * never silently dropped), while a proposal claiming `state_event_log` with
+ * sequence 0 — an append that can never have existed — stays a request
+ * rejection, and an event-log proposal ahead of a markdown derived head
+ * stays the future rejection.
  *
  * Causal binding (RFC §5 "impact scope"): the request also carries typed
  * inventories the Python authority derived at admission time — the goal's
@@ -86,6 +100,7 @@ export const GOAL_AMENDMENT_PROPOSAL_ADMISSION_FACTS = [
   "base_state_event_basis_sequence_behind_derived_head",
   "base_source_basis_digest_mismatch",
   "base_source_basis_unverifiable",
+  "base_revision_basis_superseded",
 ] as const;
 export type GoalAmendmentAdmissionFact =
   (typeof GOAL_AMENDMENT_PROPOSAL_ADMISSION_FACTS)[number];
@@ -118,6 +133,7 @@ export interface GoalAmendmentProposal extends JsonObject {
   goal_id: string;
   proposer_agent_id: string;
   amendment_class: GoalAmendmentClass;
+  base_revision_basis: AmendmentRevisionBasis;
   base_state_event_basis_sequence: number;
   base_source_basis_digest: string;
   retained: string[];
@@ -180,6 +196,7 @@ export interface GoalAmendmentProposalAdmission extends JsonObject {
   goal_id: string;
   proposer_agent_id: string;
   amendment_class: GoalAmendmentClass;
+  base_revision_basis: AmendmentRevisionBasis;
   proposal_digest: string;
   base_state_event_basis_sequence: number;
   base_source_basis_digest: string;
@@ -371,6 +388,12 @@ function decodeProposal(value: unknown): GoalAmendmentProposal {
       "goal_amendment_proposal.amendment_class",
       "amendment class is unsupported",
     ),
+    base_revision_basis: requireStringLiteral(
+      proposal.base_revision_basis,
+      REVISION_BASIS_VALUES,
+      "goal_amendment_proposal.base_revision_basis",
+      "amendment base revision_basis is unsupported",
+    ),
     base_state_event_basis_sequence: nonNegativeInteger(
       proposal.base_state_event_basis_sequence,
       "goal_amendment_proposal.base_state_event_basis_sequence",
@@ -404,31 +427,35 @@ function nonNegativeInteger(value: unknown, label: string): number {
 
 function requireProducibleBaseSequence(
   proposal: GoalAmendmentProposal,
-  derived: DerivedGoalBasisFacts,
 ): void {
   // The proposal's base sequence must be a value the Stage 1 producer can
-  // actually emit for the goal's current revision basis — never a decoded
-  // integer the caller invented. A markdown goal (no state event log)
-  // always projects state_event_basis_sequence=0, so 0 is the only real
-  // markdown base and a fabricated positive sequence is a request
-  // rejection, not an unverifiable admission. An event-log base stays
-  // strictly positive: append sequences start at 1, so 0 cannot exist
-  // under state_event_log and is rejected instead of silently becoming a
-  // "behind the head" needs_rebase retention.
+  // actually emit for the basis the proposal DECLARES it was produced
+  // against (`base_revision_basis`) — never a decoded integer the caller
+  // invented, and never a type inferred from the goal's *current* derived
+  // basis. A markdown base always projects state_event_basis_sequence=0, so
+  // 0 is the only real markdown base and a fabricated positive sequence is
+  // a request rejection, not an unverifiable admission. An event-log base
+  // stays strictly positive: append sequences start at 1, so 0 cannot exist
+  // under a claimed state_event_log base and is rejected instead of
+  // silently becoming a "behind the head" needs_rebase retention. Validating
+  // against the claimed basis is what keeps a REAL markdown base (0)
+  // admissible after the goal's derived basis has since evolved to a typed
+  // event log — that transition is admissionOutcome's superseded branch,
+  // not a fabricated history (review round 8).
   if (
-    derived.revision_basis === "markdown_active_state" &&
+    proposal.base_revision_basis === "markdown_active_state" &&
     proposal.base_state_event_basis_sequence !== 0
   ) {
     throw new EffectRuntimeRequestError(
-      "goal_amendment_proposal.base_state_event_basis_sequence must be 0 when the derived revision_basis is markdown_active_state (the real markdown basis has no event append sequence; do not fabricate one)",
+      "goal_amendment_proposal.base_state_event_basis_sequence must be 0 when the proposal's base_revision_basis is markdown_active_state (the real markdown basis has no event append sequence; do not fabricate one)",
     );
   }
   if (
-    derived.revision_basis === "state_event_log" &&
+    proposal.base_revision_basis === "state_event_log" &&
     proposal.base_state_event_basis_sequence < 1
   ) {
     throw new EffectRuntimeRequestError(
-      "goal_amendment_proposal.base_state_event_basis_sequence must be a positive integer when the derived revision_basis is state_event_log",
+      "goal_amendment_proposal.base_state_event_basis_sequence must be a positive integer when the proposal's base_revision_basis is state_event_log",
     );
   }
 }
@@ -661,6 +688,29 @@ function admissionOutcome(
   proposal: GoalAmendmentProposal,
   derived: DerivedGoalBasisFacts,
 ): { admission: GoalAmendmentAdmission; facts: GoalAmendmentAdmissionFact[] } {
+  if (proposal.base_state_event_basis_sequence > derived.state_event_basis_sequence) {
+    // Checked across basis types too: an event-log proposal's positive
+    // sequence is ahead of a markdown derived head (0), which is not a real
+    // producer transition and stays the future rejection.
+    throw new EffectRuntimeRequestError(
+      "goal amendment proposal base_state_event_basis_sequence is ahead of the derived state event basis head",
+    );
+  }
+  if (
+    proposal.base_revision_basis === "markdown_active_state" &&
+    derived.revision_basis === "state_event_log"
+  ) {
+    // A real markdown base that has since been superseded by the goal's
+    // first state events: the sequence 0 and markdown digest were produced
+    // by the Stage 1 projection of the then event-less goal, so this is a
+    // rebase-required base transition — an explicit, read-back
+    // reconciliation outcome — never a fabricated history and never a
+    // silently fresh admission (RFC §7).
+    return {
+      admission: "needs_rebase",
+      facts: ["base_revision_basis_superseded"],
+    };
+  }
   if (derived.revision_basis === "markdown_active_state") {
     // No event log to compare against: report unverifiable, never a
     // fabricated stale verdict (same policy as Stage 1).
@@ -668,11 +718,6 @@ function admissionOutcome(
       admission: "admitted",
       facts: ["base_source_basis_unverifiable"],
     };
-  }
-  if (proposal.base_state_event_basis_sequence > derived.state_event_basis_sequence) {
-    throw new EffectRuntimeRequestError(
-      "goal amendment proposal base_state_event_basis_sequence is ahead of the derived state event basis head",
-    );
   }
   const facts: GoalAmendmentAdmissionFact[] = [];
   if (proposal.base_state_event_basis_sequence < derived.state_event_basis_sequence) {
@@ -720,7 +765,7 @@ export function admitGoalAmendmentProposal(
 ): GoalAmendmentProposalAdmission {
   const request = decodeGoalAmendmentProposalRequest(value);
   const { proposal } = request;
-  requireProducibleBaseSequence(proposal, request.derived_basis);
+  requireProducibleBaseSequence(proposal);
   requireCausalBinding(proposal, request);
   const outcome = admissionOutcome(proposal, request.derived_basis);
   return {
@@ -729,6 +774,7 @@ export function admitGoalAmendmentProposal(
     goal_id: proposal.goal_id,
     proposer_agent_id: proposal.proposer_agent_id,
     amendment_class: proposal.amendment_class,
+    base_revision_basis: proposal.base_revision_basis,
     proposal_digest: canonicalDigest(proposal),
     base_state_event_basis_sequence: proposal.base_state_event_basis_sequence,
     base_source_basis_digest: proposal.base_source_basis_digest,

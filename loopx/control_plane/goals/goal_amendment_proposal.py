@@ -35,6 +35,16 @@ the equivalent ``rejected_schema`` outcome, and nothing is retained.
 Governed commit belongs to Stage 3+ behind the
 ``GoalAmendmentAuthority``.
 
+The proposal declares its own ``base_revision_basis`` — the type of the
+Stage 1 basis it was produced against — so the reducer validates sequence
+producibility against the *claimed* basis, never against the goal's
+current derived basis. When a Goal's basis later evolves from markdown to
+a typed event log, a proposal still carrying its real markdown base
+(sequence 0 + the markdown source digest) is retained as ``needs_rebase``
+with the ``base_revision_basis_superseded`` fact: an explicit, read-back
+reconciliation outcome rather than a rejection that would call a produced
+basis a fabricated history.
+
 The derived basis (``state_event_basis_sequence``, ``revision_basis``,
 ``source_basis_digest``) comes from the Stage 1 read-only projection
 (``project_shared_goal_alignment``), which also fails closed on unknown
@@ -101,6 +111,7 @@ GOAL_AMENDMENT_PROPOSAL_ADMISSION_FACTS = (
     "base_state_event_basis_sequence_behind_derived_head",
     "base_source_basis_digest_mismatch",
     "base_source_basis_unverifiable",
+    "base_revision_basis_superseded",
 )
 AMENDMENT_PROPOSAL_JOURNAL_DIRNAME = "amendment-proposals"
 AMENDMENT_PROPOSAL_JOURNAL_BASENAME = "journal.jsonl"
@@ -482,6 +493,8 @@ def _check_admission_shape(
         != normalize_todo_claimed_by(proposal.get("proposer_agent_id"))
         or admission.get("proposal_id")
         != str(proposal.get("proposal_id") or "").strip().lower()
+        or admission.get("base_revision_basis")
+        != str(proposal.get("base_revision_basis") or "").strip()
         or not _SHA256_DIGEST_PATTERN.fullmatch(
             str(admission.get("proposal_digest") or "")
         )

@@ -481,6 +481,11 @@ def _proposal(
         "goal_id": GOAL_ID,
         "proposer_agent_id": "agent-a",
         "amendment_class": "shared_acceptance",
+        # The proposal declares the basis type it was produced against — a
+        # real proposer reads this verbatim from the Stage 1 projection, and
+        # the reducer validates sequence producibility against this claim
+        # (not against the goal's current derived basis).
+        "base_revision_basis": basis["revision_basis"],
         "base_state_event_basis_sequence": basis["state_event_basis_sequence"],
         "base_source_basis_digest": basis["source_basis_digest"],
         "retained": ["original outcome remains unchanged"],
@@ -1094,6 +1099,64 @@ def test_event_log_basis_rejects_zero_sequence(tmp_path: Path) -> None:
     assert _journal_rows(paths) == []
 
 
+def test_superseded_markdown_basis_is_retained_as_needs_rebase(
+    tmp_path: Path,
+) -> None:
+    # Review round 8 counterexample: the proposal binds the REAL markdown
+    # basis (sequence 0 from the live Stage 1 projection of an event-less
+    # Goal) and admits. The Goal then gains its first state event through
+    # the real AppendOnlyStateEventStore producer; replaying the same base
+    # under a new proposal id must not be rejected as a fabricated history —
+    # it enters the explicit needs_rebase reconciliation outcome, is
+    # retained, and reads back from the journal.
+    paths = _write_fixture(tmp_path, events=None)
+
+    markdown_proposal = _proposal(paths)
+    assert markdown_proposal["base_revision_basis"] == "markdown_active_state"
+    first = _admit(paths, markdown_proposal)
+    assert first["admission"] == "admitted"
+    assert first["admission_facts"] == ["base_source_basis_unverifiable"]
+
+    store = AppendOnlyStateEventStore(paths["state_file"].with_name(EVENT_LOG_NAME))
+    store.append(
+        make_state_event(
+            event_id="evt_stage2_first",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            actor_agent_id="agent-a",
+            refs={"todo_id": "todo_stage2_a"},
+            payload={"text": "First fixture event for todo_stage2_a."},
+        )
+    )
+    evolved = _derived_source_basis(paths)
+    assert evolved["revision_basis"] == "state_event_log"
+    assert evolved["state_event_basis_sequence"] >= 1
+
+    replay = _admit(paths, {**markdown_proposal, "proposal_id": "gap_stage2_002"})
+
+    assert replay["admission"] == "needs_rebase"
+    assert replay["admission_facts"] == ["base_revision_basis_superseded"]
+    assert replay["canonical_effect"] == "none"
+    assert replay["base_revision_basis"] == "markdown_active_state"
+    assert replay["base_state_event_basis_sequence"] == 0
+    rows = _journal_rows(paths)
+    assert [row["admission"] for row in rows] == ["admitted", "needs_rebase"]
+
+    # Not every zero under the evolved basis is a superseded markdown base:
+    # a proposal claiming state_event_log with sequence 0 invents an append
+    # that can never have existed and still fails closed, nothing retained.
+    with pytest.raises(ValueError, match="state_event_log"):
+        _admit(
+            paths,
+            {
+                **markdown_proposal,
+                "proposal_id": "gap_stage2_003",
+                "base_revision_basis": "state_event_log",
+            },
+        )
+    assert len(_journal_rows(paths)) == 2
+
+
 def test_admission_has_zero_canonical_effect(tmp_path: Path) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
     event_log = paths["state_file"].with_name(EVENT_LOG_NAME)
@@ -1120,6 +1183,7 @@ def test_registered_effect_method_rejects_an_illegal_request() -> None:
         "goal_id": GOAL_ID,
         "proposer_agent_id": "agent-a",
         "amendment_class": "shared_acceptance",
+        "base_revision_basis": "state_event_log",
         "base_state_event_basis_sequence": 3,
         "base_source_basis_digest": "md5:zz",
         "retained": ["original outcome remains unchanged"],
