@@ -81,7 +81,7 @@ def test_provider_input_does_not_select_a_diagnostic_todo() -> None:
 
     provider_input = _provider_input(request)
 
-    assert provider_input["canonical_selected_todo_id"] is None
+    assert "canonical_selected_todo_id" not in provider_input
     assert (
         provider_input["packet"]["agent_todo_summary"]["first_executable_items"][0][
             "todo_id"
@@ -185,7 +185,7 @@ def test_direct_actor_uses_canonical_endpoint_without_tools_or_raw_retention() -
     assert captured["timeout_seconds"] == 12
     system_instruction = captured["body"]["messages"][0]["content"]
     compact_instruction = " ".join(system_instruction.lower().split())
-    assert "canonical_selected_todo_id exactly" in compact_instruction
+    assert "canonical_selected_todo_id" not in compact_instruction
     assert "never infer a todo id from summaries" in compact_instruction
     assert "follow any packet response_plan exactly" in compact_instruction
     assert "when user_action_required=true, choose decision=ask_user" not in (
@@ -195,7 +195,6 @@ def test_direct_actor_uses_canonical_endpoint_without_tools_or_raw_retention() -
     assert provider_input == {
         "schema_version": MODEL_BEHAVIOR_PROVIDER_INPUT_SCHEMA_VERSION,
         "arm": "candidate_packet",
-        "canonical_selected_todo_id": "todo_fixture001",
         "semantic_contract_required": False,
         "semantic_contract_fields": [],
         "packet": {
