@@ -37,9 +37,31 @@ Verified status on `main`:
   `TodoProjectionMetadata` keep task semantics (`archive_state`,
   `source_section`, optional `index`).
 - A product-source scan of all 70 `loopx/**/*.ts` files found zero
-  `as unknown as` casts and zero `JSON.parse(...) as T` assertions. The named
-  migration-seam escape hatch is currently unused; any new occurrence must
-  re-enter an inventory with a negative-coverage and removal owner.
+  `as unknown as` casts and one `JSON.parse(...) as T` assertion:
+  `loopx/control_plane/quota/void_commit.ts:259` — the internal
+  `cloneObject` helper, which round-trips a value that is already a
+  validated `JsonObject` through `JSON.parse(JSON.stringify(value))` to
+  get a deep copy and casts the result back. This is not an external
+  trust boundary: the input has already passed the module's decoders, so
+  the assertion covers an internal clone rather than untrusted input.
+  It stays in the seam inventory below with a removal owner; any new
+  occurrence must re-enter the same inventory with negative coverage
+  and a removal owner.
+
+  Reproducible scan (run from the repository root against a pinned
+  snapshot):
+
+  ```sh
+  fd -e ts . loopx -x rg -n "as unknown as" {}
+  fd -e ts . loopx -x rg -n "JSON\.parse\(.*\) as " {}
+  ```
+
+  Named seam inventory (against `main@bf217e1e`):
+  `quota/void_commit.ts:259` — internal clone assertion inside the
+  void-commit runtime, merged in #3832; negative coverage via the
+  module's own decoder tests on the pre-clone value; removal owner is
+  the quota/void-commit migration slice (replace the cast with a typed
+  clone or generator-emitted copy helper).
 
 Constraints these notes restate as invariants for later slices: decoding
 happens once at the boundary (not repeated ad hoc inside the domain), the
