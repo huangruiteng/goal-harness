@@ -9,12 +9,15 @@
     "frontendDist": "../static"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8766 http://127.0.0.1:8767; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:"
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": false,
+    "resources": {"../runtime/runtime-source.tar.gz": "runtime/runtime-source.tar.gz", "../runtime/identity.json": "runtime/identity.json"},
     "active": true,
     "targets": ["app", "dmg", "msi", "nsis", "deb", "appimage"],
     "category": "DeveloperTool",
@@ -26,5 +29,11 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI5OUQzOTdCNDJDODhDRTQKUldUa2pNaENlem1kS1V0UGo5R21vSnNRNlZUaS84SkludFMyZ2h5RWx5NVhIYVBuM25kOVBMQ1QK",
+      "endpoints": ["https://github.com/huangruiteng/loopx/releases/latest/download/desktop-updater.json"]
+    }
   }
 }

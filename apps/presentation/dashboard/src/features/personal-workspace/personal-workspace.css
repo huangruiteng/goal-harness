@@ -145,6 +145,23 @@
 .personal-priority-dot.is-medium { background: #e5a33d; }
 .personal-priority-dot.is-low { background: #3fae7c; }
 .personal-sidebar-footer { padding: 12px; border-top: 1px solid var(--pw-line); }
+.personal-sidebar-footer { flex-shrink: 0; }
+.personal-update-trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--pw-text); font: inherit; font-size: 13px; cursor: pointer; }
+.personal-update-trigger span { flex: 1; text-align: left; }
+.personal-update-trigger:hover { background: var(--pw-card); }
+.personal-update-trigger:focus-visible { outline: 2px solid #0070f3; outline-offset: 2px; }
+.personal-update-panel { position: fixed; inset: auto auto 80px 12px; margin: 0; width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 104px); overflow-y: auto; box-sizing: border-box; padding: 16px; color: var(--pw-text); background: var(--pw-card, #fff); font: inherit; font-size: 13px; line-height: 1.6; border: 1px solid var(--pw-line); border-radius: 12px; box-shadow: 0 8px 28px rgb(0 0 0 / 12%); }
+.personal-update-panel header { display: flex; align-items: center; justify-content: space-between; }
+.personal-update-panel button { min-height: 44px; padding: 6px 10px; color: inherit; background: var(--pw-card, #fff); border: 1px solid var(--pw-line); border-radius: 6px; cursor: pointer; }
+.personal-update-panel header button { min-width: 44px; display: grid; place-items: center; border: 0; }
+.personal-update-panel summary { min-height: 44px; align-content: center; cursor: pointer; }
+.personal-update-panel p { margin: 10px 0; }
+.personal-update-panel label, .personal-update-panel small, .personal-update-panel code { display: block; }
+.personal-update-panel select { width: 100%; min-height: 44px; margin-top: 6px; color: inherit; background: var(--pw-card); border: 1px solid var(--pw-line); border-radius: 6px; }
+.personal-update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.personal-update-actions button { min-height: 44px; padding: 6px 10px; border: 1px solid var(--pw-line); border-radius: 6px; }
+.personal-update-panel a { text-decoration: underline; }
+.personal-update-panel :focus-visible { outline: 2px solid #0070f3; outline-offset: 2px; }
 .personal-sidebar-utility { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 54px; padding: 7px 9px; border: 1px solid var(--pw-line-strong); border-radius: 10px; background: #fff; box-shadow: 0 1px 4px rgb(30 28 20 / 7%); font-size: 13px; }
 .personal-sidebar-utility:hover { border-color: #d6d2c8; background: #fff; box-shadow: 0 2px 7px rgb(30 28 20 / 10%); }
 .personal-sidebar-utility-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); }

@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, ArrowUpDown, Bot, ChevronDown, ChevronRight, LoaderCircle, Pause, Plus, RotateCcw, Settings2, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { DesktopUpdate } from "./desktop-update";
 import { useGoalOrder } from "./use-goal-order";
 
 import { localizedGoalState, useWorkspaceI18n } from "./i18n";
@@ -154,6 +155,7 @@ export function GoalSidebar({
       </nav>
 
       <div className="personal-sidebar-footer">
+        <DesktopUpdate />
         {onOpenSettings ? (
           <button aria-label={t("settings.open")} className="personal-sidebar-utility" onClick={onOpenSettings} type="button">
             <span className="personal-sidebar-utility-icon"><Settings2 size={17} /></span>
