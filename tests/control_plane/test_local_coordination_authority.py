@@ -525,6 +525,22 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     assert corrected_item["last_actor_agent_id"] == "agent-b"
     assert not state_file.exists()
 
+    # A note-only CLI edit must survive an independent provider readback too;
+    # accepting the option or exercising the text branch cannot prove this.
+    note_command = [*correction_command[:-2], "--note", "Correction context"]
+    note_result = subprocess.run(
+        note_command, capture_output=True, text=True, check=True, timeout=30
+    )
+    assert json.loads(note_result.stdout)["ok"] is True
+    noted = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
+    noted_item = next(
+        item for item in noted["todos"] if item["todo_id"] == "todo_claimable"
+    )
+    assert noted_item["note"] == "Correction context"
+    assert noted_item["text"] == "Corrected before claiming"
+    assert not noted_item.get("claimed_by")
+    assert not state_file.exists()
+
     claim_command = [
         sys.executable, "-m", "loopx.cli", "--format", "json",
         "--registry", str(registry_path), "todo", "claim", "--goal-id", "goal-a",
@@ -606,7 +622,7 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     assert created_item["text"] == "Create directly against promoted provider"
     assert created_item["claimed_by"] == "agent-a"
     assert after_create["authority_read"]["todo_read_model"]["todo_count"] == 4
-    assert claimed_item["note"] == claimable["note"]
+    assert claimed_item["note"] == "Correction context"
 
     # Real CLI, no Markdown file: provider data feeds an in-memory editor and
     # only requested fields return through TS CAS. Complex sibling fields do

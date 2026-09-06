@@ -43,6 +43,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "problem_context",
         "architecture_flow",
         "repository_reuse",
+        "observable_semantics",
         "changed_line_classification",
         "scope_fit",
         "symbol_map",
@@ -121,6 +122,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert contract["completion_gate"]["stale_head_verdict_allowed"] is False
     assert contract["completion_gate"]["blocking_evidence_verdicts"] == {
         "repository_reuse": ["unjustified_duplication", "not_yet_proven"],
+        "observable_semantics": ["unintended_drift", "not_yet_proven"],
         "change_proportionality": ["disproportionate", "not_yet_proven"],
         "default_off_isolation": ["not_isolated", "not_yet_proven"],
         "authority_semantics": ["misleading", "not_yet_proven"],
@@ -341,3 +343,81 @@ def test_reuse_evidence_compares_semantics_beyond_the_diff() -> None:
     assert "coexistence" in reuse["rule"]
     assert "not an automatic similarity detector" in reuse["rule"]
     assert "repository_reuse" in contract["verdict_policy"]["open_pr_unresolved_reuse"]
+
+
+@pytest.mark.parametrize(
+    "area",
+    [
+        "product_runtime",
+        "app_or_ui_surface",
+        "ci_or_release",
+        "build_or_config",
+        "agent_instruction_surface",
+        "public_entry_or_policy",
+    ],
+)
+def test_observable_parity_is_required_without_refactor_title_detection(
+    area: str,
+) -> None:
+    item = _item(areas={area: 1})
+    item["title"] = "Extract shared decision helper"
+    item["checks"] = {"counts": {"success": 51, "failure": 0}}
+    plan = build_review_plan(item)
+    assert plan["applicability"]["observable_semantics_required"] is True
+    assert plan["result_template"]["evidence"]["observable_semantics"] == {
+        "status": "unverified"
+    }
+
+
+@pytest.mark.parametrize("area", ["public_docs", "test_or_example"])
+def test_non_behavior_changes_do_not_invent_parity_execution(area: str) -> None:
+    plan = build_review_plan(_item(areas={area: 1}))
+    assert plan["applicability"]["observable_semantics_required"] is False
+    assert "observable_semantics" not in plan["required_evidence_ids"]
+
+
+def test_observable_semantics_covers_diagnostics_and_claim_neutral_note_paths() -> None:
+    contract = build_agent_response_contract()["review_execution_contract"]
+    parity = next(
+        row
+        for row in contract["evidence_requirements"]
+        if row["evidence_id"] == "observable_semantics"
+    )
+    assert parity["required_when"] == "behavior_bearing_change"
+    assert {
+        "baseline_revision",
+        "reviewed_head",
+        "caller_branch_inventory",
+        "comparison_rows",
+        "intentional_deltas",
+        "regression_sensitivity",
+        "unverified_dimensions",
+        "verdict",
+    } <= set(parity["fields"])
+    assert {
+        "accepted_inputs_and_defaults",
+        "eligibility_and_rejection_precedence",
+        "full_diagnostics_and_remediation",
+        "argument_to_persistence_readback",
+        "state_receipts_and_no_effects",
+        "replay_and_concurrent_updates",
+    } <= set(parity["comparison_dimensions"])
+    assert {
+        "input_and_pre_state",
+        "entrypoint_and_backend",
+        "baseline_observation",
+        "head_observation",
+        "expected_invariant_source",
+        "validation_evidence",
+    } <= set(parity["row_fields"])
+    assert parity["verdict_values"] == [
+        "equivalent",
+        "intentional_change_validated",
+        "unintended_drift",
+        "not_yet_proven",
+    ]
+    assert "reviewer-executed" in parity["rule"]
+    assert (
+        "observable_semantics"
+        in contract["verdict_policy"]["open_pr_unresolved_semantics"]
+    )
