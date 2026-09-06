@@ -579,11 +579,7 @@ def inspect_lark_event_inbox(
         "instruction": (
             "For an actionable item, first run `loopx lark-inbox processing` for "
             "its message_id, then translate it into a todo, vision correction, PR "
-            "update, or no-follow-up rationale. If the message semantically asks "
-            "this Agent for a periodic report, invoke `loopx periodic-report "
-            "request --goal-id <goal-id> --agent-id <agent-id> --source-ref "
-            "<message_id> --execute`; the Agent owns that semantic decision and "
-            "must not delegate it to keyword matching. Send and verify any required reply "
+            "update, or no-follow-up rationale. Send and verify any required reply "
             "before acknowledging the message_id. Follow reply_guidance for "
             "placement and editorial style. If no reply is required, run "
             "`loopx lark-inbox material-review` with a committed effect receipt "
