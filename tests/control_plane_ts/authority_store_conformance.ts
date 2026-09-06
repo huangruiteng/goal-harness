@@ -427,6 +427,88 @@ export function registerAuthorityStoreConformance(
       }
       assert.deepEqual(await store.loadAuthority(), afterRace);
     });
+    for (const fault of ["lease_replaced", "lost_response"] as const) {
+      test(`${providerName} conformance: hard-lease claim ${fault} (${native ? "native" : "v0"})`, async (t) => {
+        const {store, contender} = await factory(t);
+        const goalId = "goal-claim";
+        const projection = {...todoClaimProjection(goalId, native), handoff_mode: "hard_lease"};
+        assert.equal((await store.commitAuthority({
+          operation_id: "seed-hard-lease", expected_provider_revision: null,
+          next_projection: projection, events: [], receipts: [],
+        })).status, "applied");
+        const request = {
+          goal_id: goalId, todo_id: "todo-claim", claimed_by: "agent-a",
+          actor_agent_id: "agent-a", expected_role: "agent",
+          registered_agents: ["agent-a", "agent-b"], operation_id: "claim-hard-lease",
+          dry_run: false, now: new Date("2026-09-05T04:30:00Z"),
+        };
+        // Claim does not mint execution authority: an absent lease rejects
+        // without consuming the operation id or changing the provider head.
+        const before = await store.loadAuthority();
+        assert.equal((await executeCoordinationTodoClaim(store, request)).reason_code,
+          "handoff_mode_requires_lease");
+        assert.deepEqual(await store.loadAuthority(), before);
+        assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+        assert.equal(before.status, "loaded");
+        if (before.status !== "loaded") return;
+        const lease = {todo_id: request.todo_id, owner: "agent-a", status: "active",
+          lease_epoch: 1, expires_at: "2026-09-05T05:00:00Z"};
+        assert.equal((await store.commitAuthority(prepareCoordinationProjectionCommit({
+          goal_id: goalId, operation_id: "acquire-canonical-lease",
+          expected_provider_revision: before.provider_revision, projection: before.head,
+          mutations: [{kind: "lease_upsert", lease}],
+        }))).status, "applied");
+        const leased = await store.loadAuthority();
+        assert.equal(leased.status, "loaded");
+        if (leased.status !== "loaded") return;
+        const intercepted: AuthorityStore = {
+          storeIdentity: () => store.storeIdentity(),
+          loadAuthority: () => store.loadAuthority(),
+          readReceipt: (id) => store.readReceipt(id),
+          scanCommitted: (cursor, limit) => store.scanCommitted(cursor, limit),
+          commitAuthority: async (commit) => {
+            if (fault === "lease_replaced") {
+              assert.equal((await contender.commitAuthority(prepareCoordinationProjectionCommit({
+                goal_id: goalId, operation_id: "replace-lease-before-claim-commit",
+                expected_provider_revision: leased.provider_revision, projection: leased.head,
+                mutations: [{kind: "lease_upsert", lease: {...lease, owner: "agent-b", lease_epoch: 2}}],
+              }))).status, "applied");
+              return store.commitAuthority(commit);
+            }
+            assert.equal((await store.commitAuthority(commit)).status, "applied");
+            return {status: "ambiguous", reason_code: "lost_response",
+              reason: "commit response lost after persistence"};
+          },
+        };
+        const result = await executeCoordinationTodoClaim(intercepted, request);
+        assert.equal(result.status, fault === "lease_replaced" ? "conflict" : "recovered");
+        assert.equal((await store.readReceipt(request.operation_id)).status,
+          fault === "lease_replaced" ? "missing" : "found");
+        const after = await store.loadAuthority();
+        assert.equal(after.status, "loaded");
+        if (after.status !== "loaded") return;
+        const todo = (after.head.todos as Record<string, unknown>[])[0]!;
+        if (fault === "lease_replaced") {
+          assert.equal(todo.claimed_by, undefined);
+          assert.deepEqual(after.head.leases, [{...lease, owner: "agent-b", lease_epoch: 2}]);
+          assert.equal((await executeCoordinationTodoClaim(store, request)).reason_code,
+            "handoff_mode_requires_lease");
+        } else {
+          assert.equal(todo.claimed_by, "agent-a");
+          assert.deepEqual(after.head.leases, [lease]);
+          // Historical acceptance is retry evidence, not a fresh grant after expiry.
+          const expiredRequest = {...request, now: new Date("2026-09-05T06:00:00Z")};
+          assert.equal((await executeCoordinationTodoClaim(store, expiredRequest)).status, "replayed");
+          assert.equal((await executeCoordinationTodoClaim(store,
+            {...expiredRequest, operation_id: "fresh-expired-claim"})).reason_code,
+          "handoff_mode_requires_lease");
+          assert.equal((await executeCoordinationTodoClaim(store,
+            {...request, claimed_by: "agent-b", actor_agent_id: "agent-b"})).reason_code,
+          "coordination_operation_identity_mismatch");
+        }
+        assert.deepEqual(await store.loadAuthority(), after);
+      });
+    }
     test(`${providerName} conformance: provider-neutral Todo claim transaction (${native ? "native" : "v0"})`, async (t) => {
       const { store } = await factory(t);
       const goalId = "goal-claim";
