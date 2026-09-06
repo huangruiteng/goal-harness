@@ -2250,10 +2250,14 @@ into `write_reserved_run_artifacts` and into the `refresh-state` run-write
 path. The first shipped measurement source is the Codex CLI session rollout:
 `loopx refresh-state --usage-codex-session <rollout.jsonl>` reads only the
 newest aggregate `token_count` totals, the model id, the session id, and event
-timestamps — never prompts, completions, or tool output. The session must be
-bound explicitly; there is no automatic session discovery, because guessing a
-concurrent session risks attributing one session's spend to another run. A
-host that measures usage itself can instead pass one finished per-run
+timestamps — never prompts, completions, or tool output. The model label is
+bound to the context observed before the selected token snapshot; a later
+context without new usage cannot relabel that snapshot. A snapshot without a
+preceding model context is rejected. This binding does not allocate cumulative
+session usage across models. The session must be bound explicitly; there is no
+automatic session discovery, because guessing a concurrent session risks
+attributing one session's spend to another run. A host that measures usage
+itself can instead pass one finished per-run
 measurement with `--usage-json`. Without either flag, usage stays unknown.
 
 Cumulative host snapshots are converted to non-negative deltas at that
