@@ -81,11 +81,17 @@ Preview, stop, or resume a Goal without deleting its history, todos, or evidence
 \fBloopx evidence\-log \-\-goal\-id <goal\-id> \-\-agent\-id <agent\-id> \-\-thin\fR
 Read the current agent's thin public\-safe ledger before replan or handoff.
 .TP
+\fBloopx machine\-config \-\-help\fR
+Inspect typed machine policy, preview changes, and apply an exact plan revision.
+.TP
 \fBloopx todo \-\-help\fR
 Show todo lifecycle commands.
 .TP
 \fBloopx task\-lease \-\-help\fR
 Acquire, renew, transfer, release, or inspect a hard per\-todo lease.
+.TP
+\fBloopx coordination\-shadow \-\-help\fR
+Inspect, bootstrap, or revision\-fenced rollback the default\-off Stage 2C file shadow.
 .TP
 \fBloopx quota should\-run\fR
 Decide whether the next agent turn should run.
@@ -135,7 +141,7 @@ Generate a copy\-paste project connection prompt for an agent.
 Persist one stable host thread binding to an already registered LoopX agent.
 .TP
 \fBloopx resolve\-agent\-thread\fR
-Read one exact host thread binding across the current project without mutating authority.
+Read one exact host thread binding from an opaque id or copied Codex task deep link without mutating authority.
 .TP
 \fBloopx unbind\-agent\-thread\fR
 Remove one exact host thread binding without unregistering its agent or peer sessions.

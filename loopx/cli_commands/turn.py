@@ -48,7 +48,7 @@ from ..control_plane.turn_driver import (
 from ..quota import spend_quota_slot
 from ..state_refresh import refresh_state_run
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
-from ..todos import complete_goal_todo, resolve_todo_state_path, update_goal_todo
+from ..todos import resolve_todo_state_path
 from .lark_inbox import (
     build_lark_operator_inbox_urgency_projector,
     dispatch_goal_lark_turn_start_hooks,
@@ -61,6 +61,10 @@ from .turn_rendering import (
     render_loopx_turn_plan_markdown as _render_loopx_turn_plan_markdown,
 )
 from .turn_selection import turn_controller_advisory_primary
+from .turn_todo_writeback import (
+    write_turn_repair_update,
+    write_turn_validated_completion,
+)
 
 EXACT_SETTLEMENT_READBACK_NOT_FOUND = (
     "exact settlement readback unexpectedly returned not-found"
@@ -73,64 +77,6 @@ PrintPayload = Callable[
 FormatSelector = Callable[..., str]
 
 
-def write_turn_repair_update(
-    *,
-    registry_path: Path,
-    runtime_root_arg: str | None,
-    goal_id: str,
-    todo_id: str,
-    note: str,
-    evidence: str,
-    agent_id: str | None,
-) -> None:
-    """Record one repair-required Todo note under the effective runtime root.
-
-    ``runtime_root_arg`` is required on purpose: the Turn settlement must
-    hand down the same ``--runtime-root`` override the dispatch resolved, so
-    the legacy writer fence and the todo mutex of a promotion cannot split
-    from the Turn writeback path.
-    """
-
-    update_goal_todo(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        todo_id=todo_id,
-        role="agent",
-        note=note,
-        evidence=evidence,
-        agent_id=agent_id,
-        project=None,
-        dry_run=False,
-        runtime_root_arg=runtime_root_arg,
-    )
-
-
-def write_turn_validated_completion(
-    *,
-    registry_path: Path,
-    runtime_root_arg: str | None,
-    goal_id: str,
-    todo_id: str,
-    completion_turn_key: str,
-    evidence: str,
-    note: str,
-    agent_id: str | None,
-) -> dict[str, Any]:
-    """Complete one validated Todo under the effective runtime root."""
-
-    return complete_goal_todo(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        todo_id=todo_id,
-        role="agent",
-        completion_turn_key=completion_turn_key,
-        evidence=evidence,
-        note=note,
-        agent_id=agent_id,
-        project=None,
-        dry_run=False,
-        runtime_root_arg=runtime_root_arg,
-    )
 
 
 def handle_turn_command(
