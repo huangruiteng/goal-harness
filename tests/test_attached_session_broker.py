@@ -429,6 +429,64 @@ def test_attached_completion_uses_canonical_response_and_terminal_events(
     assert events[-1]["payload"]["response"] == response
 
 
+def test_attached_completion_replays_closeout_after_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatSessionStore(tmp_path)
+    session_id = str(_bind(store)["session"]["session_id"])
+    turn, _created = store.create_queued_turn(
+        session_id,
+        client_turn_id="attached-completion-recovery",
+        message="survive completion restart",
+        origin="web",
+    )
+    turn_id = str(turn["turn_id"])
+    claim_attached_agent_turn(
+        store=store,
+        session_id=session_id,
+        host_surface=HOST_SURFACE,
+        host_session_id=HOST_SESSION_ID,
+        claim_id="attached-recovery-claim",
+    )
+    append_events = store.append_completed_response_events
+
+    def crash_after_events(*args: object, **kwargs: object) -> None:
+        append_events(*args, **kwargs)  # type: ignore[arg-type]
+        raise RuntimeError("crash after attached completion events")
+
+    monkeypatch.setattr(store, "append_completed_response_events", crash_after_events)
+    with pytest.raises(RuntimeError, match="crash after attached completion events"):
+        complete_attached_agent_turn(
+            store=store,
+            session_id=session_id,
+            turn_id=turn_id,
+            host_surface=HOST_SURFACE,
+            host_session_id=HOST_SESSION_ID,
+            claim_id="attached-recovery-claim",
+            completion_id="attached-recovery-completion",
+            response={"message": "durable attached response"},
+        )
+
+    assert store.load_turn(session_id, turn_id)["status"] == "completing"  # type: ignore[index]
+    assert store.load_session(session_id)["status"] == "busy"  # type: ignore[index]
+
+    restarted = ChatSessionStore(tmp_path)
+
+    assert restarted.load_turn(session_id, turn_id)["status"] == "completed"  # type: ignore[index]
+    assert restarted.load_session(session_id)["status"] == "ready"  # type: ignore[index]
+    assert [
+        message["text"]
+        for message in restarted.messages(session_id)
+        if message.get("role") == "agent"
+    ] == ["durable attached response"]
+    assert [
+        event["kind"]
+        for event in restarted.events_after(session_id, turn_id, None)
+        if event.get("kind") == "turn.completed"
+    ] == ["turn.completed"]
+
+
 def test_chat_events_reconcile_writes_from_another_store_instance(tmp_path: Path) -> None:
     server_store = ChatSessionStore(tmp_path)
     session_id = str(_bind(server_store)["session"]["session_id"])
