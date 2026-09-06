@@ -43,6 +43,7 @@ from .goal_channel_contracts import (
     operation_packet,
     provider_idempotency_key,
     read_goal_channel_binding,
+    reusable_goal_topic_root,
     save_goal_connection,
     serialize_goal_binding_mutation,
     semantic_key,
@@ -558,6 +559,13 @@ def connect_lark_goal_topic(
 
     objective = goal_objective(goal)
     topic_text = f"LoopX Goal Topic: {objective}\nGoal ID: {goal_id}"
+    reusable_root = reusable_goal_topic_root(
+        read_goal_channel_binding(binding_path),
+        goal_id,
+        connection_id=connection_id,
+        provider_target=matched[1] if matched is not None else None,
+        chat_id=safe_chat_id,
+    )
     key = provider_idempotency_key(
         semantic_key(
             goal_id,
@@ -569,60 +577,63 @@ def connect_lark_goal_topic(
             topic_text,
         )
     )
-    sent = call(
-        runner,
-        lark_args(
-            cli_bin=effective_cli_bin,
-            profile=profile,
-            tail=[
-                "im",
-                "+messages-send",
-                "--chat-id",
-                safe_chat_id,
-                "--text",
-                topic_text,
-                "--idempotency-key",
-                key,
-                "--as",
-                "bot",
-                "--format",
-                "json",
-            ],
-        ),
-    )
-    root_message_id = find_first_string(
-        json_payload(sent),
-        {"message_id"},
-        MESSAGE_ID_PATTERN,
-    )
-    if sent.get("returncode") != 0 or not root_message_id:
-        return operation_packet(
-            ok=False,
-            goal_id=goal_id,
-            operation="connect_topic",
-            execute=True,
-            status="failed",
-            blocker="provider_api_failed",
-            public_summary="the Goal Topic root message could not be sent",
+    if reusable_root:
+        root_message_id = reusable_root
+    else:
+        sent = call(
+            runner,
+            lark_args(
+                cli_bin=effective_cli_bin,
+                profile=profile,
+                tail=[
+                    "im",
+                    "+messages-send",
+                    "--chat-id",
+                    safe_chat_id,
+                    "--text",
+                    topic_text,
+                    "--idempotency-key",
+                    key,
+                    "--as",
+                    "bot",
+                    "--format",
+                    "json",
+                ],
+            ),
         )
-    verified = message_readback_verified(
+        root_message_id = find_first_string(
+            json_payload(sent),
+            {"message_id"},
+            MESSAGE_ID_PATTERN,
+        )
+        if sent.get("returncode") != 0 or not root_message_id:
+            return operation_packet(
+                ok=False,
+                goal_id=goal_id,
+                operation="connect_topic",
+                execute=True,
+                status="failed",
+                blocker="provider_api_failed",
+                public_summary="the Goal Topic root message could not be sent",
+            )
+    if not message_readback_verified(
         runner=runner,
         cli_bin=effective_cli_bin,
         profile=profile,
         identity="bot",
         message_id=root_message_id,
-        expected_text=topic_text,
-    )
-    if not verified:
+        expected_text=f"Goal ID: {goal_id}" if reusable_root else topic_text,
+        expected_chat_id=safe_chat_id if reusable_root else None,
+    ):
         return operation_packet(
             ok=False,
             goal_id=goal_id,
             operation="connect_topic",
             execute=True,
-            status="sent_unverified",
+            status="blocked" if reusable_root else "sent_unverified",
             blocker="readback_mismatch",
-            public_summary="the Goal Topic was sent but could not be verified",
-            external_write_performed=True,
+            public_summary="the Goal Topic could not be verified; binding preserved",
+            external_write_performed=not bool(reusable_root),
         )
 
     connector_binding: dict[str, Any] | None = None
@@ -683,7 +694,7 @@ def connect_lark_goal_topic(
                 status="sent_verified_registration_failed",
                 blocker="agent_inbox_registration_failed",
                 public_summary="the Agent-scoped inbox could not be registered",
-                external_write_performed=True,
+                external_write_performed=not bool(reusable_root),
                 readback_verified=True,
             )
 
@@ -732,7 +743,7 @@ def connect_lark_goal_topic(
         execute=True,
         status="connected",
         public_summary="connected one Goal to a dedicated Lark topic",
-        external_write_performed=True,
+        external_write_performed=not bool(reusable_root),
         readback_verified=True,
         idempotency_key=key,
         details={

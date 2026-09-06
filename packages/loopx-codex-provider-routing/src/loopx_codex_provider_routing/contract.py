@@ -1604,18 +1604,20 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     if preset not in {"legacy-ab-sol", "abc-sol-astra"}:
         raise ValueError("unsupported snapshot routing preset")
     expected_hidden = {"gpt-5.6-sol"}
+    expected_rows = expected_visible
     if preset == "abc-sol-astra":
-        from .selectors import MODEL_FAMILIES, ROUTES
+        from .selectors import MODEL_FAMILIES, ROUTES, VISIBLE_SELECTORS
 
-        expected_visible = set(ROUTES) | {
+        expected_rows = set(ROUTES) | {
             "ark/deepseek-v4-flash",
             "deepseek-v4-flash",
             "deepseek-v4-flash-ga-260731",
             "deepseek-v4-pro-ga-260813",
         }
-        expected_hidden = set(MODEL_FAMILIES)
-    expected_fast = {slug for slug in expected_visible if slug.startswith("fast/")}
-    expected_native = {slug for slug in expected_visible if "gpt-" in slug}
+        expected_visible = set(VISIBLE_SELECTORS)
+        expected_hidden = set(MODEL_FAMILIES) | (expected_rows - expected_visible)
+    expected_fast = {slug for slug in expected_rows if slug.startswith("fast/")}
+    expected_native = {slug for slug in expected_rows if "gpt-" in slug}
     checks: list[dict[str, Any]] = []
 
     def check(check_id: str, passed: bool, detail: str) -> None:
@@ -1633,7 +1635,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     check(
         "hidden_alias",
         expected_hidden <= hidden,
-        "bare compatibility alias remains hidden",
+        "compatibility aliases remain hidden",
     )
     modalities = snapshot.get("input_modalities")
     if not isinstance(modalities, Mapping):
@@ -1655,12 +1657,12 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     check(
         "fast_projection",
         fast_models == expected_fast,
-        "Fast is exposed as explicit sibling rows",
+        "Fast compatibility rows retain their tier metadata",
     )
     selector_tiers = snapshot.get("selector_default_service_tiers")
     if not isinstance(selector_tiers, Mapping):
         raise TypeError("snapshot.selector_default_service_tiers must be an object")
-    standard_selectors = expected_visible - fast_models
+    standard_selectors = expected_rows - fast_models
     check(
         "fast_default_off",
         snapshot.get("default_service_tier") == "default"
@@ -1733,7 +1735,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         expected_traversal = {
             slug: {
                 "entrypoint": "affinity_then_first"
-                if slug.removeprefix("fast/").startswith("auto/")
+                if slug.removeprefix("fast/").startswith(("auto/", "auto-with-ds/"))
                 or slug == "gpt-5.6-luna"
                 else f"codex-{route['order'][0]}",
                 "ordered_candidates": [f"codex-{slot}" for slot in route["order"]]

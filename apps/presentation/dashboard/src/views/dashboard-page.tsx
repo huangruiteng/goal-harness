@@ -70,6 +70,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { PersonalWorkspacePage } from "../features/personal-workspace/personal-workspace-page";
+import { useWorkspaceI18n } from "../features/personal-workspace/i18n";
 import {
   normalizePersonalHomeModel,
   type WorkspaceAgentOption,
@@ -149,7 +150,7 @@ type DataSource =
   | { kind: "url"; label: string };
 
 async function fetchStatusPayload(url: string) {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} while loading ${url}`);
   }
@@ -190,6 +191,7 @@ type TodoExplorerItem = {
 };
 
 type PersonalAgentTodoItem = {
+  resumeWhen?: string | null;
   claimedBy?: string | null;
   done: boolean;
   evidence?: string | null;
@@ -699,8 +701,10 @@ function personalTodoText(todo: TodoItem) {
 
 function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): PersonalAgentTodoItem {
   return {
+    resumeWhen: todo.resume_when ?? null,
     claimedBy: todo.claimed_by ?? null,
-    done: todo.done,
+    // Legacy summaries mark deferred entries checked; they are not completed work.
+    done: todo.status === "deferred" ? false : todo.done,
     evidence: todo.evidence ? compactShareText(todo.evidence, 96) : null,
     index: todo.index,
     priority: todo.priority ?? null,
@@ -712,8 +716,21 @@ function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): Perso
   };
 }
 
+// Owner Workspace needs the queue, not the bounded public-share preview.
+// Use the same items for cards and completion deduplication.
+function personalAgentTodoItems(row: GoalDirectoryRow): TodoItem[] {
+  const queue = row.queueItem?.agent_todos;
+  const items = queue?.items ?? row.queueItem?.project_asset?.agent_todos?.items ?? [];
+  const merged = new Map(items.map((todo) => [todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`, todo]));
+  for (const todo of queue?.deferred_items ?? []) {
+    const key = todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`;
+    if (!merged.has(key)) merged.set(key, todo);
+  }
+  return [...merged.values()];
+}
+
 function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
-  return (getShareTodos(row, "agent")?.items ?? []).map((todo) => personalAgentTodoFromItem(todo, row));
+  return personalAgentTodoItems(row).map((todo) => personalAgentTodoFromItem(todo, row));
 }
 
 function personalSubagentDomainCandidates(
@@ -775,7 +792,7 @@ function mergePersonalAgentTodos(
 /**
  * Projected completion facts for a Goal. The status payload reports completed
  * Todos as a count (project_asset.agent_todos.done) plus a bounded
- * recent-completed lane; the items list itself only carries open Todos.
+ * recent-completed lane. Queue items may also include completed Todos.
  */
 function personalAgentTodoFacts(row: GoalDirectoryRow): {
   doneTodoCount: number;
@@ -784,13 +801,13 @@ function personalAgentTodoFacts(row: GoalDirectoryRow): {
 } {
   const assetTodos = row.queueItem?.project_asset?.agent_todos;
   const queueTodos = row.queueItem?.agent_todos;
-  const items = assetTodos?.items?.length ? assetTodos.items : queueTodos?.items ?? [];
+  const items = personalAgentTodoItems(row);
   const doneFromCount = assetTodos?.advancement_done_count
     ?? queueTodos?.advancement_done_count
     ?? assetTodos?.done
     ?? queueTodos?.done_count
     ?? null;
-  const doneFromItems = items.filter((todo) => todo.done).length;
+  const doneFromItems = items.filter((todo) => todo.done && todo.status !== "deferred").length;
   const doneTodoCount = Math.max(doneFromCount ?? 0, doneFromItems);
   const seenTodoIds = new Set(
     items
@@ -1342,6 +1359,7 @@ function PersonalGoalHome({
   toggleTheme: () => void;
 }) {
   const readOnly = statusSourceControl.activeSource.readOnly;
+  const { t } = useWorkspaceI18n();
   const [runtimeAgents, setRuntimeAgents] = useState<Array<{
     adapter_kind: string;
     agent_id: string;
@@ -1429,6 +1447,7 @@ function PersonalGoalHome({
   const [sendingContextId, setSendingContextId] = useState<string | null>(null);
   const [runtimeBindings, setRuntimeBindings] = useState<Record<string, PersonalRuntimeBinding>>({});
   const [executionSessions, setExecutionSessions] = useState<ChatSessionSummary[]>([]);
+  const [executionDiscoveryError, setExecutionDiscoveryError] = useState<"partial" | "offline" | null>(null);
   const [executionSessionSnapshots, setExecutionSessionSnapshots] = useState<Record<string, ChatSessionSnapshot>>({});
   const managerMessageId = useRef(1);
   const proposalId = useRef(1);
@@ -1782,6 +1801,7 @@ function PersonalGoalHome({
   }, [readOnly, sessionDiscoveryKey, selectedGoal?.goalId]);
 
   useEffect(() => {
+    setExecutionDiscoveryError(null);
     if (readOnly) {
       setExecutionSessions([]);
       setExecutionSessionSnapshots({});
@@ -1794,7 +1814,15 @@ function PersonalGoalHome({
     }
     let cancelled = false;
     let timer = 0;
+    let failures = 0;
+    setExecutionSessions([]);
+    setExecutionSessionSnapshots({});
     const discover = async () => {
+      if (cancelled) return;
+      if (document.hidden) {
+        timer = window.setTimeout(() => void discover(), 10_000);
+        return;
+      }
       try {
         const listed = await fetchChatSessions({ goalId: selectedGoal.goalId });
         if (!cancelled) {
@@ -1802,6 +1830,9 @@ function PersonalGoalHome({
           setExecutionSessions(taskSessions);
           const snapshots = await Promise.allSettled(taskSessions.map((session) => fetchChatSession(session.session_id)));
           if (!cancelled) {
+            const partialFailure = snapshots.some((result) => result.status === "rejected");
+            failures = partialFailure ? failures + 1 : 0;
+            setExecutionDiscoveryError(partialFailure ? "partial" : null);
             setExecutionSessionSnapshots(Object.fromEntries(snapshots.flatMap((result, index) => {
               if (result.status !== "fulfilled") return [];
               return [[taskSessions[index].session_id, result.value]];
@@ -1809,9 +1840,10 @@ function PersonalGoalHome({
           }
         }
       } catch {
-        // Durable Todos remain visible while the local execution runtime reconnects.
+        failures += 1;
+        if (!cancelled) setExecutionDiscoveryError("offline");
       }
-      if (!cancelled) timer = window.setTimeout(() => void discover(), 2_000);
+      if (!cancelled) timer = window.setTimeout(() => void discover(), Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4)));
     };
     void discover();
     return () => {
@@ -2489,6 +2521,7 @@ function PersonalGoalHome({
   };
   return (
     <div className={theme === "dark" ? "dark" : ""} data-testid="personal-goal-home">
+      {executionDiscoveryError ? <p role="status" className="m-0 bg-amber-50 px-4 py-2 text-sm text-amber-900">{t(executionDiscoveryError === "partial" ? "runs.discoveryPartial" : "runs.discoveryOffline")}</p> : null}
       <PersonalWorkspacePage
         agents={agentOptions.map((agent) => ({
           adapterKind: agent.adapterKind,
@@ -2717,12 +2750,12 @@ function StatusRequestView({
                   <>
                     <p className="mt-2 break-words text-sm leading-6 text-slate-500 dark:text-zinc-400">
                       {statusServiceUnavailable
-                        ? "LoopX 状态服务未连接。请从 dashboard 目录运行 npm run dev；它会同时启动 5173、8766 和 8767。"
+                        ? "本地状态服务暂时未连接。升级或启动期间可能短暂断开，请重试；仍失败时重新打开 LoopX App，或运行 loopx doctor。"
                         : error}
                     </p>
                     {statusServiceUnavailable ? (
                       <p className="mt-2 text-xs leading-5 text-slate-400 dark:text-zinc-500">
-                        远程 SSH 开发只需转发 5173；状态请求会通过 Vite 转发到远程 8766。
+                        重新加载不会执行任务，也不会改变 Goal 配置。
                       </p>
                     ) : null}
                     <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -2735,7 +2768,9 @@ function StatusRequestView({
                       </Button>
                     </div>
                   </>
-                ) : null}
+                ) : <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-zinc-400" role="status">
+                  正在读取 Goal 状态，历史较多时可能需要几秒。页面仍在响应，请稍候。 / Loading Goal state; this may take a few seconds.
+                </p>}
               </div>
             </CardContent>
           </Card>
@@ -2784,8 +2819,7 @@ export function DashboardPage() {
   );
 
   const statusRequestActive = source.kind === "example"
-    && Boolean(activeStatusRequestUrl)
-    && Boolean(loadError && requestedStatusUrl);
+    && !exampleModeRequested;
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
   const goalRows = useMemo(
@@ -3058,8 +3092,8 @@ export function DashboardPage() {
         error={loadError}
         isLoading={isLoading}
         onReset={resetToExample}
-        onRetry={() => void loadFromUrl(activeStatusRequestUrl)}
-        requestedUrl={activeStatusRequestUrl}
+        onRetry={() => void loadFromUrl(activeStatusRequestUrl || defaultGlobalStatusUrl)}
+        requestedUrl={activeStatusRequestUrl || defaultGlobalStatusUrl}
         theme={theme}
         toggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />

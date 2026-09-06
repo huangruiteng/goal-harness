@@ -16,6 +16,7 @@ export type WorkspaceHomeLane =
   | "stopped";
 
 export type WorkspaceAgentTodo = {
+  resumeWhen?: string | null;
   claimedBy?: string | null;
   dependencies?: string[];
   done: boolean;

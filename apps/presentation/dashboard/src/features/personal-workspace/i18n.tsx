@@ -1,11 +1,11 @@
 import {
-  createContext,
   useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { WorkspaceI18nContext, type WorkspaceI18nValue } from "./workspace-i18n-context";
 
 export const workspaceLocaleStorageKey = "loopx-pw-locale";
 
@@ -88,10 +88,10 @@ const en = {
   "conversation.replying": "Replying",
   "conversation.title": "Manager conversation",
   "conversation.toTask": "Convert to Task",
-  "digest.away": "While you were away",
-  "digest.completed": "completed",
-  "digest.failed": "issues",
-  "digest.needsYou": "need confirmation",
+  "digest.away": "Runs since your previous visit",
+  "digest.completed": "new completions",
+  "digest.failed": "new failed/interrupted runs",
+  "digest.needsYou": "currently need confirmation",
   "feedback.applying": "Running: {title}",
   "feedback.cancelFailed": "Cancel failed: {error}",
   "feedback.completed": "Completed: {title}",
@@ -290,6 +290,9 @@ const en = {
   "drawer.taskNextOpen": "Advance or update status",
   "drawer.taskOrdinary": "Task",
   "drawer.taskStatusBlocked": "Blocked",
+  "drawer.taskStatusDeferred": "Deferred",
+  "drawer.resumeWhen": "Resume condition",
+  "drawer.taskNextDeferred": "Wait for the resume condition, then reassess",
   "drawer.taskStatusCompleted": "Completed",
   "drawer.taskStatusOpen": "Ready",
   "drawer.taskSuccessor": "Create follow-up Todo",
@@ -804,6 +807,14 @@ const en = {
   "tasks.chatViewReply": "View reply",
   "tasks.convertToTask": "Convert to Task",
   "tasks.completed": "Completed",
+  "runs.discoveryPartial": "Some execution details are unavailable. Reconnecting; task summaries are not live execution status.",
+  "runs.discoveryOffline": "Execution service unavailable. Reconnecting; retained task summaries may be stale.",
+  "files.openConversation": "Go to conversation",
+  "files.exportSummary": "Export summary",
+  "tasks.viewDescription": "Decisions first, then work and recent completions",
+  "tasks.viewLabel": "Task view",
+  "tasks.listView": "List",
+  "tasks.boardView": "Board",
   "tasks.completedSummary": "{count} tasks completed. Recent details are projected by the control plane when needed.",
   "tasks.emptyCompleted": "No completed tasks yet.",
   "tasks.emptyConfirm": "No tasks waiting for confirmation.",
@@ -914,10 +925,10 @@ const zhCN: Record<WorkspaceMessageKey, string> = {
   "conversation.replying": "正在回复",
   "conversation.title": "管家对话",
   "conversation.toTask": "转为 Task",
-  "digest.away": "你不在的时候",
-  "digest.completed": "完成",
-  "digest.failed": "异常",
-  "digest.needsYou": "等你确认",
+  "digest.away": "自上次访问以来的运行记录",
+  "digest.completed": "新增完成运行",
+  "digest.failed": "新增失败或中断",
+  "digest.needsYou": "当前待确认",
   "feedback.applying": "正在执行：{title}",
   "feedback.cancelFailed": "取消失败：{error}",
   "feedback.completed": "已完成：{title}",
@@ -1116,6 +1127,9 @@ const zhCN: Record<WorkspaceMessageKey, string> = {
   "drawer.taskNextOpen": "推进或更新状态",
   "drawer.taskOrdinary": "普通任务",
   "drawer.taskStatusBlocked": "受阻",
+  "drawer.taskStatusDeferred": "已延期",
+  "drawer.resumeWhen": "恢复条件",
+  "drawer.taskNextDeferred": "等待恢复条件满足后重新评估",
   "drawer.taskStatusCompleted": "已完成",
   "drawer.taskStatusOpen": "待执行",
   "drawer.taskSuccessor": "创建后续 Todo",
@@ -1630,6 +1644,14 @@ const zhCN: Record<WorkspaceMessageKey, string> = {
   "tasks.chatViewReply": "查看回复",
   "tasks.convertToTask": "转为 Task",
   "tasks.completed": "已完成",
+  "runs.discoveryPartial": "部分执行详情暂不可用，正在重连；任务摘要不代表实时执行状态。",
+  "runs.discoveryOffline": "执行服务暂不可用，正在重连；保留的任务摘要可能已过时。",
+  "files.openConversation": "前往会话",
+  "files.exportSummary": "导出摘要",
+  "tasks.viewDescription": "先处理待确认，再查看工作与完成记录",
+  "tasks.viewLabel": "任务视图",
+  "tasks.listView": "列表",
+  "tasks.boardView": "看板",
   "tasks.completedSummary": "已完成 {count} 项，近期完成明细由控制面按需投影。",
   "tasks.emptyCompleted": "还没有完成的任务。",
   "tasks.emptyConfirm": "没有待确认的任务。",
@@ -1683,14 +1705,6 @@ export function readWorkspaceLocale(): WorkspaceLocale {
 }
 
 export type WorkspaceTranslate = (key: WorkspaceMessageKey, values?: Record<string, string | number>) => string;
-
-type WorkspaceI18nValue = {
-  locale: WorkspaceLocale;
-  setLocale: (locale: WorkspaceLocale) => void;
-  t: WorkspaceTranslate;
-};
-
-const WorkspaceI18nContext = createContext<WorkspaceI18nValue | null>(null);
 
 export function WorkspaceI18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<WorkspaceLocale>(readWorkspaceLocale);

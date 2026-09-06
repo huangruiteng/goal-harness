@@ -170,7 +170,16 @@ binds its exact SHA-256, and the Goal Channel sink may advance that binding into
 publication cursor only after delivery readback succeeds. The compact
 `periodic_report_workspace_index_v0` hot path contains identity, delivery time,
 predecessor lineage, and an exact content-addressed detail reference, but no
-report prose. The full projection is a loopback-only cold read and must match
+report prose. A request that explicitly supplies `limit` or `offset` opts into
+the bounded window response; this keeps an old strict v0 reader compatible with
+a newer service, while a new reader accepts both the legacy and windowed v0
+shapes during staggered upgrades. The window returns the newest 100 items by
+default, accepts `limit` in 0..200 and `offset` in 0..10000, and reports
+`returned_count`, `total_count`, and `truncated`. `count` means the number of
+items returned in this window. Items sort by `delivered_at` newest-first using
+chronological timestamp comparison, then by cursor path descending for a stable
+tie-break. The 10000 offset cap makes this a finite browsing window, not an
+unbounded historical traversal. The full projection is a loopback-only cold read and must match
 the current publication cursor. Approval-pending, generation-only, stale, or
 digest-mismatched projections therefore fail closed instead of appearing as
 published.

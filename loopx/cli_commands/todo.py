@@ -84,6 +84,12 @@ from .post_writeback import (
     PostWritebackProjectionBuilder,
     dispatch_committed_cli_post_writeback_hooks,
 )
+from ..control_plane.agents.capability_gate import (
+    runtime_capabilities_for_cli_projection,
+)
+from ..control_plane.turn_driver.journal_store import (
+    turn_journal_observed_capabilities,
+)
 
 
 def _fsync_parent_directory(path: Path) -> None:
@@ -377,6 +383,15 @@ def register_todo_command(
         help="For capture-followups, append one public-safe agent follow-up todo. Repeat up to the requested batch.",
     )
     todo_parser.add_argument("--todo-id", help="Structured todo id from status/quota, such as todo_ab12cd34ef56.")
+    todo_parser.add_argument(
+        "--claim-operation-id",
+        help=(
+            "For todo claim on promoted canonical authority only, reuse this public-safe "
+            "operation id across retries. Changed intent with the same id is rejected; "
+            "receipt replay proves historical acceptance, not current lease ownership. "
+            "Omit to retain a fresh operation id per invocation."
+        ),
+    )
     todo_parser.add_argument(
         "--turn-instance-id",
         help=(
@@ -964,6 +979,7 @@ def handle_todo_command(
                 claimed_by=args.claimed_by,
                 agent_id=args.agent_id,
                 claim_only=True,
+                claim_operation_id=args.claim_operation_id,
                 **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
@@ -1280,6 +1296,19 @@ def handle_todo_command(
         identity = settlement_identity.as_dict()
         committed_at = str(payload.get("updated_at") or "").strip()
         if committed_at:
+            # Capability evidence comes only from a Turn journal the TS
+            # journal owner validated against this completion's full
+            # settlement identity (goal/agent/binding/turn/effect): the
+            # journaled envelope froze what this exact Turn's scheduler
+            # observed. No fully-bound journal means no evidence, and gated
+            # successors stay excluded (fail closed).
+            observed = turn_journal_observed_capabilities(
+                resolve_runtime_root(load_registry(registry_path), runtime_root_arg),
+                settlement_identity=identity,
+            )
+            projected = runtime_capabilities_for_cli_projection(observed)
+            if projected:
+                payload["available_capabilities"] = projected
             payload["post_writeback_hooks"] = (
                 dispatch_committed_cli_post_writeback_hooks(
                     payload=payload,

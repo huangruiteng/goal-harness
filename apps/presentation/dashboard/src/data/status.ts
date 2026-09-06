@@ -65,6 +65,7 @@ export const todoItemSchema = z.object({
   todo_id: z.string().optional().nullable(),
   role: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
+  resume_when: z.string().optional().nullable(),
   priority: z.string().optional().nullable(),
   title: z.string().optional().nullable(),
   archive_state: z.string().optional().nullable(),
@@ -87,6 +88,7 @@ export const todoGroupSchema = z.object({
   done_count: z.number().optional().default(0),
   advancement_done_count: z.number().optional(),
   items: z.array(todoItemSchema).optional().default([]),
+  deferred_items: z.array(todoItemSchema).optional(),
 });
 
 export const todoIndexItemSchema = todoItemSchema.extend({
@@ -854,13 +856,35 @@ export const periodicReportIndexItemSchema = z.object({
   detail_ref: periodicReportDetailRefSchema,
 }).strict();
 
+const periodicReportIndexBaseSchema = z.object({
+  schema_version: z.literal("periodic_report_workspace_index_v0"),
+  count: z.number().int().nonnegative(),
+  items: z.array(periodicReportIndexItemSchema),
+});
+
+const periodicReportWindowedIndexSchema = periodicReportIndexBaseSchema.extend({
+  returned_count: z.number().int().nonnegative(),
+  total_count: z.number().int().nonnegative(),
+  limit: z.number().int().nonnegative(),
+  offset: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+}).strict();
+
+const periodicReportLegacyIndexSchema = periodicReportIndexBaseSchema.strict().transform((value) => ({
+  ...value,
+  returned_count: value.count,
+  total_count: value.count,
+  limit: value.count,
+  offset: 0,
+  truncated: false,
+}));
+
 export const periodicReportIndexResponseSchema = z.object({
   ok: z.literal(true),
-  periodic_reports: z.object({
-    schema_version: z.literal("periodic_report_workspace_index_v0"),
-    count: z.number().int().nonnegative(),
-    items: z.array(periodicReportIndexItemSchema),
-  }).strict(),
+  periodic_reports: z.union([
+    periodicReportWindowedIndexSchema,
+    periodicReportLegacyIndexSchema,
+  ]),
 }).strict();
 
 export const periodicReportProjectionSchema = z.object({

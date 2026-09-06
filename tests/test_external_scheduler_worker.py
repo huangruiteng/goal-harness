@@ -139,7 +139,6 @@ def test_default_invocation_persists_backoff_state(
 
 def test_unchanged_limit_runs_final_quota_probe_before_stop(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "final-probe"
     fake_cli = root / "fake-loopx"
@@ -159,7 +158,7 @@ def test_unchanged_limit_runs_final_quota_probe_before_stop(
         "counter.write_text(str(count + 1), encoding='utf-8')\n"
         f"print({payload!r})\n",
     )
-    monkeypatch.setattr(worker.time, "sleep", lambda _seconds: None)
+    requested_sleeps: list[float] = []
     args = _args(
         fake_cli=fake_cli,
         state_file=root / "state.json",
@@ -167,8 +166,9 @@ def test_unchanged_limit_runs_final_quota_probe_before_stop(
     )
     args.once = False
 
-    assert worker.run_worker(args) == 0
+    assert worker.run_worker(args, sleep=requested_sleeps.append) == 0
     assert counter.read_text(encoding="utf-8") == "3"
+    assert requested_sleeps == [60]
 
 
 def test_quota_probe_timeout_enters_tick_error(tmp_path: Path) -> None:

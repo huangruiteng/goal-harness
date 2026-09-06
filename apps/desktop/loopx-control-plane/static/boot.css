@@ -5,6 +5,13 @@ main { width: min(440px, calc(100vw - 48px)); padding: 32px; border: 1px solid #
 header { display: flex; align-items: center; gap: 12px; }
 .mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 8px; background: #171717; color: white; font-weight: 650; }
 h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+details { margin-top: 20px; font-size: 14px; }
+summary { cursor: pointer; padding: 10px 0; }
+button, select { min-height: 44px; padding: 8px 12px; margin-top: 8px; border: 1px solid #8f8f8f; border-radius: 6px; font: inherit; color: inherit; background: transparent; }
+label { display: block; margin-top: 12px; }
+button { cursor: pointer; }
+button:disabled { cursor: wait; opacity: .6; }
+:focus-visible { outline: 2px solid #0070f3; outline-offset: 2px; }
 p { margin: 16px 0 0; color: #4d4d4d; font-size: 14px; line-height: 1.55; }
 .progress { height: 2px; margin-top: 24px; overflow: hidden; background: #ebebeb; }
 .progress::after { content: ""; display: block; width: 45%; height: 100%; background: #171717; animation: travel 1.1s ease-in-out infinite alternate; }

@@ -45,6 +45,11 @@ import {
   COORDINATION_TODO_CREATE_RESULT_SCHEMA,
   executeCoordinationTodoCreate,
 } from "./todo_create.ts";
+import {
+  COORDINATION_TODO_UPDATE_REQUEST_SCHEMA,
+  COORDINATION_TODO_UPDATE_RESULT_SCHEMA,
+  executeCoordinationTodoUpdate,
+} from "./todo_update.ts";
 import { editCoordinationTodo, TODO_COMPATIBILITY_EDIT_RESULT_SCHEMA } from "./todo_compatibility_edit.ts";
 
 export const LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA =
@@ -462,6 +467,11 @@ function decodeMutations(value: unknown): CoordinationProjectionMutation[] {
         return {
           kind: "todo_upsert",
           todo: canonicalAuthorityObject(mutation.todo, `mutations[${index}].todo`),
+          ...(mutation.clear_fields === undefined ? {} : {
+            clear_fields: requiredUniqueStrings(
+              mutation.clear_fields, `mutations[${index}].clear_fields`,
+            ),
+          }),
         };
       case "todo_remove":
         return {
@@ -634,6 +644,47 @@ export async function createLocalCoordinationTodo(
       reason: error instanceof Error ? error.message : "invalid Todo create request",
       ...providerEvidence,
     };
+  }
+}
+
+/** Local file-provider adapter for one provider-neutral metadata mutation. */
+export async function updateLocalCoordinationTodo(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  const providerEvidence = {source_authority: "file_v0",
+    decision_read_from_provider: true, legacy_fallback_used: false};
+  try {
+    const input = requireJsonObject(value, "local coordination Todo update request");
+    if (input.schema_version !== COORDINATION_TODO_UPDATE_REQUEST_SCHEMA) {
+      throw new TypeError("local coordination Todo update request schema mismatch");
+    }
+    if (!Array.isArray(input.registered_agents) || !Array.isArray(input.clear_fields)) {
+      throw new TypeError("registered_agents and clear_fields must be JSON arrays");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    return {...await executeCoordinationTodoUpdate(store, {
+      goal_id: goalId, todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
+      expected_role: input.role === null || input.role === undefined ? null :
+        requireAuthorityStoreId(input.role, "role"),
+      actor_agent_id: input.actor_agent_id === null || input.actor_agent_id === undefined ? null :
+        claimAgentValue(input.actor_agent_id, "actor_agent_id"),
+      registered_agents: input.registered_agents.map((agent) =>
+        claimAgentValue(agent, "registered agent")),
+      operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+      patch: requireJsonObject(input.patch, "Todo update patch"),
+      clear_fields: input.clear_fields.map((field) => claimAgentValue(field, "clear field")),
+      dry_run: input.dry_run as boolean,
+      now: claimObservedAt(input.observed_at),
+    }), ...providerEvidence};
+  } catch (error) {
+    return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA, status: "failed",
+      changed: false, reason_code: "invalid_local_coordination_todo_update_request",
+      reason: error instanceof Error ? error.message : "invalid Todo update request",
+      ...providerEvidence};
   }
 }
 

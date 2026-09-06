@@ -405,35 +405,43 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
       fixture.attention_queue.items.push({
         agent_todos: {
           advancement_done_count: 42,
-          done_count: 4,
+          done_count: 6,
+          deferred_count: 2,
           items: [
             currentTodo,
             { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle, title: idlessLongTitle },
+            { done: false, index: 7, role: "agent", status: "open", task_class: "advancement_task", text: "Full queue follow-up", title: "Full queue follow-up", todo_id: "todo-progress-full" },
+            { done: true, index: 8, role: "agent", status: "deferred", resume_when: "todo_done:todo-progress-full", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
             { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
             { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
             { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
             { done: true, index: 6, role: "agent", status: "done", task_class: "continuous_monitor", text: "Completed Monitor", title: "Completed Monitor", todo_id: "todo-progress-monitor" },
           ],
-          open_count: 2,
+          deferred_items: [
+            { done: true, index: 8, role: "agent", status: "deferred", resume_when: "todo_done:todo-progress-full", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
+            { done: true, index: 9, role: "agent", status: "deferred", task_class: "advancement_task", text: "Deferred follow-up outside preview", title: "Deferred follow-up outside preview", todo_id: "todo-progress-deferred-extra" },
+          ],
+          open_count: 3,
           source_section: "Agent Todo",
-          total_count: 6,
+          total_count: 9,
         },
         goal_id: "progress-projection",
         project_asset: {
           agent_todos: {
             advancement_done_count: 42,
-            done: 4,
+            done: 6,
+            deferred_count: 2,
             items: [
               currentTodo,
               { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle.slice(0, 220), title: idlessLongTitle.slice(0, 220) },
             ],
-            open: 2,
+            open: 3,
             recent_completed_advancement_items: [
               { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
               { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
               { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
             ],
-            total: 6,
+            total: 9,
           },
           gate: "none",
           next_action: "Current Todo",
@@ -563,7 +571,11 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
   });
   await page.route("**/periodic-report-workspace?*", async (route) => {
-    const goalId = new URL(route.request().url()).searchParams.get("goal_id");
+    const requestUrl = new URL(route.request().url());
+    const goalId = requestUrl.searchParams.get("goal_id");
+    if (requestUrl.searchParams.get("limit") !== "100" || requestUrl.searchParams.get("offset") !== "0") {
+      throw new Error("Periodic-report index request did not negotiate a bounded window");
+    }
     const items = goalId === periodicReportProjection.goal_id ? [{
       goal_id: periodicReportProjection.goal_id,
       agent_id: periodicReportProjection.agent_id,
@@ -580,7 +592,19 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     }] : [];
     await route.fulfill({
       contentType: "application/json",
-      json: { ok: true, periodic_reports: { schema_version: "periodic_report_workspace_index_v0", count: items.length, items } },
+      json: {
+        ok: true,
+        periodic_reports: {
+          schema_version: "periodic_report_workspace_index_v0",
+          count: items.length,
+          returned_count: items.length,
+          total_count: items.length,
+          limit: 100,
+          offset: 0,
+          truncated: false,
+          items,
+        },
+      },
       status: 200,
     });
   });
@@ -1887,7 +1911,26 @@ async function main() {
     const progressHeader = page.locator(".personal-channel-title p");
     if (!(await progressHeader.innerText()).includes("Current Todo")) throw new Error(`Goal header did not prefer the current Todo: ${await progressHeader.innerText()}`);
     const progressColumn = page.locator(".personal-object-list", { hasText: "待执行 / 进行中" });
-    if ((await progressColumn.locator(".personal-task-card").count()) !== 2) throw new Error("Id-less long Todo was duplicated across compact and full projections");
+    if ((await progressColumn.locator(".personal-task-card").count()) !== 5) throw new Error("Id-less long Todo was duplicated across compact and full projections");
+    await progressColumn.getByText("Full queue follow-up", { exact: true }).waitFor();
+    await progressColumn.getByText("Deferred queue task", { exact: true }).waitFor();
+    await progressColumn.getByText("Deferred follow-up outside preview", { exact: true }).waitFor();
+    async function assertDeferredTask(conditionExpected = true) {
+      const title = conditionExpected ? "Deferred queue task" : "Deferred follow-up outside preview";
+      const card = page.locator(".personal-task-card", { hasText: title });
+      await card.getByText("已延期", { exact: true }).waitFor();
+      if (await card.getByText("待执行", { exact: true }).count()) throw new Error("Deferred task was labeled queued");
+      await card.getByText(title, { exact: true }).click();
+      const drawer = page.getByRole("dialog", { name: "Todo 详情" });
+      await drawer.getByText("等待恢复条件满足后重新评估", { exact: true }).waitFor();
+      const condition = drawer.locator("dl > div", { has: page.getByText("恢复条件", { exact: true }) });
+      await condition.getByText(conditionExpected ? "todo_done:todo-progress-full" : "未设置", { exact: true }).waitFor();
+      if (await drawer.getByText("待执行", { exact: true }).count()) throw new Error("Deferred drawer was labeled ready");
+      await page.screenshot({ path: resolve(outputDir, `deferred-task-${conditionExpected ? "condition" : "missing"}.png`), fullPage: false, animations: "disabled" });
+      await drawer.getByRole("button", { name: /关闭详情/ }).click();
+    }
+    await assertDeferredTask();
+    await assertDeferredTask(false);
     const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
     const taskLaneScrollers = page.locator('.personal-task-kanban .personal-task-lane-scroll');
     if (await taskLaneScrollers.count() !== 4) throw new Error('Every desktop Task lane must own a scroll region');
@@ -1916,6 +1959,22 @@ async function main() {
     await page.screenshot({ path: resolve(outputDir, 'completed-history-4087.png'), fullPage: false, animations: 'disabled' });
     await historyScroll.evaluate(element => { element.scrollTop = 0; });
     await completedColumn.getByText('Completed A', { exact: true }).waitFor();
+    // Both presentations retain one snapshot, including archived history and evidence.
+    let historyRequests = 0;
+    page.on('request', request => { if (request.url().includes('/api/chat/completed-todos?')) historyRequests += 1; });
+    await page.getByRole('button', { name: '列表', exact: true }).click();
+    await assertDeferredTask();
+    const listHistory = page.getByTestId('completed-task-lane');
+    await listHistory.getByRole('button', { name: '已完成', exact: false }).click();
+    await listHistory.getByText('4087', { exact: true }).waitFor();
+    await listHistory.getByText('Completed A', { exact: true }).waitFor();
+    await listHistory.locator('.personal-task-lane-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await listHistory.getByText('Completed historical Task 4087', { exact: true }).waitFor();
+    if (await listHistory.locator('.personal-completed-row').count() > 20) throw new Error('List history DOM grew with accumulated pages');
+    await page.screenshot({ path: resolve(outputDir, 'completed-history-list.png'), fullPage: false, animations: 'disabled' });
+    await page.getByRole('button', { name: '看板', exact: true }).click();
+    await completedColumn.getByText('Completed A', { exact: true }).waitFor();
+    if (historyRequests) throw new Error('Switching presentation replaced the completed-history snapshot');
     await page.locator(".personal-goal-link", { hasText: "Multi Agent Projection" }).click();
     const multiAgentHeader = await page.locator(".personal-channel-title p").innerText();
     if (!multiAgentHeader.includes("2 个工作 Agent") || multiAgentHeader.includes("codex-older-lane ·")) {

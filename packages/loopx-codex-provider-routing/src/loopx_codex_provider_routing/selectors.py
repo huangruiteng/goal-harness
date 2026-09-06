@@ -21,12 +21,26 @@ for model, label in MODEL_FAMILIES.items():
                 "model": model,
                 "order": order,
                 "fast": fast,
-                "tail": [] if fast else ["ark-text"],
+                "tail": [],
                 "display_name": f"{label} · {title} · "
                 + ("Fast · " if fast else "")
-                + f"Codex {chain}"
-                + ("" if fast else " → Ark"),
+                + f"Codex {chain}",
             }
+# The second Auto is an explicit opt-in to a heterogeneous Standard fallback.
+for model, label in MODEL_FAMILIES.items():
+    ROUTES[f"auto-with-ds/{model}"] = {
+        "model": model,
+        "order": list(SLOTS),
+        "fast": False,
+        "tail": ["ark-text"],
+        "display_name": f"{label} · Auto · A → B → C → DeepSeek",
+    }
+VISIBLE_SELECTORS = {
+    f"{prefix}/{model}"
+    for model in MODEL_FAMILIES
+    for prefix in ("auto", "fast/auto", "auto-with-ds")
+} | {"gpt-5.6-luna"}
+
 ROUTES["gpt-5.6-luna"] = {
     "model": "gpt-5.6-luna",
     "order": list(SLOTS),
@@ -48,6 +62,7 @@ def aliases_for_slot(slot):
                 "alias": slug,
                 "display-name": route["display_name"],
                 "force-mapping": True,
+                "fork": slug.startswith("auto/"),
                 "routing-priority": 400 - 100 * route["order"].index(slot),
             }
         )
@@ -77,14 +92,14 @@ def routing_source():
             "priority": 100,
             "input_modalities": ["text"],
             "supports_fast": False,
-            "tool_transports": ["function_call"],
+            "tool_transports": ["function_call", "custom_tool_call"],
         }
     )
     routes = []
     for slug, spec in ROUTES.items():
         if spec["fast"]:
             continue
-        auto = slug.startswith("auto/") or slug == "gpt-5.6-luna"
+        auto = slug.startswith(("auto/", "auto-with-ds/")) or slug == "gpt-5.6-luna"
         route = {
             "slug": slug,
             "display_name": spec["display_name"],
@@ -95,7 +110,7 @@ def routing_source():
             else f"codex-{spec['order'][0]}",
             "fallback_tail": spec["tail"],
             "input_modalities": ["text", "image"],
-            "supports_fast": True,
+            "supports_fast": not bool(spec["tail"]),
             "reasoning_levels": ["low", "medium", "high", "xhigh", "max"],
         }
         fast = ROUTES.get(f"fast/{slug}")

@@ -1,0 +1,150 @@
+name: Signed Desktop Updates
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'scripts/desktop_*'
+      - '.github/workflows/desktop-updater.yml'
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-desktop-${{ github.event.release.tag_name || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/loopx-control-plane/src-tauri -> target
+      - run: python3 scripts/desktop_runtime_bundle.py
+      - run: python3 -m unittest discover -s tests/desktop -p 'test_*.py'
+      - run: cargo test --locked && cargo clippy --all-targets --locked -- -D warnings
+        working-directory: apps/desktop/loopx-control-plane/src-tauri
+  identity:
+    if: github.repository == 'huangruiteng/loopx' && (github.event_name == 'release' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.identity.outputs.ref }}
+      version: ${{ steps.identity.outputs.version }}
+      tag: ${{ steps.identity.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || 'main' }}
+      - id: identity
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if [ -n "$RELEASE_TAG" ]; then
+            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-main.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+            echo "tag=desktop-main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          fi
+  build:
+    needs: identity
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            bundle: app
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.identity.outputs.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/loopx-control-plane/src-tauri -> target
+      - run: npm ci
+        working-directory: apps/desktop/loopx-control-plane
+      - name: Build signed App and exact bundled runtime
+        working-directory: apps/desktop/loopx-control-plane
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          VERSION: ${{ needs.identity.outputs.version }}
+          BUNDLE: ${{ matrix.bundle }}
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          npm run build -- --bundles "$BUNDLE" --config "{\"version\":\"$VERSION\",\"bundle\":{\"createUpdaterArtifacts\":true,\"macOS\":{\"signingIdentity\":\"-\"}}}"
+      - name: Collect native updater artifacts
+        shell: bash
+        run: |
+          mkdir -p dist/updater
+          find apps/desktop/loopx-control-plane/src-tauri/target/release/bundle -type f \( -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' -o -name '*-setup.exe' -o -name '*-setup.exe.sig' \) -exec cp {} dist/updater/ \;
+          for artifact in dist/updater/*-setup.exe*; do
+            if [ -f "$artifact" ]; then mv "$artifact" "${artifact/-setup.exe/-updater-setup.exe}"; fi
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signed-updater-${{ matrix.runner }}
+          path: dist/updater/*
+          if-no-files-found: error
+  publish:
+    needs: [identity, build, validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.identity.outputs.ref }}
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: signed-updater-*
+          path: dist/updater
+          merge-multiple: true
+      - name: Generate complete feed
+        env:
+          VERSION: ${{ needs.identity.outputs.version }}
+          RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+        run: python scripts/desktop_update_feed.py --directory dist/updater --version "$VERSION" --tag "$RELEASE_TAG"
+      - name: Upload immutable artifacts, publish channel pointer last
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+          SOURCE_REF: ${{ needs.identity.outputs.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != release ]; then
+            gh release create "$RELEASE_TAG" --prerelease --target "$SOURCE_REF" --title "Desktop main $SOURCE_REF" --notes "Signed App and matching runtime preview."
+          fi
+          for artifact in dist/updater/*.gz dist/updater/*.sig; do
+            gh release upload "$RELEASE_TAG" "$artifact"
+          done
+          gh release upload "$RELEASE_TAG" dist/updater/desktop-updater.json --clobber
+          if [ "$EVENT_NAME" != release ]; then
+            gh release view desktop-main >/dev/null 2>&1 || gh release create desktop-main --prerelease --target "$SOURCE_REF" --title "Desktop main channel" --notes "Pointer to the latest complete signed desktop build."
+            gh release upload desktop-main dist/updater/desktop-updater.json --clobber
+          fi

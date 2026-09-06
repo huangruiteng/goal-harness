@@ -12,8 +12,54 @@ desktop release workflow succeeds:
 - macOS: `.dmg` plus a zipped `.app` bundle;
 - Windows: `.msi` plus an NSIS `.exe` installer.
 
-The desktop shell still depends on a local `loopx` command at runtime. Install
-or update the LoopX CLI first, then open the desktop app.
+On Apple Silicon macOS, signed updater builds carry an exact matching runtime
+source snapshot. Open **Update LoopX** in the bottom-left corner, check for an
+update, select **Install update**, then **Restart to finish**. The App verifies
+the archive signature before replacing itself; the restarted App installs its
+bundled runtime and verifies the selected CLI revision before reconnecting.
+This updates both layers without asking the operator to run a terminal command.
+Existing desktop builds without this updater need a one-time App replacement.
+Windows preview installers retain the manual CLI installation path; they are
+not advertised in the signed update feed until their runtime installer is
+qualified. Browser/PWA users continue to use `loopx update`.
+
+## Updates And Recovery
+
+The update panel is collapsed by default and opens above the sidebar without
+reducing the Goal list height. Automatic checks never install software. Its
+advanced options expose stable/main channels, repair, and macOS rollback.
+The main channel points to the latest **complete signed build**, not arbitrary
+moving Git HEAD. A missing feed or failed signature is an error, not proof that
+the App is up to date. Release artifacts and matching runtime stay immutable;
+only the main channel feed pointer is replaced.
+
+The App binary owns native windowing, service startup, IPC and update/recovery.
+The bundled runtime owns the CLI, HTTP APIs and workspace assets. A runtime-only
+CLI update cannot patch native startup or updater bugs; those require an App
+update. The App update workflow packages both layers from one Git revision.
+
+If startup cannot proceed, the embedded **Recovery & updates** screen stays
+available without a working HTTP service. **Repair this version** reinstalls
+the bundled runtime. It may replace a separately updated CLI with this App's
+matching snapshot, so it requires an explicit click. No automatic downgrade
+is performed when the selected runtime differs. Explicit `LOOPX_BIN` overrides
+are retained; an override that still selects another revision fails identity
+verification instead of reporting success.
+
+An update journal resumes an approved runtime installation after restart.
+Concurrent transactions and additional installs before a required restart are
+rejected. Service readiness is distinct from installer completion. macOS keeps
+a verified previous App for **Restore previous version**; restart restores its
+matching runtime too. Goal state is neither deleted nor migrated backwards by
+this action, so data-schema compatibility still governs rollback suitability.
+Older backup directories are retained for manual recovery and can consume disk.
+
+The updater accepts only fixed official HTTPS channels, not browser-provided
+commands, paths or download URLs. Its signing private key is confined to the
+release secret; the App embeds the public key. PR validation has no signing
+secret. Updater signing does not provide Apple notarization. It also does not
+change Goal authority, grant capabilities, or stop running agents on behalf of
+the user. Services may briefly disconnect during reconciliation.
 
 Published macOS preview artifacts use ad-hoc code signing to verify bundle
 integrity without requiring an Apple Developer account. They are not signed
@@ -77,7 +123,9 @@ until that command is stopped.
 
 ## Prerequisites
 
-- LoopX installed and available as `loopx`; set `LOOPX_BIN` to override it.
+- A working Python interpreter for runtime installation; existing managed
+  installations preserve their interpreter. Windows requires a separately
+  installed LoopX CLI. Set `LOOPX_BIN` only for deliberate runtime overrides.
 - Node.js 20.19+ or 22.12+ for dashboard builds.
 - Rust stable and the platform-specific Tauri build dependencies.
 
@@ -89,6 +137,7 @@ Linux requires WebKitGTK 4.1 and GTK 3 development packages. See the
 ```bash
 cd apps/desktop/loopx-control-plane
 npm install
+python3 ../../../scripts/desktop_runtime_bundle.py
 npm run dev
 ```
 

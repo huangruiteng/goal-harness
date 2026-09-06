@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from .doctor import collect_doctor
 from .install_contract import NO_CLONE_INSTALL_URL
+from .self_update_download import run_archive_installer
 
 
 UPDATE_PLAN_SCHEMA_VERSION = "loopx_update_plan_v0"
@@ -105,20 +106,7 @@ def _command_for_source(source: dict[str, Any]) -> str:
             "Update a trusted LoopX checkout, then run its "
             "`scripts/install-windows.ps1` with PowerShell 7."
         )
-    exports = [
-        f"LOOPX_REPO={shlex.quote(str(source['repo']))}",
-        f"LOOPX_REF={shlex.quote(str(source['ref']))}",
-    ]
-    archive_url = source.get("archive_url")
-    if source.get("channel") == "github_archive_url_override" and archive_url:
-        exports.append(f"LOOPX_ARCHIVE_URL={shlex.quote(str(archive_url))}")
-    return (
-        "set -o errexit -o pipefail\n"
-        + "\n".join(f"export {value}" for value in exports)
-        + f"\ncurl -fsSL {shlex.quote(str(source['installer_url']))} | bash\n"
-        'export PATH="$HOME/.local/bin:$PATH"\n'
-        "loopx doctor"
-    )
+    return _update_action_command(UpdateAction.APPLY, source)
 
 
 def _installer_env_for_source(
@@ -1104,16 +1092,10 @@ def execute_update_plan(
             current_release_root if isinstance(current_release_root, str) else None
         ),
     )
-    install_result = subprocess.run(
-        [
-            "bash",
-            "-lc",
-            f"set -o pipefail; curl -fsSL {shlex.quote(installer_url)} | bash",
-        ],
-        text=True,
-        capture_output=True,
+    install_result, download_observation = run_archive_installer(
+        installer_url,
         env=env,
-        timeout=timeout_seconds,
+        timeout_seconds=timeout_seconds,
     )
     loopx_bin = Path.home() / ".local" / "bin" / "loopx"
     doctor_result = subprocess.run(
@@ -1124,6 +1106,7 @@ def execute_update_plan(
         timeout=timeout_seconds,
     )
     execution = {
+        "installer_download": download_observation,
         "install_returncode": install_result.returncode,
         "doctor_returncode": doctor_result.returncode,
         "install_stdout_tail": install_result.stdout[-2000:],
@@ -1472,4 +1455,12 @@ def render_update_plan_markdown(payload: dict[str, Any]) -> str:
                 f"- Doctor return code: `{execution.get('doctor_returncode')}`",
             ]
         )
+        download = execution.get("installer_download")
+        if isinstance(download, dict):
+            lines.append(f"- Installer stage: `{download.get('stage')}`")
+            for attempt in download.get("attempts", []):
+                lines.append(
+                    f"- Download attempt {attempt['attempt']}: "
+                    f"HTTP `{attempt['http_status']}`, curl `{attempt['curl_returncode']}`"
+                )
     return "\n".join(lines) + "\n"
