@@ -21,7 +21,14 @@
         <p id="update-status" role="status"></p>
         <button id="repair" type="button">修复当前版本 / Repair this version</button>
         <button id="rollback" type="button" hidden>恢复上版并准备重启 / Restore previous version</button>
-        <p>仍失败时运行 <code>loopx doctor</code> 检查安装。不要删除 Goal 数据。</p>
+        <details>
+          <summary>诊断信息 / Diagnostics</summary>
+          <p>复制以下诊断用于问题反馈；不包含消息、环境变量或本机路径。</p>
+          <textarea id="diagnostics" readonly rows="9" aria-label="诊断信息 / Diagnostics"></textarea>
+          <button id="copy-diagnostics" type="button">复制诊断 / Copy diagnostics</button>
+          <p id="copy-status" role="status"></p>
+        </details>
+        <p><code>loopx doctor</code> 只检查终端选中的运行时，不能证明它与 App 匹配。不要删除 Goal 数据。</p>
       </details>
     </main>
     <script src="boot.js"></script>

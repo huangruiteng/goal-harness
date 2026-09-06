@@ -36,6 +36,18 @@ const labels = {
   error: "更新未完成。请重试检查，或修复当前版本。Goal 数据不会被删除。",
 };
 const errors = {
+  desktop_status_unavailable: "无法读取 App 诊断状态。请重启 App；若仍失败，请重新安装完整 App。",
+  runtime_setup_required: "App 与本机运行时不匹配，或找不到安装身份。请修复当前版本，成功后重启。",
+  runtime_bundle_missing: "App 缺少配套运行时文件。请重新下载完整 App。",
+  runtime_bundle_invalid: "App 配套运行时校验失败。请重新下载完整 App。",
+  runtime_installer_unavailable: "无法启动安装程序。请检查系统是否提供 bash（Windows 为 PowerShell）。",
+  runtime_install_failed: "运行时安装失败。请展开诊断信息，提供错误码以便排查。",
+  runtime_install_timeout: "运行时安装超过十分钟，已停止。请检查网络和安装依赖后重试。",
+  runtime_identity_mismatch: "安装已结束，但 App 仍选中了不同运行时。请检查是否设置了 LOOPX_BIN。",
+  runtime_staging_failed: "无法创建安装临时目录。请检查磁盘空间及写入权限。",
+  update_state_unavailable: "无法读写更新状态。请检查 App 数据目录的权限和磁盘空间。",
+  update_state_invalid: "更新状态无法读取。请保留诊断信息并反馈问题。",
+  app_update_incomplete: "App 更新尚未完成，无法安装配套运行时。请重新安装目标 App。",
   update_feed_unavailable: "此通道的更新源尚未就绪或暂时不可用。可稍后重新检查。",
   update_feed_invalid: "更新源格式异常。请稍后重新检查。",
   update_platform_unavailable: "此通道尚无适用于本机的更新包。",
@@ -53,19 +65,47 @@ function render(state) {
   channel.disabled = working || state.phase === "restart_required";
   nextAction = state.phase === "available" ? "apply" : state.phase === "restart_required" ? "restart" : "check";
   update.textContent = nextAction === "apply" ? "更新并准备重启 / Install update" : nextAction === "restart" ? "重启完成更新 / Restart" : "检查更新 / Check for updates";
-  updateStatus.textContent = state.phase === "error" && Object.hasOwn(errors, state.details?.code) ? errors[state.details.code] : labels[state.phase] || "";
+  const code = state.details?.code;
+  updateStatus.textContent = typeof code === "string" && /^runtime_install_exit_(\d+|signal)$/.test(code)
+    ? `安装程序退出（${code.slice("runtime_install_exit_".length)}）。请复制诊断信息反馈；修复没有完成。`
+    : Object.hasOwn(errors, code) ? errors[code] : labels[state.phase] || "";
 }
+const diagnostics = document.querySelector("#diagnostics");
+function safeCode(code) {
+  return typeof code === "string" && (Object.hasOwn(errors, code) || /^runtime_install_exit_(\d+|signal)$/.test(code) || ["service_start_failed", "update_failed"].includes(code)) ? code : "unknown";
+}
+function renderDiagnostics(result) {
+  const failure = result.last_failure ?? result.state;
+  const text = JSON.stringify({
+    schema_version: "desktop_recovery_diagnostics_v1",
+    failure_phase: ["error", "runtime_required", "service_error"].includes(failure?.phase) ? failure.phase : null,
+    app_version: /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(result.app_version) ? result.app_version : "unknown",
+    error_code: safeCode(failure?.details?.code),
+    installed_identity_available: typeof failure?.details?.installed_identity_available === "boolean" ? failure.details.installed_identity_available : null,
+    revision_matches: typeof failure?.details?.revision_matches === "boolean" ? failure.details.revision_matches : null,
+  }, null, 2);
+  if (diagnostics.value !== text) diagnostics.value = text;
+}
+document.querySelector("#copy-diagnostics").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(diagnostics.value);
+    document.querySelector("#copy-status").textContent = "已复制 / Copied";
+  } catch {
+    diagnostics.focus(); diagnostics.select();
+    document.querySelector("#copy-status").textContent = "请按 ⌘C / Ctrl+C 复制已选中的诊断。";
+  }
+};
 async function run(action) {
   if (working) return;
   render({phase: action === "check" ? "checking" : action === "repair" ? "installing_runtime" : "downloading"});
   try { render(await window.__TAURI__.core.invoke("desktop_update", {action,channel:channel.value})); }
-  catch (error) { render({phase:"error", details:{code: typeof error === "string" && Object.hasOwn(errors, error) ? error : "update_failed"}}); }
+  catch (error) { render({phase:"error", details:{code: safeCode(error)}}); }
 }
 update.onclick = () => run(nextAction);
 repair.onclick = () => run("repair");
 rollback.onclick = () => run("rollback");
 async function refresh() {
-  if (!window.__TAURI__) return;
+  if (!window.__TAURI__) { renderDiagnostics({state:{phase:"error",details:{code:"desktop_status_unavailable"}}}); return; }
   try {
     const result = await window.__TAURI__.core.invoke("desktop_update_status");
     if (!channelInitialized) {
@@ -73,8 +113,9 @@ async function refresh() {
       channelInitialized = true;
     }
     rollback.hidden = !result.rollback_available;
+    renderDiagnostics(result);
     render(result.state);
-  } catch { /* Static recovery instructions remain usable. */ }
+  } catch { renderDiagnostics({state:{phase:"error",details:{code:"desktop_status_unavailable"}}}); }
 }
 void refresh();
 setInterval(refresh,1000);

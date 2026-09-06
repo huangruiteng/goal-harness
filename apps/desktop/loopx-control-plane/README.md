@@ -54,6 +54,15 @@ matching runtime too. Goal state is neither deleted nor migrated backwards by
 this action, so data-schema compatibility still governs rollback suitability.
 Older backup directories are retained for manual recovery and can consume disk.
 
+The embedded Recovery & updates section includes selectable, copyable diagnostics
+with the App version, last failure category, installer exit code when available,
+and runtime identity availability/match results. The last failure survives a
+subsequent update check within the same App process. Copying never includes raw
+installer output, environment variables, local paths, or Goal content. Installation
+failures, missing/corrupt bundles, and runtime mismatch show distinct recovery
+instructions. A terminal `loopx doctor` checks the terminal-selected runtime;
+it does not prove that Desktop selected the same installation or matching revision.
+
 The updater accepts only fixed official HTTPS channels, not browser-provided
 commands, paths or download URLs. Its signing private key is confined to the
 release secret; the App embeds the public key. PR validation has no signing
