@@ -1,0 +1,6 @@
+# Additional build tools for the Stage 2C Linux/Python 3.11 CI job.
+# Test dependencies come from pyproject.toml's test extra.
+# Regenerate requirements-stage2c-linux-py311.txt using uv==0.11.26 and the
+# complete command recorded at the top of that generated lock file.
+build==1.6.0
+setuptools==83.0.0
