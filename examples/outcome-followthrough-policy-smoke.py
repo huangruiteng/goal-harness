@@ -7,7 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.control_plane.work_items.outcome_followthrough import build_outcome_followthrough_hint
+from loopx.control_plane.work_items.outcome_followthrough import build_outcome_followthrough_hint  # noqa: E402
 
 
 def assert_none(latest_run: dict[str, object] | None) -> None:
@@ -22,7 +22,8 @@ def assert_hint(
 ) -> None:
     hint = build_outcome_followthrough_hint(latest_run)
     assert hint is not None
-    assert hint == {
+    assert isinstance(hint["spend_policy"], str) and hint["spend_policy"].strip()
+    assert {key: value for key, value in hint.items() if key != "spend_policy"} == {
         "source": "post_handoff_latest_run",
         "required": True,
         "latest_classification": str(latest_run.get("classification") or "").strip(),
@@ -34,11 +35,6 @@ def assert_hint(
             "compact_evidence",
             "blocker_writeback",
         ],
-        "spend_policy": (
-            "do not spend for another contract/preparation-only slice; spend only "
-            "after validated product-path evidence, benchmark/case evidence, or a "
-            "precise blocker writeback"
-        ),
     }
 
 
@@ -69,11 +65,20 @@ def main() -> None:
             "classification": "blocked but explicitly requires followthrough",
         },
         outcome=None,
-        turn_kind="blocker_writeback",
+        turn_kind="unknown",
     )
     assert_hint(
-        {"classification": "contract-only preparation"},
+        {"classification": "done", "delivery_turn_kind": "contract_only_preparation"},
         outcome=None,
+        turn_kind="contract_only_preparation",
+    )
+    # Diagnostic prose must not create or suppress a machine obligation.
+    assert_none({"classification": "contract-only preparation"})
+    assert_none({"classification": "needs product evidence"})
+    assert_none({"delivery_turn_kind": "blocker_writeback"})
+    assert_hint(
+        {"delivery_outcome": "surface_only", "classification": "done"},
+        outcome="surface_only",
         turn_kind="contract_only_preparation",
     )
     print("outcome-followthrough-policy-smoke ok")
