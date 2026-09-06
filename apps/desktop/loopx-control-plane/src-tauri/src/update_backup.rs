@@ -102,6 +102,9 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     let failed = staging.path().join("failed.app");
     let version = fs::read_to_string(root(app)?.join("previous/version"))
         .map_err(|_| "backup_unavailable")?;
+    // Once an installed App can move here, never let TempDir cleanup erase it
+    // on a failed second rename (including a failed restoration rename).
+    let _preserved = staging.keep();
     crate::bundled_runtime::record_pending(app, version.trim(), "rollback")?;
     fs::rename(&bundle, &failed).map_err(|_| "rollback_failed")?;
     if fs::rename(&candidate, &bundle).is_err() {
@@ -109,6 +112,5 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
         return Err("rollback_failed".into());
     }
     // Keep the failed App recoverable too. Never delete a user's installed App.
-    let _preserved = staging.keep();
     Ok(())
 }
