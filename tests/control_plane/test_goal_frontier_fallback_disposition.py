@@ -9,6 +9,10 @@ from loopx.control_plane.goals.goal_frontier import (
     agent_scoped_selectable_advancement_todo_ids,
     build_goal_frontier_projection_context_from_status,
 )
+from loopx.control_plane.goals.goal_vision import (
+    compact_goal_vision_packet,
+    normalize_goal_vision_packet,
+)
 from loopx.control_plane.scheduler.execution_context import (
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
 )
@@ -40,8 +44,17 @@ def _fallback_vision_run(
     path_outcome: str | None = None,
     fallback_declarations: list[Any] | None = None,
 ) -> dict:
-    agent_vision: dict = {
-        "schema_version": "goal_vision_replan_contract_v0",
+    """Persist a caller packet through the production write/readback chain.
+
+    The caller packet goes through the real TS ``goal.vision_checkpoint``
+    prepare (the executor entry) and the compact read-model projection (the
+    status/shared-runtime entry) before it becomes a run-history record, so
+    the tests can only pass when the typed declaration survives the same
+    chain a real caller uses.
+    """
+
+    packet: dict = {
+        "goal_id": GOAL_ID,
         "agent_id": AGENT_ID,
         "state": state,
         "todo_delta": todo_delta
@@ -54,9 +67,9 @@ def _fallback_vision_run(
         },
     }
     if fallback_declarations is not None:
-        agent_vision["fallback_declarations"] = fallback_declarations
+        packet["fallback_declarations"] = fallback_declarations
     elif acceptance_summary == DECLARED_FALLBACK_ACCEPTANCE:
-        agent_vision["fallback_declarations"] = [
+        packet["fallback_declarations"] = [
             {
                 "declaration_id": "declared_fallback_direction",
                 "target_todo_id": FALLBACK_ID,
@@ -64,13 +77,23 @@ def _fallback_vision_run(
             }
         ]
     if path_outcome is not None:
-        agent_vision["path_delta"] = {"outcome": path_outcome}
+        packet["path_delta"] = {
+            "outcome": path_outcome,
+            "prior_assumption": "The primary route stays viable after the "
+            "prerequisite clears.",
+            "observed_reality": "The declared fallback direction remains the "
+            "bounded alternative path.",
+            "stopped": ["Continue only the primary route."],
+        }
+    prepared = normalize_goal_vision_packet(packet, goal_id=GOAL_ID, agent_id=AGENT_ID)
+    compact = compact_goal_vision_packet(prepared)
+    assert compact is not None
     return {
         "classification": "vision_fallback_disposition_fixture",
         "generated_at": "2026-09-05T00:00:00+00:00",
         "agent_id": AGENT_ID,
         "progress_scope": "agent_lane",
-        "agent_vision": agent_vision,
+        "agent_vision": compact,
     }
 
 
@@ -163,6 +186,30 @@ def test_blocked_primary_with_runnable_fallback_projects_todo_selectable() -> No
     assert "fallback_gaps" not in decision["goal_frontier_projection"]
 
 
+def test_declared_fallback_survives_prepare_compact_and_readback() -> None:
+    # The typed declaration must survive the real TS prepare, the compact
+    # read model, and the history readback before any gap can be projected.
+    run = _fallback_vision_run(
+        todo_delta=[f"retain:{PRIMARY_WAIT_ID}", f"retain:{FALLBACK_ID}"]
+    )
+    vision = run["agent_vision"]
+
+    assert vision["fallback_declarations"] == [
+        {
+            "declaration_id": "declared_fallback_direction",
+            "target_todo_id": FALLBACK_ID,
+            "successor_todo_id": FALLBACK_ID,
+        }
+    ]
+    from loopx.control_plane.goals.goal_frontier.semantic_history import (
+        latest_agent_vision_from_runs,
+    )
+
+    readback = latest_agent_vision_from_runs([run], goal_id=GOAL_ID, agent_id=AGENT_ID)
+    assert readback is not None
+    assert readback["fallback_declarations"] == vision["fallback_declarations"]
+
+
 def test_declared_fallback_without_resolution_projects_single_gap() -> None:
     # The structured declaration links the fallback direction to a Todo id,
     # but no runnable Todo with that id exists on this agent's frontier.
@@ -194,6 +241,15 @@ def test_declared_fallback_without_resolution_projects_single_gap() -> None:
     assert "do not invent a user gate" in gap["recommended_action"]
     assert frontier["replan_required"] is False
 
+    decision = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        scheduler_execution_context=(GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT),
+    )
+    quota_projection = decision["goal_frontier_projection"]
+    assert quota_projection["fallback_gaps"][0]["unresolved_todo_ids"] == [FALLBACK_ID]
+
 
 def test_retaining_only_the_blocked_primary_successor_is_no_declaration() -> None:
     # The primary successor is the wait state's own object; retaining it does
@@ -209,7 +265,6 @@ def test_retaining_only_the_blocked_primary_successor_is_no_declaration() -> Non
     )
 
     frontier = _frontier_projection(payload)
-
     assert "fallback_gaps" not in frontier
 
 
@@ -387,31 +442,6 @@ def test_unrelated_create_does_not_resolve_fallback_gap() -> None:
     assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
 
 
-def test_fallback_declared_via_todo_linkage_contract_projects_gap() -> None:
-    # A fallback declared on a blocked successor item via the task linkage
-    # contract projects an advisory gap when unresolved.
-    payload = _status_payload(
-        fallback_runnable=False,
-        latest_runs=[
-            _fallback_vision_run(
-                todo_delta=[f"retain:{PRIMARY_WAIT_ID}"],
-                fallback_declarations=[],
-            )
-        ],
-    )
-    item = payload["attention_queue"]["items"][0]
-    agent_todos = item["agent_todos"]
-    for deferred in agent_todos.get("deferred_items") or []:
-        if isinstance(deferred, dict):
-            deferred["fallback_todo_id"] = FALLBACK_ID
-
-    frontier = _frontier_projection(payload)
-
-    gaps = frontier["fallback_gaps"]
-    assert len(gaps) == 1
-    assert gaps[0]["unresolved_todo_ids"] == [FALLBACK_ID]
-
-
 def test_typed_declaration_successor_relation_resolves_gap() -> None:
     # A typed declaration-to-successor relation resolves when its declared
     # bounded successor is created in todo_delta.
@@ -433,6 +463,63 @@ def test_typed_declaration_successor_relation_resolves_gap() -> None:
     frontier = _frontier_projection(payload)
 
     assert "fallback_gaps" not in frontier
+
+
+def test_legacy_alias_shapes_do_not_declare_a_fallback() -> None:
+    # Unsupported alias shapes (string arrows, patch-level fields, renamed
+    # keys) have no production author; the reader must not resurrect them.
+    run = _fallback_vision_run(
+        todo_delta=[f"retain:{PRIMARY_WAIT_ID}"],
+        fallback_declarations=[],
+    )
+    vision = dict(run["agent_vision"])
+    vision["fallback_relationships"] = [
+        {"fallback_id": FALLBACK_ID, "successor_id": FALLBACK_ID}
+    ]
+    vision["vision_patch"] = {
+        **vision["vision_patch"],
+        "fallback_declarations": [f"{FALLBACK_ID}->{FALLBACK_ID}"],
+    }
+    payload = _status_payload(
+        fallback_runnable=False,
+        latest_runs=[{**run, "agent_vision": vision}],
+    )
+
+    frontier = _frontier_projection(payload)
+
+    assert "fallback_gaps" not in frontier
+
+
+def test_compact_read_model_mirrors_the_bounded_declaration_contract() -> None:
+    # Compaction is the defensive mirror of the TS prepare contract: at most
+    # four entries, one per unique declaration_id, typed fields only, and
+    # anything past the bound is truncated exactly like the write contract
+    # rejects it.
+    compact = compact_goal_vision_packet(
+        {
+            "schema_version": "goal_vision_replan_contract_v0",
+            "goal_id": GOAL_ID,
+            "agent_id": AGENT_ID,
+            "state": "vision_drift_detected",
+            "vision_patch": {"vision_summary": "Bounded route."},
+            "fallback_declarations": [
+                {
+                    "declaration_id": "first_direction",
+                    "target_todo_id": FALLBACK_ID,
+                    "legacy_field": "dropped",
+                },
+                {"declaration_id": "first_direction", "target_todo_id": "todo_dup"},
+                {"target_todo_id": "todo_missing_id"},
+                "not-an-object",
+                {"declaration_id": "truncated_direction"},
+            ],
+        }
+    )
+
+    assert compact is not None
+    assert compact["fallback_declarations"] == [
+        {"declaration_id": "first_direction", "target_todo_id": FALLBACK_ID},
+    ]
 
 
 def test_selectable_frontier_ids_mirror_the_authoritative_counts() -> None:

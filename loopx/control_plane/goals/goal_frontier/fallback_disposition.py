@@ -25,6 +25,8 @@ VISION_TODO_DELTA_LINKAGE_ACTIONS = frozenset(
     VISION_FRONTIER_TODO_DELTA_ACTIONS - VISION_TODO_DELTA_SUCCESSOR_ACTIONS
 )
 VISION_TODO_DELTA_ID_LIMIT = 120
+VISION_FALLBACK_DECLARATION_ENTRY_LIMIT = 4
+VISION_FALLBACK_DECLARATION_FIELDS = ("target_todo_id", "successor_todo_id")
 VISION_FALLBACK_GAP_TRIGGER = "vision_fallback_unresolved"
 VISION_FALLBACK_GAP_REASON_CODE = "declared_fallback_without_runnable_or_terminal"
 VISION_FALLBACK_TERMINAL_PATH_OUTCOME = "stop"
@@ -87,131 +89,46 @@ def parse_vision_todo_delta_entries(entries: Any) -> list[tuple[str, str]]:
 
 def parse_fallback_declarations(
     agent_vision: dict[str, Any] | None,
-    agent_todo_summary: dict[str, Any] | None = None,
 ) -> list[FallbackDeclaration]:
-    """Extract structured fallback declarations from vision and linkage contracts."""
+    """Parse typed fallback declarations written by the TS Vision contract.
+
+    The only supported authoring path is ``agent_vision.fallback_declarations``
+    as validated and persisted by the TS-owned ``goal.vision_checkpoint``
+    prepare (and mirrored through the status/shared-runtime compact read
+    model). Prose mentions, generic ``todo_delta`` actions, and legacy alias
+    shapes are not declarations.
+    """
 
     declarations: list[FallbackDeclaration] = []
+    if not isinstance(agent_vision, dict):
+        return declarations
+    source = agent_vision.get("fallback_declarations")
+    if not isinstance(source, list):
+        return declarations
+
     seen: set[tuple[str, str | None, str | None]] = set()
-
-    def add_declaration(
-        declaration_id: str,
-        target_todo_id: str | None = None,
-        successor_todo_id: str | None = None,
-    ) -> None:
+    for raw in source[:VISION_FALLBACK_DECLARATION_ENTRY_LIMIT]:
+        if not isinstance(raw, dict):
+            continue
+        declaration_id = _compact_text(
+            raw.get("declaration_id"),
+            limit=VISION_TODO_DELTA_ID_LIMIT,
+        )
+        if not declaration_id:
+            continue
+        target_todo_id = normalize_todo_id(raw.get("target_todo_id"))
+        successor_todo_id = normalize_todo_id(raw.get("successor_todo_id"))
         key = (declaration_id, target_todo_id, successor_todo_id)
-        if key not in seen:
-            seen.add(key)
-            declarations.append(
-                FallbackDeclaration(
-                    declaration_id=declaration_id,
-                    target_todo_id=target_todo_id,
-                    successor_todo_id=successor_todo_id,
-                )
+        if key in seen:
+            continue
+        seen.add(key)
+        declarations.append(
+            FallbackDeclaration(
+                declaration_id=declaration_id,
+                target_todo_id=target_todo_id,
+                successor_todo_id=successor_todo_id,
             )
-
-    if isinstance(agent_vision, dict):
-        patch = agent_vision.get("vision_patch")
-        patch = patch if isinstance(patch, dict) else {}
-        for source in (
-            agent_vision.get("fallback_declarations"),
-            agent_vision.get("fallback_relationships"),
-            agent_vision.get("fallbacks"),
-            patch.get("fallback_declarations"),
-            patch.get("fallback_relationships"),
-            patch.get("fallbacks"),
-        ):
-            if not isinstance(source, list):
-                continue
-            for raw in source:
-                if isinstance(raw, dict):
-                    raw_decl_id = (
-                        raw.get("declaration_id")
-                        or raw.get("fallback_id")
-                        or raw.get("id")
-                        or raw.get("name")
-                        or raw.get("fallback_todo_id")
-                        or raw.get("todo_id")
-                    )
-                    declaration_id = _compact_text(
-                        raw_decl_id,
-                        limit=VISION_TODO_DELTA_ID_LIMIT,
-                    )
-                    target_todo_id = normalize_todo_id(
-                        raw.get("target_todo_id")
-                        or raw.get("fallback_todo_id")
-                        or raw.get("todo_id")
-                    )
-                    successor_todo_id = normalize_todo_id(
-                        raw.get("successor_todo_id") or raw.get("successor_id")
-                    )
-                    if not declaration_id and target_todo_id:
-                        declaration_id = target_todo_id
-                    if not target_todo_id and not successor_todo_id and declaration_id:
-                        target_todo_id = normalize_todo_id(declaration_id)
-                    if declaration_id:
-                        add_declaration(
-                            declaration_id=declaration_id,
-                            target_todo_id=target_todo_id,
-                            successor_todo_id=successor_todo_id,
-                        )
-                elif isinstance(raw, str):
-                    text = _compact_text(raw, limit=VISION_TODO_DELTA_ID_LIMIT)
-                    if not text:
-                        continue
-                    if "->" in text:
-                        decl, _, succ = text.partition("->")
-                        d_id = decl.strip()
-                        s_id = normalize_todo_id(succ.strip())
-                        add_declaration(
-                            declaration_id=d_id,
-                            target_todo_id=normalize_todo_id(d_id),
-                            successor_todo_id=s_id,
-                        )
-                    elif ":" in text and not text.startswith(("todo_", "task_")):
-                        decl, _, succ = text.partition(":")
-                        d_id = decl.strip()
-                        s_id = normalize_todo_id(succ.strip())
-                        add_declaration(
-                            declaration_id=d_id,
-                            target_todo_id=normalize_todo_id(d_id),
-                            successor_todo_id=s_id,
-                        )
-                    else:
-                        t_id = normalize_todo_id(text) or text
-                        add_declaration(
-                            declaration_id=text,
-                            target_todo_id=t_id,
-                            successor_todo_id=t_id,
-                        )
-
-    # Check linkage contract on blocked successor items in agent_todo_summary
-    if isinstance(agent_todo_summary, dict):
-        for slot in (
-            "deferred_items",
-            "deferred_resume_candidates",
-            "current_agent_blocker_items",
-        ):
-            items = agent_todo_summary.get(slot)
-            if not isinstance(items, list):
-                continue
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                if fallback_todo_id := normalize_todo_id(item.get("fallback_todo_id")):
-                    add_declaration(
-                        declaration_id=fallback_todo_id,
-                        target_todo_id=fallback_todo_id,
-                        successor_todo_id=fallback_todo_id,
-                    )
-                if fallback_succ_id := normalize_todo_id(
-                    item.get("fallback_successor_todo_id")
-                ):
-                    add_declaration(
-                        declaration_id=fallback_succ_id,
-                        successor_todo_id=fallback_succ_id,
-                    )
-
+        )
     return declarations
 
 
@@ -280,9 +197,9 @@ def declared_fallback_gap_from_agent_vision(
     """Project one advisory gap for an unresolved declared fallback.
 
     A fallback direction is declared structurally via the agent vision's
-    ``fallback_declarations`` / ``fallback_relationships`` contract or the
-    task linkage contract on blocked successor items. Prose mentions never
-    declare a fallback, and generic ``todo_delta`` actions are not fallback
+    typed ``fallback_declarations`` contract, which the TS-owned Vision
+    prepare validates and persists. Prose mentions never declare a
+    fallback, and generic ``todo_delta`` actions are not fallback
     declarations on their own.
 
     The declared direction is resolved when one of:
@@ -310,10 +227,7 @@ def declared_fallback_gap_from_agent_vision(
     ):
         return None
 
-    declarations = parse_fallback_declarations(
-        agent_vision,
-        agent_todo_summary=agent_todo_summary,
-    )
+    declarations = parse_fallback_declarations(agent_vision)
     if not declarations:
         return None
 
