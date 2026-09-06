@@ -45,9 +45,15 @@ not renew a lease or assert current ownership. Successful non-preview
 may advance, but Todo state, `updated_at`, and domain events do not change.
 A structurally valid empty registration list permits historical replay, never
 a fresh claim; malformed lists still fail. Preview remains zero-write, and
-invalid preview booleans fail before provider access. The CLI creates a fresh operation id per invocation;
-cross-invocation retry identity and combined claim/lease acquisition remain
-follow-up work, not guarantees of this claim-only transaction.
+invalid preview booleans fail before provider access. The CLI still creates a
+fresh operation id by default. On an already promoted canonical authority,
+callers can opt into cross-invocation retry with
+`loopx todo claim --goal-id <goal> --todo-id <todo> --claimed-by <agent> --agent-id <agent> --claim-operation-id <public-safe-id>`.
+Reuse the same id and intent after a lost response; changed intent under that
+id fails closed. A preview does not consume the id. The option rejects legacy
+mode without writing or promoting anything; omit it to retain default behavior.
+It grants neither a lease nor current ownership on historical replay. Combined
+claim/lease acquisition remains follow-up work.
 
 The next replacement slice makes promoted `todo add` a native create
 transaction on that same authority owner. Python validates the established CLI

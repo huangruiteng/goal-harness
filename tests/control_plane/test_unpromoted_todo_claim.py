@@ -36,6 +36,9 @@ def test_unpromoted_claim_retains_markdown_semantics(
     if with_note:
         request["note"] = "legacy combined claim remains supported"
     before = state.read_bytes()
+    with pytest.raises(ValueError, match="requires promoted canonical authority"):
+        update_goal_todo(**request, claim_operation_id="explicit-retry")
+    assert state.read_bytes() == before
     preview = update_goal_todo(**request, dry_run=True)
     assert preview["ok"] is True
     assert preview["changed"] is True

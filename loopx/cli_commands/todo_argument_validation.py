@@ -10,6 +10,7 @@ TODO_OPTION_FIELDS = (
     ("--text", "text"),
     ("--follow-up", "followups"),
     ("--todo-id", "todo_id"),
+    ("--claim-operation-id", "claim_operation_id"),
     ("--turn-instance-id", "turn_instance_id"),
     ("--completion-identity-key", "completion_identity_key"),
     ("--replan-obligation-id", "replan_obligation_id"),
@@ -332,9 +333,9 @@ def validate_todo_claim_options(args: argparse.Namespace) -> None:
         )
     _validate_todo_option_subset(
         args,
-        {"role", "todo_id", "claimed_by", "agent_id", "state_file"},
+        {"role", "todo_id", "claimed_by", "agent_id", "state_file", "claim_operation_id"},
         "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-        "--project, --state-file, and --dry-run; unsupported: ",
+        "--claim-operation-id, --project, --state-file, and --dry-run; unsupported: ",
     )
 
 
@@ -499,6 +500,8 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         raise ValueError(
             "--turn-instance-id is supported only by todo complete settlement"
         )
+    if getattr(args, "claim_operation_id", None) is not None and args.todo_command != "claim":
+        raise ValueError("--claim-operation-id is supported only by todo claim")
     if (
         getattr(args, "completion_identity_key", None)
         and args.todo_command != "complete"

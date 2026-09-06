@@ -38,8 +38,13 @@ decision 处理 actor、registration、role、status、archive、exclusion 与�
 同样在 head CAS 下持久化终态 receipt：存储 revision 可以前进，但 Todo 状态、
 `updated_at` 和 domain events 不变。结构合法的空注册名单允许历史回放，不能发起
 新 claim；非法名单仍失败。preview 保持零写入，非法 preview boolean 在访问 provider
-前失败。CLI 每次调用仍生成新的 operation id；跨调用重试身份和 claim/lease
-联合获取仍是后续工作，不能视为当前 claim-only 事务已提供的保证。
+前失败。CLI 默认仍为每次调用生成新 operation id。在已经 promotion 的 canonical
+authority 上，可显式使用
+`loopx todo claim --goal-id <goal> --todo-id <todo> --claimed-by <agent> --agent-id <agent> --claim-operation-id <public-safe-id>`
+进行跨进程重试：响应丢失后复用相同 id 和请求意图；同 id 搭配不同意图会失败。
+preview 不消耗该 id。legacy 模式会拒绝此选项，不写入也不自动 promotion；省略
+选项即可保持默认行为。历史 replay 不授予 lease 或当前所有权，claim/lease 联合
+获取仍是后续工作。
 
 下一 replacement slice 让 promotion 后的 `todo add` 成为同一 authority owner 上的
 原生 create transaction。Python 只校验既有 CLI 参数并一次性适配为带版本的 domain
