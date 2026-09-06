@@ -264,6 +264,24 @@ loopx status</code></pre>
 
 </section>
 
+<section id="references">
+<h2>参考与延伸阅读</h2>
+<h3>原文</h3>
+<ul><li><a href="https://my.feishu.cn/wiki/DPdLwMajaiEmWHky7jhcPOtEnEf">飞书原文：从一次性 Agent 到长程控制面——LoopX 的目标、状态内核与 Effect Program</a>。中文原始长文，与本博客改编版分别维护。</li></ul>
+<h3>LoopX 实现与实验证据</h3>
+<ul>
+<li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/docs/architecture.md">LoopX 架构</a>：目标、状态与执行边界的整体设计。实际使用可从<a href="../../../docs/book/">开发者手册</a>开始。</li>
+<li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/loopx/control_plane/effect_program.ts">Effect Program 实现</a>与<a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/tests/control_plane_ts/effect_program.test.ts">对应测试</a>：核对结算顺序、Receipt、重放与中断恢复。</li>
+<li><a href="../../../benchmarks/swe-marathon/?lang=zh">SWE-Marathon 双语研究简报</a>与<a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/benchmark/swe-marathon/data.json">固定版本的聚合数据</a>：阅读五种模式的实验设置、结果、成本和局限。</li>
+</ul>
+<h3>相关公开材料</h3>
+<ul>
+<li><a href="https://openai.com/index/trustworthy-third-party-evaluations-foundations/">OpenAI：A shared playbook for trustworthy third party evaluations</a>：理解 Harness、预算与评测结论之间的关系。</li>
+<li><a href="https://docs.langchain.com/oss/python/langgraph/persistence">LangGraph：Persistence</a>：Checkpoint、恢复与人类介入的持久化基础。</li>
+<li><a href="https://docs.temporal.io/activities">Temporal：Activities</a>：外部动作、重试与应用级幂等的职责边界。</li>
+</ul>
+</section>
+
   <p class="edition">本文为公开博客改编版。文中的实现引用固定到 <a href="https://github.com/huangruiteng/loopx/tree/41a35880fc63ed8b51696e08ec1f17b5369b1a4b">41a3588</a>；使用说明请以当前文档为准。</p>
   </article>
 </div>
