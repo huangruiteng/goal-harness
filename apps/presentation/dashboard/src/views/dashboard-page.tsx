@@ -1,4 +1,4 @@
-import { directoryStatusPayload, fetchWorkspaceDirectory, loadWorkspaceGoalSnapshots, type WorkspaceProgress } from "../data/workspace-progressive-status";
+import { directoryStatusPayload, fetchWorkspaceDirectory, loadWorkspaceGoalSnapshots, type WorkspaceProgress, type WorkspaceLoadError } from "../data/workspace-progressive-status";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert, Moon, RefreshCw, Sun } from "lucide-react";
 
@@ -426,6 +426,7 @@ type PersonalRunEvidence = {
 
 type PersonalGoalItem = {
   loadState?: "loading" | "error";
+  loadError?: WorkspaceLoadError;
   activationState: "active" | "stopped";
   agentId: string;
   agentSentence: string;
@@ -1046,7 +1047,7 @@ function answerPersonalManagerQuestion(
   model: PersonalHomeModel,
   question: string,
 ): PersonalManagerAnswer {
-  if (model.goals.some((goal) => goal.loadState)) return {
+  if (model.goals.some((goal) => goal.activationState === "active" && goal.loadState)) return {
     text: "Goal 状态尚未全部加载，暂不能给出完整统计。可先打开已加载的 Goal，失败项可重试。", lines: [],
   };
   if (personalManagerMatches(question, ["Agent", "agent", "推进", "在做"])) {
@@ -1389,11 +1390,11 @@ function PersonalGoalHome({
     ));
     const loadedGoals = new Map(models.flatMap((item) => item.goals).map((goal) => [goal.goalId, goal]));
     const goals = base.goals.map((goal) => loadedGoals.get(goal.goalId) ?? {
-      ...goal, loadState: progress.errors[goal.goalId] ? "error" as const : "loading" as const,
+      ...goal, loadError: progress.errors[goal.goalId], loadState: progress.errors[goal.goalId] ? "error" as const : "loading" as const,
       agentId: "", agentSentence: "", nextSentence: "", subagentExecution: undefined,
     });
     const userTodos = models.flatMap((item) => item.userTodos);
-    const incomplete = goals.some((goal) => goal.loadState);
+    const incomplete = goals.some((goal) => goal.activationState === "active" && goal.loadState);
     const issues = [...new Set(models.flatMap((item) => item.systemHealth?.issues ?? []))];
     return {
       ...base, goals, userTodos, visibleUserTodos: userTodos.slice(0, 5),
@@ -1412,10 +1413,10 @@ function PersonalGoalHome({
   const [periodicReport, setPeriodicReport] = useState<PeriodicReportProjection | null>(null);
   const [periodicReportError, setPeriodicReportError] = useState<string | null>(null);
   const [periodicReportLoading, setPeriodicReportLoading] = useState(false);
-  const sessionDiscoveryKey = model.goals.some((goal) => goal.loadState === "loading")
+  const sessionDiscoveryKey = model.goals.some((goal) => goal.activationState === "active" && goal.loadState === "loading")
     ? "loading" : model.goals.map((goal) => `${goal.goalId}:${goal.agentId}`).join("|");
   const contextId = selectedGoal?.goalId ?? "manager";
-  const managerSummary = model.goals.some((goal) => goal.loadState)
+  const managerSummary = model.goals.some((goal) => goal.activationState === "active" && goal.loadState)
     ? "Goal 状态正在逐个更新，当前统计尚不完整。"
     : (model.systemHealth ? !model.systemHealth.ok : !payload.ok)
     ? "LoopX 当前存在状态问题，可以打开运行详情查看原因。"
@@ -2926,6 +2927,7 @@ export function DashboardPage() {
     url: string,
     options: {
       background?: boolean;
+      retryOnly?: boolean;
       resyncAttempt?: number;
       selectionRevision?: number;
     } = {},
@@ -2956,21 +2958,33 @@ export function DashboardPage() {
       const directory = await fetchWorkspaceDirectory(trimmed, window.location.href).catch(() => null);
       if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
       if (directory) {
-        setProgress({ directory, snapshots: {}, errors: {} });
+        const retained = options.retryOnly && source.kind === "url" && source.label === trimmed
+          && progress?.directory.registry_revision === directory.registry_revision ? progress.snapshots : {};
+        setProgress({ directory, snapshots: retained, errors: {} });
+        const requestedDirectory = { ...directory, goals: directory.goals.filter((goal) => !retained[goal.id]) };
+        let directoryChanged = false;
         const initial = directoryStatusPayload(directory);
         if (background) setPayload(initial);
         else if (!await commitLoadedStatus(trimmed, initial, request)) return;
         setGoalArchiveLoadState({ error: null, phase: "loading" });
-        await loadWorkspaceGoalSnapshots(trimmed, window.location.href, directory,
-          (id, snapshot, error) => setProgress((current) => current ? {
+        await loadWorkspaceGoalSnapshots(trimmed, window.location.href, requestedDirectory,
+          (id, snapshot, error) => {
+            if (error === "revision") directoryChanged = true;
+            setProgress((current) => current ? {
             ...current,
             snapshots: snapshot ? { ...current.snapshots, [id]: snapshot } : current.snapshots,
             errors: error ? { ...current.errors, [id]: error } : current.errors,
-          } : current),
+          } : current);
+          },
           () => statusRequestCanCommit(statusRequestFenceRef.current, request),
           () => preferredGoalRef.current,
           progressiveAbort.signal,
         );
+        if (directoryChanged && (options.resyncAttempt ?? 0) < 1
+          && statusRequestCanCommit(statusRequestFenceRef.current, request)) {
+          await loadFromUrl(trimmed, { resyncAttempt: 1 });
+          return;
+        }
         if (statusRequestCanCommit(statusRequestFenceRef.current, request)) {
           setGoalArchiveLoadState({ error: null, phase: "ready" });
         }
@@ -3122,6 +3136,14 @@ export function DashboardPage() {
     }
   }, [goalArchiveLoadState.phase, goalRows, navigate, search.goalId, search.statusUrl, source.kind]);
 
+  useEffect(() => {
+    if (!progress || isLoading || !search.goalId || source.kind !== "url") return;
+    const goal = progress.directory.goals.find((item) => item.id === search.goalId);
+    if (goal?.activation_state === "stopped" && !progress.snapshots[goal.id] && !progress.errors[goal.id]) {
+      void loadFromUrl(source.label, { retryOnly: true });
+    }
+  }, [search.goalId, isLoading, progress, source]);
+
   function selectGoal(goalId: string) {
     void navigate({
       search: (current) => ({
@@ -3168,7 +3190,7 @@ export function DashboardPage() {
         { background: true },
       )}
       onRetryGoalArchive={retryGoalArchive}
-      onRefresh={() => loadFromUrl(source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl))}
+      onRefresh={() => loadFromUrl(source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl), { retryOnly: Boolean(progress && Object.keys(progress.errors).length) })}
       payload={payload}
       progress={progress}
       rows={goalRows}

@@ -48,7 +48,7 @@ export function GoalSidebar({
   const activeGoals = ordering.sorted;
   const stoppedGoals = goals.filter((goal) => goal.activationState === "stopped");
   const goalRow = (goal: WorkspaceGoal, stopped: boolean) => (
-    <div className={`personal-goal-row${ordering.target?.id === goal.goalId ? ordering.target.after ? " is-drop-after" : " is-drop-before" : ""}`} key={goal.goalId} data-reorder-goal={stopped ? undefined : goal.goalId}>
+    <div className={`personal-goal-row${ordering.target?.id === goal.goalId ? ordering.target.after ? " is-drop-after" : " is-drop-before" : ""}`} key={goal.goalId} data-reorder-goal={stopped ? undefined : goal.goalId} data-load-error={goal.loadError}>
       <button
         {...(!stopped ? ordering.pointerProps(goal.goalId) : {})}
         title={stopped ? undefined : t("sidebar.dragGoal")}
@@ -60,7 +60,7 @@ export function GoalSidebar({
         <span className={`personal-goal-state-dot ${goal.loadState ? "" : goalStateClass[goal.state]}`} />
         <span className="personal-goal-link-copy">
           <strong>{goal.title}</strong>
-          <small>{(goal.loadState ? t(goal.loadState === "error" ? "startup.goalError" : "startup.goalLoading") : localizedGoalState(goal.state, locale))}{goal.needsYou && !stopped ? ` · ${t("home.lane.needsYou")}` : ""}</small>
+          <small>{(goal.loadState && (!stopped || selectedGoalId === goal.goalId) ? t(goal.loadState === "error" ? "startup.goalError" : "startup.goalLoading") : localizedGoalState(goal.state, locale))}{goal.needsYou && !stopped ? ` · ${t("home.lane.needsYou")}` : ""}</small>
         </span>
         <ChevronRight size={15} />
       </button>

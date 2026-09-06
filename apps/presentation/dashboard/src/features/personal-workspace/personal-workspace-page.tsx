@@ -88,13 +88,17 @@ function activityTimeLabel(value: string | undefined, locale: string, t: Workspa
 function ManagerHomeBoard({
   goals,
   onSelectGoal,
+  onRetry,
   systemHealth,
 }: {
   goals: WorkspaceGoal[];
   onSelectGoal: (goalId: string) => void;
+  onRetry?: () => void;
   systemHealth?: WorkspaceSystemHealth;
 }) {
   const { locale, t } = useWorkspaceI18n();
+  const currentGoals = goals.filter((goal) => goal.activationState === "active");
+  const failedCount = currentGoals.filter((goal) => goal.loadState === "error").length;
   const activeHomeLanes = [
     { description: t("home.lane.needsYouDescription"), key: "needs_you", label: t("home.lane.needsYou") },
     { description: t("home.lane.runningDescription"), key: "running", label: t("home.lane.running") },
@@ -111,12 +115,12 @@ function ManagerHomeBoard({
     else active[lane].push(goal);
   });
   const goalCard = (goal: WorkspaceGoal) => (
-    <button className="personal-home-goal-card" data-goal-state={goal.state} key={goal.goalId} onClick={() => onSelectGoal(goal.goalId)} type="button">
+    <button className="personal-home-goal-card" data-goal-state={goal.loadState ?? goal.state} data-load-error={goal.loadError} key={goal.goalId} onClick={() => onSelectGoal(goal.goalId)} type="button">
       <span className="personal-home-goal-meta"><i />{goal.agentLaneCount && goal.agentLaneCount > 1
         ? t("header.workAgentCount", { count: goal.agentLaneCount })
         : goal.agentLabel ?? goal.agentId}</span>
       <strong>{goal.title}</strong>
-      <p>{goal.needsYou ?? goal.nextSentence}</p>
+      <p>{goal.loadError ? t(`startup.error.${goal.loadError}`) : goal.needsYou ?? goal.nextSentence}</p>
       <footer><span>{(goal.loadState ? t(goal.loadState === "error" ? "startup.goalError" : "startup.goalLoading") : localizedGoalState(goal.state, locale))}</span><small title={goal.latestActivity}>{goal.loadState ? "" : goal.latestActivity ? activityTimeLabel(goal.latestActivity, locale, t) : goal.agentTodos.length ? t("home.taskCount", { count: goal.agentTodos.length }) : t("home.noActivity")}</small></footer>
     </button>
   );
@@ -138,9 +142,11 @@ function ManagerHomeBoard({
           ) : null}
         </div>
       ) : null}
-      {goals.some((goal) => goal.loadState) ? <section className="personal-home-lane" aria-live="polite">
-        <header>{t("startup.progress", { loaded: goals.filter((goal) => !goal.loadState).length, total: goals.length })}</header>
-        {goals.filter((goal) => goal.loadState).map(goalCard)}
+      {currentGoals.some((goal) => goal.loadState) ? <section className="personal-home-lane" aria-live="polite">
+        <header>{t("startup.progress", { loaded: currentGoals.filter((goal) => !goal.loadState).length, total: currentGoals.length })}</header>
+        {failedCount ? <div className="personal-stopped-goal-error" role="status"><span>{t("startup.failedCount", { count: failedCount })}</span>
+          <button className="min-h-11 rounded-md border px-3 py-2 text-sm" onClick={onRetry} type="button">{t("startup.retryFailed")}</button></div> : null}
+        {currentGoals.filter((goal) => goal.loadState).map(goalCard)}
       </section> : null}
       <div className="personal-home-lanes">
         {activeHomeLanes.map((lane) => (
@@ -1758,14 +1764,14 @@ export function PersonalWorkspacePage({
             {!selectedGoal && !managerChatOpen ? (
               <section className="personal-manager-greeting">
                 <span><Bot size={20} /></span>
-                <div><strong>{t("home.greeting")}</strong><p>{model.goals.some((goal) => goal.loadState) ? t("startup.partial") : <>{t("home.waitingCount", { count: managerNeedsYouCount })} {t("home.blockingSummary", { count: managerBlockingCount })}</>}</p></div>
+                <div><strong>{t("home.greeting")}</strong><p>{model.goals.some((goal) => goal.activationState === "active" && goal.loadState) ? t("startup.partial") : <>{t("home.waitingCount", { count: managerNeedsYouCount })} {t("home.blockingSummary", { count: managerBlockingCount })}</>}</p></div>
               </section>
             ) : null}
             {selectedGoal?.loadState ? (
               <section className="personal-manager-greeting" role="status" data-testid="goal-status-loading">
                 <div><strong>{t(selectedGoal.loadState === "error" ? "startup.goalError" : "startup.goalLoading")}</strong>
-                <p>{t("startup.independent")}</p>
-                {selectedGoal.loadState === "error" ? <button className="personal-action-button" type="button" onClick={() => void callbacks.onRefresh?.()}>{t("startup.retry")}</button> : null}</div>
+                <p>{t(selectedGoal.loadError ? `startup.error.${selectedGoal.loadError}` : "startup.independent")}</p>
+                {selectedGoal.loadState === "error" ? <button className="min-h-11 rounded-md border px-3 py-2 text-sm" type="button" onClick={() => void callbacks.onRefresh?.()}>{t("startup.retry")}</button> : null}</div>
               </section>
             ) : selectedGoal && selectedGoalTab === "tasks" ? (
               <GoalTasksView
@@ -1792,7 +1798,7 @@ export function PersonalWorkspacePage({
                 reportState={model.periodicReports}
               />
             ) : !selectedGoal && !managerChatOpen ? (
-              <ManagerHomeBoard goals={workspaceGoals} onSelectGoal={selectGoal} systemHealth={model.systemHealth} />
+              <ManagerHomeBoard goals={workspaceGoals} onRetry={() => void callbacks.onRefresh?.()} onSelectGoal={selectGoal} systemHealth={model.systemHealth} />
             ) : !selectedGoal ? (
               <ChannelTimeline items={managerChatItems} onSelect={setSelection} selectedGoal={null} />
             ) : (
