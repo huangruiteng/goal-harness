@@ -54,16 +54,74 @@ class ArchiveQualificationTests(unittest.TestCase):
             bundle.qualify_archive(archive)
         self.assertIn("scripts/link", str(rejected.exception))
 
-    def test_pax_local_headers_fail_the_release_build(self):
+    def test_pax_local_headers_carry_long_paths_and_qualify(self):
+        # `git archive` emits a PAX local header ('x') whenever a path exceeds
+        # ustar capacity. The pinned tar crate's non-raw iterator folds it into
+        # the entry that follows, so the App installs the snapshot fine and the
+        # build gate must accept the same shape (and not count it as an entry).
         archive = self.write_archive(
             tar_header(b"docs/deep-path.md", b"x", size=512),
             b"21 path=docs/deep-path.md\n".ljust(512, b"\0"),
             tar_header(b"docs/deep-path.md", b"0"),
             b"\0" * 1024,
         )
+        self.assertEqual(bundle.qualify_archive(archive), 1)
+
+    def test_gnu_longname_headers_carry_long_paths_and_qualify(self):
+        # GNU longname records ('L') are the other path-metadata carrier the
+        # non-raw iterator folds away; accept them like the App does.
+        archive = self.write_archive(
+            tar_header(b"././@LongLink", b"L", size=512),
+            b"docs/deep-path.md".ljust(512, b"\0"),
+            tar_header(b"docs/deep-path.md", b"0"),
+            b"\0" * 1024,
+        )
+        self.assertEqual(bundle.qualify_archive(archive), 1)
+
+    def test_metadata_headers_do_not_smuggle_links_through(self):
+        # Accepting path-metadata headers must not weaken the link rejection:
+        # the entry that follows the metadata is still type-checked.
+        archive = self.write_archive(
+            tar_header(b"docs/deep-path.md", b"x", size=512),
+            b"21 path=docs/deep-path.md\n".ljust(512, b"\0"),
+            tar_header(b"scripts/link", b"2"),
+            b"\0" * 1024,
+        )
         with self.assertRaises(SystemExit) as rejected:
             bundle.qualify_archive(archive)
-        self.assertIn("typeflag b'x'", str(rejected.exception))
+        self.assertIn("scripts/link", str(rejected.exception))
+
+    def test_real_git_long_path_archive_qualifies(self):
+        # Mirror of the reviewer's synthetic reproduction: a real
+        # `git archive` of a snapshot whose path exceeds ustar capacity emits
+        # PAX local headers that the gate must not reject.
+        import subprocess
+
+        repo = self.root / "repo"
+        deep = repo / ("docs/" + "very-deep-directory-name/" * 6 + "long-path.md")
+        deep.parent.mkdir(parents=True)
+        deep.write_text("# beyond ustar capacity\n")
+
+        def git(*args: str) -> None:
+            subprocess.run(
+                ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+            )
+
+        git("init", "-q")
+        git("config", "user.email", "build-gate@example.invalid")
+        git("config", "user.name", "build gate")
+        git("add", ".")
+        git("commit", "-qm", "long-path snapshot")
+        archive = self.root / "real-runtime-source.tar.gz"
+        subprocess.run(
+            [
+                "git", "archive", "--format=tar.gz",
+                f"--output={archive}", "HEAD",
+            ],
+            cwd=repo,
+            check=True,
+        )
+        self.assertGreaterEqual(bundle.qualify_archive(archive), 1)
 
     def test_pax_global_headers_are_skipped_like_the_app_extractor(self):
         archive = self.write_archive(

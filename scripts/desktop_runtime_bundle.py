@@ -35,14 +35,20 @@ def build(root: Path) -> None:
 def qualify_archive(archive: Path) -> int:
     """Fail the release build when the App-side extractor could never install it.
 
-    The Rust extractor accepts plain files and directories and skips the global
-    PAX header only. Git emits other entry types as soon as the snapshot gains a
-    symlink or a path the ustar header cannot carry; every client would then
-    fail the post-restart install (and repair) with ``runtime_bundle_invalid``
-    while the feed keeps advertising the update, so the release pipeline must
-    reject the snapshot here instead. Raw typeflag bytes are inspected because
-    tar readers silently fold extended headers into the entry that follows.
+    The Rust extractor iterates logical entries with the pinned tar crate's
+    non-raw iterator: PAX local headers ('x', emitted by ``git archive`` for
+    paths beyond ustar capacity), PAX global headers ('g') and GNU
+    longname/longlink records ('L'/'K') carry path metadata for the entry that
+    follows and are folded away before the App's ``is_file``/``is_dir`` checks
+    run. The gate must therefore accept those metadata carriers and reject only
+    entries that survive as real links, devices or reserved types -- shapes
+    every client would fail the post-restart install (and repair) with
+    ``runtime_bundle_invalid`` while the feed keeps advertising the update.
+    Raw typeflag bytes are inspected precisely because tar readers silently
+    fold extended headers; see bundled_runtime.rs tests for the matching
+    extractor-side acceptance matrix.
     """
+    metadata_typeflags = (b"g", b"x", b"L", b"K")
     entries = 0
     with gzip.open(archive, "rb") as bundle:
         while True:
@@ -51,13 +57,13 @@ def qualify_archive(archive: Path) -> int:
                 break
             typeflag = header[156:157]
             name = header[:100].rstrip(b"\0").decode("utf-8", "replace")
-            if typeflag not in (b"0", b"\0", b"5", b"g"):
+            if typeflag not in (b"0", b"\0", b"5") and typeflag not in metadata_typeflags:
                 raise SystemExit(
                     f"runtime bundle entry is neither a file nor a directory, "
                     f"which the App cannot install: {name!r} "
                     f"(tar typeflag {typeflag!r})"
                 )
-            if typeflag != b"g":
+            if typeflag in (b"0", b"\0", b"5"):
                 entries += 1
             size = int((header[124:136].rstrip(b"\0 ") or b"0").decode("ascii") or "0", 8)
             bundle.read((size + 511) // 512 * 512)
