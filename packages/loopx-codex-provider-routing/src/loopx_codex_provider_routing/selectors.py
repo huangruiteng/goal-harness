@@ -38,8 +38,8 @@ for model, label in MODEL_FAMILIES.items():
 VISIBLE_SELECTORS = {
     f"{prefix}/{model}"
     for model in MODEL_FAMILIES
-    for prefix in ("auto", "auto-with-ds")
-}
+    for prefix in ("auto", "fast/auto", "auto-with-ds")
+} | {"gpt-5.6-luna"}
 
 ROUTES["gpt-5.6-luna"] = {
     "model": "gpt-5.6-luna",

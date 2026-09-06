@@ -286,9 +286,16 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(len(rows), 25)
         self.assertEqual(
             {slug for slug, row in rows.items() if row["visibility"] == "list"},
-            VISIBLE_SELECTORS,
+            {
+                "auto/gpt-5.6-sol",
+                "fast/auto/gpt-5.6-sol",
+                "auto-with-ds/gpt-5.6-sol",
+                "auto/gpt-6-astra",
+                "fast/auto/gpt-6-astra",
+                "auto-with-ds/gpt-6-astra",
+                "gpt-5.6-luna",
+            },
         )
-        self.assertEqual(len(VISIBLE_SELECTORS), 4)
         self.assertEqual(
             rows["gpt-6-astra"]["context_window"],
             rows["auto/gpt-6-astra"]["context_window"],
