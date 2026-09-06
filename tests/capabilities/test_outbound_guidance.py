@@ -183,6 +183,46 @@ def test_cli_opaque_turn_uses_real_timestamp(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("command", ["send", "reply"])
+def test_cli_legacy_namespace_preserves_default_off_sender(tmp_path, monkeypatch, command):
+    from loopx.cli_commands import lark_inbox as cli
+
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    monkeypatch.setattr(cli, "_inbox_context", lambda *a: (project, config))
+    monkeypatch.setattr(cli, "_resolve_lark_activation", lambda *a, **kw: {})
+    monkeypatch.setattr(cli, "resolve_routed_lark_inbox_config", lambda **kw: config)
+    monkeypatch.setattr(cli, "resolve_routed_lark_inbox_route", lambda **kw: config)
+    calls = []
+
+    def send(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "status": "preview_ready", "external_write_performed": False}
+
+    monkeypatch.setattr(
+        cli, "reply_lark_event_inbox" if command == "reply" else "send_lark_inbox_message", send
+    )
+    # Direct callers predating outbound recall do not have the new parser fields.
+    args = argparse.Namespace(
+        command="lark-inbox", lark_inbox_command=command,
+        goal_id=None, agent_id=None, message_id="om_reaction_fixture",
+        route_key="example", text="done", execute=False, provider_preflight=True,
+    )
+    results = []
+    assert cli.handle_lark_inbox_command(
+        args, registry_path=tmp_path / "registry.json", runtime_root_arg=None,
+        output_format=lambda *a: "json",
+        print_payload=lambda payload, *a: results.append(payload),
+    ) == 0
+    assert len(calls) == 1
+    assert calls[0] == {
+        "project": project, "config_path": config, "text": "done",
+        "execute": False, "provider_preflight": True, "before_send": None,
+        **({"message_id": "om_reaction_fixture"} if command == "reply" else {}),
+    }
+    assert results[0]["status"] == "preview_ready"
+    assert results[0]["external_write_performed"] is False
+
+
+@pytest.mark.parametrize("command", ["send", "reply"])
 def test_cli_installs_hook_at_real_sender(tmp_path, monkeypatch, command):
     from loopx.cli_commands import lark_inbox as cli
 

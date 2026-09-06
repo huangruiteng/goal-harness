@@ -642,8 +642,8 @@ def handle_lark_inbox_command(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
                     agent_id=args.agent_id,
-                    purpose=args.message_purpose,
-                    reviewed_digest=args.reviewed_guidance_digest,
+                    purpose=getattr(args, "message_purpose", "unspecified"),
+                    reviewed_digest=getattr(args, "reviewed_guidance_digest", None),
                 ),
             )
         elif args.lark_inbox_command == "send":
@@ -662,8 +662,8 @@ def handle_lark_inbox_command(
                     registry_path=registry_path,
                     goal_id=args.goal_id,
                     agent_id=args.agent_id,
-                    purpose=args.message_purpose,
-                    reviewed_digest=args.reviewed_guidance_digest,
+                    purpose=getattr(args, "message_purpose", "unspecified"),
+                    reviewed_digest=getattr(args, "reviewed_guidance_digest", None),
                 ),
             )
         elif args.lark_inbox_command == "processing":
