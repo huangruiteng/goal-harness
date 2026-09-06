@@ -14,6 +14,13 @@ pub(crate) fn app_bundle() -> Result<PathBuf, String> {
 // one in, so callers that must verify the installed App is still in place
 // (failed replacement recovery) resolve it from the running executable.
 // Path-level so synthetic App layouts are testable without a signed build.
+//
+// This is a layout-and-runnability check, not a signature check: the bundle
+// must keep its Info.plist AND its executable. A partially removed bundle —
+// executable deleted while Info.plist (and the runtime identity) survives a
+// failed replacement — must not verify, or the safe-restart predicate would
+// discard the recovery journal over an unbootable App. Signature integrity
+// stays at the `copy` boundary's `codesign --verify` check.
 pub(crate) fn app_bundle_at(executable: &Path) -> Result<PathBuf, String> {
     let bundle = executable
         .parent()
@@ -22,10 +29,41 @@ pub(crate) fn app_bundle_at(executable: &Path) -> Result<PathBuf, String> {
         .ok_or("app_bundle_required")?;
     if bundle.extension().and_then(|s| s.to_str()) != Some("app")
         || !bundle.join("Contents/Info.plist").is_file()
+        || !bundle_executable_is_present(executable, bundle)
     {
         return Err("app_bundle_required".into());
     }
     Ok(bundle.to_path_buf())
+}
+
+// The running binary keeps executing after the updater deletes it, so a
+// missing file at the executable's own path is exactly the "old bundle was
+// moved away / partially removed" state layout verification must reject.
+// When Info.plist declares CFBundleExecutable, that declared binary must
+// exist too: the bundle launches what Info.plist names, not any surviving
+// neighbor. An unreadable (e.g. binary) plist skips the declared-name check
+// without weakening the executable-presence check above.
+fn bundle_executable_is_present(executable: &Path, bundle: &Path) -> bool {
+    if !executable.is_file() {
+        return false;
+    }
+    match declared_bundle_executable(bundle) {
+        Some(declared) => {
+            !declared.is_empty()
+                && bundle.join("Contents/MacOS").join(declared).is_file()
+        }
+        None => true,
+    }
+}
+
+fn declared_bundle_executable(bundle: &Path) -> Option<String> {
+    let plist = fs::read_to_string(bundle.join("Contents/Info.plist")).ok()?;
+    let key = "<key>CFBundleExecutable</key>";
+    let rest = &plist[plist.find(key)? + key.len()..];
+    let open = rest.find("<string>")? + "<string>".len();
+    let value = &rest[open..];
+    let close = value.find("</string>")?;
+    Some(value[..close].trim().to_string())
 }
 
 fn root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -174,6 +212,60 @@ mod tests {
         fs::create_dir_all(loose.parent().unwrap()).unwrap();
         fs::write(&loose, "binary").unwrap();
         assert_eq!(app_bundle_at(&loose), Err("app_bundle_required".into()));
+    }
+
+    #[test]
+    fn executable_removal_while_info_plist_remains_stops_verifying() {
+        // Review round 3 counterexample: the pinned macOS updater's failed
+        // replacement can leave a partially removed bundle — Info.plist and
+        // the runtime identity survive while the executable is gone (a
+        // running process keeps executing its deleted binary, so the path
+        // simply stops existing). Layout verification must fail here so the
+        // safe-restart predicate cannot discard the journal and promise a
+        // safe restart over an unbootable App.
+        let dir = tempfile::tempdir().unwrap();
+        let contents = dir.path().join("Partial.app/Contents");
+        fs::create_dir_all(contents.join("MacOS")).unwrap();
+        fs::write(contents.join("Info.plist"), "plist").unwrap();
+        let executable = contents.join("MacOS/loopx-control-plane");
+        fs::write(&executable, "binary").unwrap();
+        assert!(app_bundle_at(&executable).is_ok());
+        fs::remove_file(&executable).unwrap();
+        assert_eq!(
+            app_bundle_at(&executable),
+            Err("app_bundle_required".into())
+        );
+    }
+
+    #[test]
+    fn declared_bundle_executable_must_be_present_when_plist_names_it() {
+        // When Info.plist declares CFBundleExecutable, that exact binary
+        // must exist in Contents/MacOS: a bundle whose declared executable
+        // was removed — even with another file left behind — cannot run the
+        // binary the bundle claims to launch.
+        let dir = tempfile::tempdir().unwrap();
+        let contents = dir.path().join("Declared.app/Contents");
+        fs::create_dir_all(contents.join("MacOS")).unwrap();
+        fs::write(
+            contents.join("Info.plist"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+             <plist version=\"1.0\"><dict>\
+             <key>CFBundleExecutable</key><string>loopx-control-plane</string>\
+             </dict></plist>",
+        )
+        .unwrap();
+        let survivor = contents.join("MacOS/unrelated-helper");
+        fs::write(&survivor, "binary").unwrap();
+        assert_eq!(
+            app_bundle_at(&survivor),
+            Err("app_bundle_required".into())
+        );
+        // With the declared executable restored beside the survivor the
+        // bundle is a runnable layout again.
+        let declared = contents.join("MacOS/loopx-control-plane");
+        fs::write(&declared, "binary").unwrap();
+        assert!(app_bundle_at(&survivor).is_ok());
+        assert!(app_bundle_at(&declared).is_ok());
     }
 
     #[test]

@@ -619,4 +619,33 @@ mod tests {
             ("app_install_incomplete", false)
         );
     }
+
+    #[test]
+    fn partially_removed_app_keeps_the_journal_as_incomplete() {
+        // Review round 3 counterexample, through the same boundary the
+        // safe-restart predicate uses: the pinned macOS updater's failed
+        // replacement leaves Info.plist (and the runtime identity) behind
+        // while the executable is gone. The layout verification
+        // failed_install_left_previous_app_usable reuses must reject this
+        // bundle, so the failure classifies as app_install_incomplete and
+        // the journal is retained for the verified-backup rollback.
+        let dir = tempfile::tempdir().unwrap();
+        let contents = dir.path().join("Partial.app/Contents");
+        std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+        std::fs::write(contents.join("Info.plist"), "plist").unwrap();
+        let executable = contents.join("MacOS/loopx-control-plane");
+        std::fs::write(&executable, "binary").unwrap();
+        assert!(crate::update_backup::app_bundle_at(&executable).is_ok());
+        // The partial removal: executable deleted, Info.plist survives.
+        std::fs::remove_file(&executable).unwrap();
+        // The predicate's bundle term fails exactly as it would for the
+        // running App's deleted binary, and the recovery classification
+        // keeps the journal instead of promising a safe restart.
+        let usable = crate::update_backup::app_bundle_at(&executable).is_ok();
+        assert!(!usable);
+        assert_eq!(
+            install_failure_recovery(usable),
+            ("app_install_incomplete", false)
+        );
+    }
 }
