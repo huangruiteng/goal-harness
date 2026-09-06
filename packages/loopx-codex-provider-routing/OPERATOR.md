@@ -33,7 +33,7 @@ Removing Ark aliases from the three-account routes prevents an old degraded
 binding from keeping those routes on DeepSeek.
 
 The four-route operator requires a CPA build with
-[custom-tool namespace recovery](https://github.com/huangruiteng/CLIProxyAPI/pull/1). Chat Completions encodes custom tools as functions
+[custom-tool namespace recovery](https://github.com/router-for-me/CLIProxyAPI/pull/5558). Chat Completions encodes custom tools as functions
 with an `input` string. CPA must restore `custom_tool_call`, the original input,
 namespace and call id in streamed and non-streamed responses. Historical custom
 calls must replay under the same qualified name as the current declaration.
@@ -100,6 +100,21 @@ CPA must refresh its model definitions: an old `-local-model` catalog can omit a
 new model even when the App picker advertises it. The operator enables CPA's
 model-definition refresh while keeping the executable/plugin hashes pinned.
 Model-definition refresh and binary upgrade are separate operations.
+
+## Reuse outside this preset
+
+The package's reusable routing boundary is `compile_catalog(source)` and the
+managed [routing contract](CONTRACT.md): callers supply symbolic profiles,
+rings, routes and capability declarations. The A/B/C and Sol/Astra names in
+this operator are a concrete preset, not requirements of that contract.
+Changing a contract does not install a runtime or grant credential access.
+
+Tool identity recovery belongs to CPA's Responses translator and depends only
+on the current request's tool declarations, not account slots, model names or
+a particular compatibility provider. Early cooldown recovery uses CPA's
+existing management API; this operator resolves the configured symbolic slot
+locally and emits a credential-free receipt. Credential acquisition, service
+supervision and live availability verification remain explicit host actions.
 
 ## Commands
 
