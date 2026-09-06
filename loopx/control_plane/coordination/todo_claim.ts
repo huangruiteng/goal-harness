@@ -74,11 +74,21 @@ function normalizeExcludedAgents(value: unknown): string[] {
   return normalized;
 }
 
-function failure(code: string, reason: string, detail: JsonObject = {}): CoordinationTodoClaimResult {
+type CoordinationTodoClaimFailureKind =
+  | "decision_rejection"
+  | "protocol_failure";
+
+function failure(
+  code: string,
+  reason: string,
+  detail: JsonObject = {},
+  kind: CoordinationTodoClaimFailureKind = "protocol_failure",
+): CoordinationTodoClaimResult {
   return {
     ...detail,
     schema_version: COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
     status: "failed",
+    failure_kind: kind,
     reason_code: code,
     reason,
   };
@@ -333,9 +343,12 @@ export async function executeCoordinationTodoClaim(
   }
   const todo = projection.todos.get(input.todo_id);
   if (todo === undefined) {
-    return failure("todo_not_found", "Todo is missing from the canonical provider head", {
-      todo_id: input.todo_id,
-    });
+    return failure(
+      "todo_not_found",
+      "Todo is missing from the canonical provider head",
+      { todo_id: input.todo_id },
+      "decision_rejection",
+    );
   }
 
   let authority: ReturnType<typeof evaluateCoordinationTodoClaimDecision>;
@@ -352,6 +365,7 @@ export async function executeCoordinationTodoClaim(
       typeof authority.reason_code === "string" ? authority.reason_code : "invalid_coordination_todo_claim",
       typeof authority.reason === "string" ? authority.reason : "Todo claim was rejected",
       authority,
+      "decision_rejection",
     );
   }
 

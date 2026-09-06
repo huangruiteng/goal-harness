@@ -50,10 +50,13 @@ def test_absent_fence_preserves_legacy_path_without_starting_typescript(
         "loopx.control_plane.coordination.local_authority.effect_runtime_result",
         lambda *_args, **_kwargs: pytest.fail("pre-cutover read must stay legacy"),
     )
-    assert read_canonical_todos_if_promoted(
-        runtime_root=tmp_path,
-        goal_id="goal-a",
-    ) is None
+    assert (
+        read_canonical_todos_if_promoted(
+            runtime_root=tmp_path,
+            goal_id="goal-a",
+        )
+        is None
+    )
 
 
 def test_engaged_fence_reads_typescript_provider_result(
@@ -94,9 +97,7 @@ def test_promoted_claim_adapter_invokes_typescript_without_markdown_fallback(
                 "goals": [
                     {
                         "id": "goal-a",
-                        "coordination": {
-                            "registered_agents": ["agent-a", "agent-b"]
-                        },
+                        "coordination": {"registered_agents": ["agent-a", "agent-b"]},
                     }
                 ],
             }
@@ -136,9 +137,7 @@ def test_promoted_claim_adapter_invokes_typescript_without_markdown_fallback(
     assert result is not None and result["changed"] is True
     assert calls[0][0] == "coordination.local_authority.todo_claim"
     assert calls[0][1]["registered_agents"] == ["agent-a", "agent-b"]
-    assert str(calls[0][1]["operation_id"]).startswith(
-        "todo-claim:goal-a:todo_a:"
-    )
+    assert str(calls[0][1]["operation_id"]).startswith("todo-claim:goal-a:todo_a:")
     assert isinstance(calls[0][1]["observed_at"], str)
 
 
@@ -147,14 +146,21 @@ def test_promoted_add_invokes_native_create_without_markdown_state(
     tmp_path: Path,
 ) -> None:
     registry = tmp_path / "registry.json"
-    registry.write_text(json.dumps({
-        "schema_version": 1,
-        "common_runtime_root": str(tmp_path / "runtime"),
-        "goals": [{
-            "id": "goal-a",
-            "coordination": {"registered_agents": ["agent-a", "agent-b"]},
-        }],
-    }), encoding="utf-8")
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "common_runtime_root": str(tmp_path / "runtime"),
+                "goals": [
+                    {
+                        "id": "goal-a",
+                        "coordination": {"registered_agents": ["agent-a", "agent-b"]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(
         "loopx.control_plane.todos.provider_create.read_canonical_todos_if_promoted",
@@ -164,7 +170,8 @@ def test_promoted_add_invokes_native_create_without_markdown_state(
     def _create(method: str, params: dict[str, object]) -> dict[str, object]:
         calls.append((method, params))
         return {
-            "status": "applied", "changed": True,
+            "status": "applied",
+            "changed": True,
             "source_authority": "file_v0",
             "decision_read_from_provider": True,
             "legacy_fallback_used": False,
@@ -174,9 +181,14 @@ def test_promoted_add_invokes_native_create_without_markdown_state(
         "loopx.control_plane.todos.provider_create.effect_runtime_result", _create
     )
     result = add_goal_todo(
-        registry_path=registry, goal_id="goal-a", role="agent",
-        text="Create natively", claimed_by="agent-a", agent_id="agent-a",
-        task_class="advancement_task", action_kind="implement",
+        registry_path=registry,
+        goal_id="goal-a",
+        role="agent",
+        text="Create natively",
+        claimed_by="agent-a",
+        agent_id="agent-a",
+        task_class="advancement_task",
+        action_kind="implement",
         validation_command_json='["python", "-c", "pass"]',
     )
 
@@ -184,9 +196,7 @@ def test_promoted_add_invokes_native_create_without_markdown_state(
     assert calls[0][0] == "coordination.local_authority.todo_create"
     assert calls[0][1]["todo"]["schema_version"] == "todo_domain_record_v0"
     assert calls[0][1]["todo"]["claimed_by"] == "agent-a"
-    assert calls[0][1]["todo"]["validation_command_argv"] == [
-        "python", "-c", "pass"
-    ]
+    assert calls[0][1]["todo"]["validation_command_argv"] == ["python", "-c", "pass"]
     assert calls[0][1]["registered_agents"] == ["agent-a", "agent-b"]
 
 
@@ -196,35 +206,55 @@ def test_promoted_add_delegates_semantic_duplicate_to_typescript(
 ) -> None:
     monkeypatch.setattr(
         "loopx.control_plane.todos.provider_create.read_canonical_todos_if_promoted",
-        lambda **_kwargs: {"todos": [{
-            "todo_id": "todo_existing", "role": "agent", "status": "open",
-            "archive_state": "active", "text": "Already native",
-        }]},
+        lambda **_kwargs: {
+            "todos": [
+                {
+                    "todo_id": "todo_existing",
+                    "role": "agent",
+                    "status": "open",
+                    "archive_state": "active",
+                    "text": "Already native",
+                }
+            ]
+        },
     )
     calls: list[tuple[str, dict[str, object]]] = []
 
     def _create(method: str, params: dict[str, object]) -> dict[str, object]:
         calls.append((method, params))
         return {
-            "status": "no_change", "changed": False,
-            "todo_id": "todo_existing", "source_authority": "file_v0",
-            "decision_read_from_provider": True, "legacy_fallback_used": False,
+            "status": "no_change",
+            "changed": False,
+            "todo_id": "todo_existing",
+            "source_authority": "file_v0",
+            "decision_read_from_provider": True,
+            "legacy_fallback_used": False,
         }
 
     monkeypatch.setattr(
-        "loopx.control_plane.todos.provider_create.effect_runtime_result", _create,
+        "loopx.control_plane.todos.provider_create.effect_runtime_result",
+        _create,
     )
     registry = tmp_path / "registry.json"
-    registry.write_text(json.dumps({
-        "schema_version": 1,
-        "goals": [{"id": "goal-a", "coordination": {
-            "registered_agents": ["agent-a"]
-        }}],
-    }), encoding="utf-8")
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "goals": [
+                    {"id": "goal-a", "coordination": {"registered_agents": ["agent-a"]}}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = add_goal_todo(
-        registry_path=registry, goal_id="goal-a", role="agent",
-        text="Already native", claimed_by="agent-a", agent_id="agent-a",
+        registry_path=registry,
+        goal_id="goal-a",
+        role="agent",
+        text="Already native",
+        claimed_by="agent-a",
+        agent_id="agent-a",
     )
 
     assert result["already_exists"] is True
@@ -372,6 +402,7 @@ def test_promoted_claim_rejection_preserves_legacy_valueerror_contract(
         "loopx.control_plane.coordination.local_authority.effect_runtime_result",
         lambda method, params: {
             "status": "failed",
+            "failure_kind": "decision_rejection",
             "reason_code": "todo_not_open",
             "reason": "todo claim requires status=open",
             "source_authority": "file_v0",
@@ -497,9 +528,7 @@ def test_todo_list_uses_provider_after_cutover_even_when_markdown_disagrees(
                         "status": "active",
                         "repo": str(project),
                         "state_file": ".codex/goals/goal-a/ACTIVE_GOAL_STATE.md",
-                        "coordination": {
-                            "registered_agents": ["agent-a", "agent-b"]
-                        },
+                        "coordination": {"registered_agents": ["agent-a", "agent-b"]},
                     }
                 ],
             }
@@ -558,9 +587,7 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
                         "status": "active",
                         "repo": str(project),
                         "state_file": ".codex/goals/goal-a/ACTIVE_GOAL_STATE.md",
-                        "coordination": {
-                            "registered_agents": ["agent-a", "agent-b"]
-                        },
+                        "coordination": {"registered_agents": ["agent-a", "agent-b"]},
                     }
                 ],
             }
@@ -732,17 +759,32 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     # The public compatibility CLI must retain claim-neutral text correction
     # after promotion; it must not reconstruct or write the Markdown source.
     correction_command = [
-        sys.executable, "-m", "loopx.cli", "--format", "json",
-        "--registry", str(registry_path), "todo", "update", "--goal-id", "goal-a",
-        "--todo-id", "todo_claimable", "--agent-id", "agent-b",
-        "--text", "Corrected before claiming",
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--format",
+        "json",
+        "--registry",
+        str(registry_path),
+        "todo",
+        "update",
+        "--goal-id",
+        "goal-a",
+        "--todo-id",
+        "todo_claimable",
+        "--agent-id",
+        "agent-b",
+        "--text",
+        "Corrected before claiming",
     ]
-    correction = subprocess.run(correction_command, capture_output=True, text=True,
-                                check=True, timeout=30)
+    correction = subprocess.run(
+        correction_command, capture_output=True, text=True, check=True, timeout=30
+    )
     assert json.loads(correction.stdout)["ok"] is True
     corrected = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
-    corrected_item = next(item for item in corrected["todos"]
-                          if item["todo_id"] == "todo_claimable")
+    corrected_item = next(
+        item for item in corrected["todos"] if item["todo_id"] == "todo_claimable"
+    )
     assert corrected_item["text"] == "Corrected before claiming"
     assert not corrected_item.get("claimed_by")
     assert corrected_item["last_actor_agent_id"] == "agent-b"
@@ -765,19 +807,45 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     assert not state_file.exists()
 
     claim_command = [
-        sys.executable, "-m", "loopx.cli", "--format", "json",
-        "--registry", str(registry_path), "todo", "claim", "--goal-id", "goal-a",
-        "--todo-id", "todo_claimable", "--claimed-by", "agent-a", "--agent-id", "agent-a",
-        "--claim-operation-id", "initial-cli-claim",
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--format",
+        "json",
+        "--registry",
+        str(registry_path),
+        "todo",
+        "claim",
+        "--goal-id",
+        "goal-a",
+        "--todo-id",
+        "todo_claimable",
+        "--claimed-by",
+        "agent-a",
+        "--agent-id",
+        "agent-a",
+        "--claim-operation-id",
+        "initial-cli-claim",
     ]
     # Duplicate callers race from separate processes, but one operation must
     # produce exactly one accepted claim and the same durable receipt.
     with ThreadPoolExecutor(max_workers=2) as pool:
-        attempts = [pool.submit(subprocess.run, claim_command,
-            capture_output=True, text=True, check=True, timeout=30) for _ in range(2)]
+        attempts = [
+            pool.submit(
+                subprocess.run,
+                claim_command,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
+            for _ in range(2)
+        ]
         claims = [json.loads(attempt.result().stdout) for attempt in attempts]
     assert sum(item["status"] == "applied" for item in claims) == 1
-    assert all(item["status"] in {"applied", "recovered", "replayed"} for item in claims)
+    assert all(
+        item["status"] in {"applied", "recovered", "replayed"} for item in claims
+    )
     assert claims[0]["original_receipt"] == claims[1]["original_receipt"]
     assert claims[0]["provider_revision"] == claims[1]["provider_revision"]
     claimed = next(item for item in claims if item["status"] == "applied")
@@ -795,44 +863,90 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     # Separate CLI processes must replay one durable operation, not mint a
     # fresh receipt for every retry. Preview does not consume that identity.
     claim_command = [*claim_command[:-1], "retryable-cli-claim"]
-    preview = json.loads(subprocess.run(
-        [*claim_command, "--dry-run"], capture_output=True, text=True, check=True,
-    ).stdout)
+    preview = json.loads(
+        subprocess.run(
+            [*claim_command, "--dry-run"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
     assert preview["dry_run"] is True
-    original = json.loads(subprocess.run(
-        claim_command, capture_output=True, text=True, check=True,
-    ).stdout)
-    replay = json.loads(subprocess.run(
-        claim_command, capture_output=True, text=True, check=True,
-    ).stdout)
+    original = json.loads(
+        subprocess.run(
+            claim_command,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    replay = json.loads(
+        subprocess.run(
+            claim_command,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
     assert original["status"] == "no_change"
     assert replay["status"] == "replayed"
     assert replay["original_receipt"] == original["original_receipt"]
     assert replay["provider_revision"] == original["provider_revision"]
-    changed_intent = ["agent-b" if part == "agent-a" else part for part in claim_command]
+    changed_intent = [
+        "agent-b" if part == "agent-a" else part for part in claim_command
+    ]
     rejected = subprocess.run(changed_intent, capture_output=True, text=True)
     assert rejected.returncode != 0
-    assert json.loads(rejected.stdout)["error"] == "operation id already names a different coordination request"
+    assert (
+        json.loads(rejected.stdout)["error"]
+        == "operation id already names a different coordination request"
+    )
     for invalid_key in ("", " padded-operation "):
-        invalid = subprocess.run([*claim_command[:-1], invalid_key], capture_output=True, text=True)
+        invalid = subprocess.run(
+            [*claim_command[:-1], invalid_key], capture_output=True, text=True
+        )
         assert invalid.returncode != 0
     assert not state_file.exists()
 
     create_command = [
-        sys.executable, "-m", "loopx.cli", "--format", "json",
-        "--registry", str(registry_path), "todo", "add", "--goal-id", "goal-a",
-        "--role", "agent", "--text", "Create directly against promoted provider",
-        "--claimed-by", "agent-a",
-        "--task-class", "advancement_task", "--action-kind", "implement",
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--format",
+        "json",
+        "--registry",
+        str(registry_path),
+        "todo",
+        "add",
+        "--goal-id",
+        "goal-a",
+        "--role",
+        "agent",
+        "--text",
+        "Create directly against promoted provider",
+        "--claimed-by",
+        "agent-a",
+        "--task-class",
+        "advancement_task",
+        "--action-kind",
+        "implement",
     ]
     create_preview = subprocess.run(
-        [*create_command, "--dry-run"], capture_output=True, text=True, check=True,
+        [*create_command, "--dry-run"],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert json.loads(create_preview.stdout)["status"] == "planned"
     assert not state_file.exists()
-    created = json.loads(subprocess.run(
-        create_command, capture_output=True, text=True, check=True,
-    ).stdout)
+    created = json.loads(
+        subprocess.run(
+            create_command,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
     assert created["ok"] is True
     assert created["source_authority"] == "file_v0"
     assert created["legacy_fallback_used"] is False
@@ -850,13 +964,35 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     # Real CLI, no Markdown file: provider data feeds an in-memory editor and
     # only requested fields return through TS CAS. Complex sibling fields do
     # not round-trip through the lossy Markdown representation.
-    command = [sys.executable, "-m", "loopx.cli", "--format", "json",
-               "--registry", str(registry_path), "todo", "update", "--goal-id", "goal-a",
-               "--todo-id", "todo_claimable", "--agent-id", "agent-a",
-               "--text", "Edit provider-owned work", "--note", "compatibility edit"]
-    preview = subprocess.run([*command, "--dry-run"], capture_output=True, text=True, check=True)
+    command = [
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--format",
+        "json",
+        "--registry",
+        str(registry_path),
+        "todo",
+        "update",
+        "--goal-id",
+        "goal-a",
+        "--todo-id",
+        "todo_claimable",
+        "--agent-id",
+        "agent-a",
+        "--text",
+        "Edit provider-owned work",
+        "--note",
+        "compatibility edit",
+    ]
+    preview = subprocess.run(
+        [*command, "--dry-run"], capture_output=True, text=True, check=True
+    )
     assert json.loads(preview.stdout)["status"] == "planned"
-    assert list_goal_todos(registry_path=registry_path, goal_id="goal-a")["todos"] == after_create["todos"]
+    assert (
+        list_goal_todos(registry_path=registry_path, goal_id="goal-a")["todos"]
+        == after_create["todos"]
+    )
     edited = subprocess.run(command, capture_output=True, text=True, check=True)
     edit_result = json.loads(edited.stdout)
     assert edit_result["status"] == "applied"
@@ -865,10 +1001,67 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     after_edit = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
     edited_by_id = {item["todo_id"]: item for item in after_edit["todos"]}
     assert edited_by_id["todo_claimable"] == {
-        **claimed_item, "text": "Edit provider-owned work", "note": "compatibility edit",
+        **claimed_item,
+        "text": "Edit provider-owned work",
+        "note": "compatibility edit",
         "last_actor_agent_id": "agent-a",
         "updated_at": edited_by_id["todo_claimable"]["updated_at"],
     }
     assert edited_by_id["todo_claimable"]["updated_at"] != claimed_item["updated_at"]
     assert edited_by_id["todo_complex"] == by_id["todo_complex"]
     assert edited_by_id["todo_successor"] == by_id["todo_successor"]
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "reason"),
+    [
+        (
+            "coordination_operation_identity_mismatch",
+            "operation id names a different coordination request",
+        ),
+        (
+            "invalid_coordination_projection",
+            "canonical projection could not be decoded",
+        ),
+        (
+            "invalid_coordination_todo_claim_receipt",
+            "stored claim receipt could not be verified",
+        ),
+    ],
+)
+def test_promoted_claim_protocol_failures_stay_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    reason_code: str,
+    reason: str,
+) -> None:
+    """Protocol and storage-integrity failures are outages, not decisions."""
+
+    _engage_fence(tmp_path)
+
+    def _protocol_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": "loopx_coordination_todo_claim_result_v0",
+            "status": "failed",
+            "failure_kind": "protocol_failure",
+            "reason_code": reason_code,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(
+        "loopx.control_plane.coordination.local_authority.effect_runtime_result",
+        _protocol_failure,
+    )
+    with pytest.raises(LocalCoordinationAuthorityUnavailable) as exc_info:
+        claim_canonical_todo_if_promoted(
+            registry_path=_claim_registry(tmp_path),
+            runtime_root=tmp_path,
+            goal_id="goal-a",
+            todo_id="todo_x1",
+            role="agent",
+            claimed_by="agent-a",
+            actor_agent_id="agent-a",
+            dry_run=False,
+        )
+    assert not isinstance(exc_info.value, ValueError)
+    assert exc_info.value.code == reason_code

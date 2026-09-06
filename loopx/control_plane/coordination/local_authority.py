@@ -43,7 +43,9 @@ class LocalCoordinationAuthorityUnavailable(RuntimeError):
         self.payload = dict(payload)
 
 
-class LocalCoordinationAuthorityRejection(LocalCoordinationAuthorityUnavailable, ValueError):
+class LocalCoordinationAuthorityRejection(
+    LocalCoordinationAuthorityUnavailable, ValueError
+):
     """The TypeScript coordination owner definitively rejected a claim.
 
     The legacy Python kernel raised ``ValueError`` for every claim rejection
@@ -107,7 +109,9 @@ def claim_canonical_todo_if_promoted(
             "registered_agents": registered_agent_ids_from_registry(
                 registry_path, goal_id
             ),
-            "operation_id": operation_id if operation_id is not None else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}",
+            "operation_id": operation_id
+            if operation_id is not None
+            else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}",
             "observed_at": now_local(),
             "dry_run": dry_run,
         },
@@ -122,12 +126,12 @@ def claim_canonical_todo_if_promoted(
     accepted = {"applied", "recovered", "replayed", "no_change", "planned"}
     if (
         payload.get("status") == "failed"
-        and payload.get("reason_code") != "invalid_local_coordination_todo_claim_request"
+        and payload.get("failure_kind") == "decision_rejection"
     ):
-        # The TypeScript owner returned a definitive decision rejection. The
-        # legacy kernel raised ValueError for the same rejections, so keep that
-        # caller-observable contract; the wrapper error code is a protocol
-        # failure and stays an infrastructure outage instead.
+        # The TypeScript owner classifies this failure as a definitive claim
+        # decision. The legacy kernel raised ValueError for the same
+        # rejections, so keep that caller-observable contract; protocol and
+        # storage-integrity failures stay infrastructure outages.
         raise LocalCoordinationAuthorityRejection(
             str(payload.get("reason") or "canonical Todo claim was rejected"),
             code=str(payload.get("reason_code") or "claim_rejected"),
@@ -202,7 +206,9 @@ def read_canonical_todos_if_promoted(
     ):
         raise LocalCoordinationAuthorityUnavailable(
             str(payload.get("reason") or "canonical Todo authority is unavailable"),
-            code=str(payload.get("reason_code") or "local_authority_todo_list_unavailable"),
+            code=str(
+                payload.get("reason_code") or "local_authority_todo_list_unavailable"
+            ),
             payload=payload,
         )
     payload["todos"] = [dict(item) for item in todos]
@@ -220,7 +226,8 @@ def canonical_todo_summary_fields(
     from ..todos.todo_summary import compact_todo_group, count_advancement_todos
 
     native_archived = {
-        item["todo_id"] for item in todos
+        item["todo_id"]
+        for item in todos
         if item.get("schema_version") == TODO_DOMAIN_ITEM_SCHEMA_VERSION
         and item.get("archive_state") == "archive"
     }
@@ -231,12 +238,14 @@ def canonical_todo_summary_fields(
             **item,
             "schema_version": TODO_ITEM_SCHEMA_VERSION,
             "source_section": (
-                "Completed Work Archive" if item["archive_state"] == "archive"
+                "Completed Work Archive"
+                if item["archive_state"] == "archive"
                 else TODO_SECTION_HEADINGS[item["role"]]
             ),
             "index": index,
         }
-        if item.get("schema_version") == TODO_DOMAIN_ITEM_SCHEMA_VERSION else item
+        if item.get("schema_version") == TODO_DOMAIN_ITEM_SCHEMA_VERSION
+        else item
         for index, item in enumerate(todos, 1)
     ]
     fields: dict[str, Any] = {}
@@ -257,10 +266,14 @@ def canonical_todo_summary_fields(
         )
         if summary:
             if role == "agent":
-                archived_done = count_advancement_todos([
-                    item for item in todos
-                    if item.get("todo_id") in native_archived and item.get("done") is True
-                ])
+                archived_done = count_advancement_todos(
+                    [
+                        item
+                        for item in todos
+                        if item.get("todo_id") in native_archived
+                        and item.get("done") is True
+                    ]
+                )
                 if archived_done:
                     summary["archived_advancement_done_count"] = archived_done
                     summary["advancement_done_count"] = (
