@@ -132,6 +132,11 @@ the reply relation through message readback before scheduling a reply. Full-chat
 capture is not full-chat activation; unrelated conversation remains available
 to domain interpretation without being treated as addressed to the bot.
 
+For a periodic-report request, semantic activation belongs to the Agent. After
+reading an exact item, the Agent calls `loopx periodic-report request` with its
+`message_id`. The Lark adapter validates binding and addressing evidence only;
+it never classifies the text or searches the inbox for weekly-report strings.
+
 ## Activate the provider
 
 Install and explicitly activate the bundled provider once in the LoopX runtime

@@ -31,6 +31,10 @@ OPERATOR_INBOX_MODULE = CONTROL_PLANE_ROOT / "work_items" / "operator_inbox.py"
 QUOTA_CLI_MODULE = PACKAGE_ROOT / "cli_commands" / "quota.py"
 TURN_CLI_MODULE = PACKAGE_ROOT / "cli_commands" / "turn.py"
 LARK_INBOX_CLI_MODULE = PACKAGE_ROOT / "cli_commands" / "lark_inbox.py"
+PERIODIC_REPORT_REQUEST_ACTION_MODULE = (
+    PACKAGE_ROOT / "capabilities" / "periodic_report" / "request_action.py"
+)
+EXTENSION_HOOK_ADAPTERS_MODULE = PACKAGE_ROOT / "extensions" / "hook_adapters.py"
 ISSUE_FIX_REVIEWER_CLI_MODULE = (
     PACKAGE_ROOT / "capabilities" / "issue_fix" / "reviewer_cli.py"
 )
@@ -345,6 +349,25 @@ def test_quota_receives_lark_urgency_only_through_cli_composition() -> None:
 
     assert "loopx.cli_commands.lark_inbox" in _resolved_imports(QUOTA_CLI_MODULE)
     assert "loopx.cli_commands.lark_inbox" in _resolved_imports(TURN_CLI_MODULE)
+
+
+def test_periodic_report_request_ports_are_manifest_discovered_outside_kernel() -> None:
+    generic_modules = (
+        PERIODIC_REPORT_REQUEST_ACTION_MODULE,
+        EXTENSION_HOOK_ADAPTERS_MODULE,
+        QUOTA_CLI_MODULE,
+    )
+    for module in generic_modules:
+        assert not any(
+            dependency == "loopx.extensions.lark"
+            or dependency.startswith("loopx.extensions.lark.")
+            for dependency in _resolved_imports(module)
+        )
+    assert not any(
+        dependency == "loopx.control_plane"
+        or dependency.startswith("loopx.control_plane.")
+        for dependency in _resolved_imports(EXTENSION_HOOK_ADAPTERS_MODULE)
+    )
 
 
 def test_lark_operator_inbox_contract_is_extension_owned() -> None:

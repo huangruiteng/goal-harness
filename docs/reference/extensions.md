@@ -757,6 +757,19 @@ table solely to make a runtime installable.
 The v0 runtime exposes integer extension API version `1` and accepts bounded
 integer constraints such as `>=1,<2`; incompatible manifests fail closed.
 
+`[[hook_adapters]]` lets an extension contribute provider ports to an existing
+capability-owned hook point without adding provider branches to the capability
+composition root or control-plane kernel. Discovery reads only installed
+manifest declarations and admits a factory only when the extension is enabled,
+doctor-ready, and authorized for every declared adapter permission. The
+factory must return exactly the declared callable ports. Import, activation,
+and factory failures become content-free optional-adapter failures; they do not
+execute or replace kernel logic.
+
+`phase = "capability_action"` is for an explicit typed action whose semantics
+have already been decided by the Agent or caller. The adapter may bind and
+settle provider evidence, but it must not infer the action from provider text.
+
 ```toml
 schema_version = "loopx_extension_manifest_v0"
 id = "loopx-lark"
@@ -781,6 +794,18 @@ real_world_anchor = "operator-facing Lark Base projection"
 user_value = "Project public-safe LoopX status and todo rows into Lark."
 entry_command = "loopx lark-kanban sync"
 next_real_step = "Validate one explicitly enabled owner-approved sink."
+
+[[hook_adapters]]
+id = "lark-periodic-report-source"
+capability_id = "periodic-report"
+target_hook_id = "periodic_report.request"
+phase = "capability_action"
+factory = "loopx.extensions.lark.periodic_report_request:build_lark_periodic_report_hook_adapter"
+required_permissions = ["lark.inbox.read", "lark.inbox.write"]
+ports = [
+  "periodic_report.request.bind_source",
+  "periodic_report.request.settle_source",
+]
 ```
 
 The bundled OpenViking pilot uses `[[implements]]` instead:

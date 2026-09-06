@@ -38,6 +38,12 @@ from .post_writeback_hook import (
     PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,
     evaluate_periodic_report_trigger_evaluation_intent,
 )
+from .request_action import (
+    PeriodicReportRequestPorts,
+    periodic_report_request_intents,
+    request_entry_for_intent,
+    settle_periodic_report_request,
+)
 from .project_progress_snapshot import build_project_progress_snapshot
 from .incremental import (
     build_periodic_report_publication_candidate,
@@ -354,24 +360,17 @@ def pending_periodic_report_intents(
 
     if not _IDENTITY_RE.fullmatch(goal_id) or not _IDENTITY_RE.fullmatch(agent_id):
         return []
-    sidecars = runtime_root / "goals" / goal_id / "post_writeback_hooks"
-    if not sidecars.is_dir():
-        return []
     pending: list[dict[str, Any]] = []
-    for path in sorted(sidecars.iterdir()):
-        if not path.is_file() or not _DISPATCH_RE.fullmatch(path.name):
-            continue
+    for intent in periodic_report_request_intents(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+    ):
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            decision = evaluate_periodic_report_trigger_evaluation_intent(intent)
+        except ValueError:
             continue
-        intent = _valid_sidecar_intent(
-            value,
-            dispatch_id=path.stem,
-            goal_id=goal_id,
-            agent_id=agent_id,
-        )
-        if intent is None:
+        if decision.get("eligible") is not True:
             continue
         actionable, _revision = _next_attempt_revision(
             registry_path=registry_path,
@@ -380,10 +379,45 @@ def pending_periodic_report_intents(
             agent_id=agent_id,
             intent=intent,
         )
-        if not actionable:
-            continue
-        pending.append(intent)
-    return pending
+        receipt = _load_consumption_receipt(
+            _receipt_path(runtime_root, goal_id, intent),
+            intent_digest=_canonical_digest(intent),
+        )
+        if actionable or (
+            isinstance(receipt, Mapping) and receipt.get("status") == "delivery_ready"
+        ):
+            pending.append(intent)
+
+    sidecars = runtime_root / "goals" / goal_id / "post_writeback_hooks"
+    if sidecars.is_dir():
+        for path in sorted(sidecars.iterdir()):
+            if not path.is_file() or not _DISPATCH_RE.fullmatch(path.name):
+                continue
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            sidecar_intent = _valid_sidecar_intent(
+                value,
+                dispatch_id=path.stem,
+                goal_id=goal_id,
+                agent_id=agent_id,
+            )
+            if sidecar_intent is None:
+                continue
+            actionable, _revision = _next_attempt_revision(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+                agent_id=agent_id,
+                intent=sidecar_intent,
+            )
+            if actionable:
+                pending.append(sidecar_intent)
+    deduplicated: dict[str, dict[str, Any]] = {}
+    for intent in pending:
+        deduplicated.setdefault(str(intent.get("idempotency_key") or ""), intent)
+    return list(deduplicated.values())
 
 
 def periodic_report_pending_intent_interaction_hook(
@@ -457,7 +491,10 @@ def periodic_report_pending_intent_interaction_hook(
         hook_id=HOOK_ID,
         capability_id=CAPABILITY_ID,
         projection_slots=("pending_capability_intent",),
-        requested_read_scope=("post_writeback_intent_journal",),
+        requested_read_scope=(
+            "periodic_report_request_journal",
+            "post_writeback_intent_journal",
+        ),
         producer=produce,
     )
 
@@ -957,6 +994,7 @@ def consume_pending_periodic_report_intent(
     goal_id: str,
     agent_id: str,
     execute: bool,
+    provider_request_ports: PeriodicReportRequestPorts | None = None,
 ) -> dict[str, Any]:
     intents = pending_periodic_report_intents(
         registry_path=registry_path,
@@ -986,12 +1024,82 @@ def consume_pending_periodic_report_intent(
     intent = intents[0]
     trigger = evaluate_periodic_report_trigger_evaluation_intent(intent)
     payload = intent["payload"]
-    stage = payload["stage_completion"]
-    completed_at = str(stage["completed_at"])
+    report_request = payload.get("report_request")
+    request_entry = (
+        request_entry_for_intent(
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            intent=intent,
+        )
+        if isinstance(report_request, Mapping)
+        else None
+    )
+    stage = payload.get("stage_completion")
+    completed_at = str(
+        report_request.get("requested_at")
+        if isinstance(report_request, Mapping)
+        else stage.get("completed_at")
+        if isinstance(stage, Mapping)
+        else ""
+    )
     project_progress = payload.get("project_progress")
     fallback_capabilities = payload.get("available_capabilities")
     if fallback_capabilities is None and isinstance(payload.get("turn"), Mapping):
         fallback_capabilities = payload["turn"].get("available_capabilities")
+    actionable, rejection_revision = _next_attempt_revision(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        intent=intent,
+    )
+    if not actionable:
+        durable = _load_consumption_receipt(
+            _receipt_path(
+                runtime_root,
+                goal_id,
+                intent,
+                rejection_revision=rejection_revision,
+            ),
+            intent_digest=_canonical_digest(intent),
+        )
+        if (
+            request_entry is not None
+            and isinstance(durable, Mapping)
+            and durable.get("status") == "delivery_ready"
+        ):
+            settlement = settle_periodic_report_request(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+                agent_id=agent_id,
+                intent=intent,
+                request_ports=provider_request_ports,
+                execute=execute,
+            )
+            result = {
+                **dict(durable),
+                "source_settlement": settlement,
+                "settlement_only_retry": True,
+            }
+            if execute:
+                atomic_write_json(
+                    _receipt_path(
+                        runtime_root,
+                        goal_id,
+                        intent,
+                        rejection_revision=rejection_revision,
+                    ),
+                    result,
+                )
+            return result
+        return {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "no_pending_intent",
+            "external_writes_performed": False,
+        }
     facts = (
         _progress_facts_from_snapshot(
             project_progress,
@@ -1008,20 +1116,6 @@ def consume_pending_periodic_report_intent(
             available_capabilities=fallback_capabilities,
         )
     )
-    actionable, rejection_revision = _next_attempt_revision(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=goal_id,
-        agent_id=agent_id,
-        intent=intent,
-    )
-    if not actionable:
-        return {
-            "ok": True,
-            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
-            "status": "no_pending_intent",
-            "external_writes_performed": False,
-        }
     request_path = _editorial_request_path(
         runtime_root,
         goal_id,
@@ -1220,6 +1314,18 @@ def consume_pending_periodic_report_intent(
         "incremental_baseline": publication_candidate.get("incremental_baseline"),
     }
     atomic_write_json(receipt_path, durable)
+    if request_entry is not None:
+        settlement = settle_periodic_report_request(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            intent=intent,
+            request_ports=provider_request_ports,
+            execute=True,
+        )
+        durable["source_settlement"] = settlement
+        atomic_write_json(receipt_path, durable)
     return durable
 
 

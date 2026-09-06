@@ -277,6 +277,67 @@ An eligible decision may be embedded as `trigger_receipt` in a
 participate in run identity, so a milestone update and a scheduled digest over
 the same evidence window cannot collide.
 
+### Agent-semantic Goal Channel requests
+
+An Agent that has read and semantically interpreted one Goal Channel inbox item
+may explicitly invoke the provider-neutral action:
+
+```text
+loopx periodic-report request \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --source-ref <opaque-provider-message-id> \
+  --execute
+```
+
+One complete active source adapter is selected automatically. If several
+provider adapters are active, a new request must include
+`--source-adapter-id <adapter-id>`. Replay of an already journaled request does
+not require the selector when exactly one journal entry matches the source
+reference; a source reference already owned by multiple providers requires an
+explicit selector. The adapter id participates in request identity together
+with Goal, Agent, and the provider-local source reference, so equal opaque ids
+from different providers remain independent. Settlement reads the owner
+`adapter_id` from that journal and resolves only the matching discovered
+settler; discovery order cannot change ownership, and another provider is
+never used as a fallback.
+
+This action is the report-intent decision. Neither LoopX Core nor the provider
+adapter classifies message strings, searches for report keywords, or scans the
+inbox for candidate requests. The provider adapter receives the exact opaque
+source reference selected by the Agent and verifies only source existence,
+user authorship, provider-native addressing, the registered Goal/Agent
+connection, the current provider target, and inbox identity. It returns a
+content-free `periodic_report_source_binding_receipt_v0`; raw message content
+never enters the capability intent or public output.
+
+An executed request writes one replay-safe local-private
+`periodic_report_request_journal_entry_v0`. The pending-intent projection reads
+that typed journal and existing post-writeback intents only; it never calls a
+provider reader. The request becomes an authorized `manual` trigger and then
+reuses the existing editorial, generation bundle, Workspace projection,
+publication candidate, and delivery-Todo pipeline. Repeating the same
+Goal/Agent/adapter/source action returns the existing request and cannot create
+another journal entry.
+
+Source binding and settlement ports are dynamically discovered from enabled,
+doctor-ready extension manifests through a `capability_action`
+`[[hook_adapters]]` declaration. Generic discovery and the periodic-report
+composition import no Lark implementation. The bundled Lark adapter is
+therefore optional provider code, not a quota or decision-kernel branch.
+
+The adapter ACKs the selected inbox item only after the `delivery_ready`
+receipt and delivery Todo are durable. If ACK fails or the adapter is
+temporarily unavailable, the typed request stays pending. A later
+`consume-pending` call loads the durable receipt, retries settlement only, and
+does not regenerate artifacts or add another delivery Todo. Exact ACK replay
+is idempotent. A provider may instead return a typed `terminal_failure` when
+the bound source is gone or its binding/receipt identity has drifted. LoopX
+then records `settlement_failed`, leaves the provider source un-ACKed, and
+removes that request from automatic retry projection. After repairing the
+provider binding or retention problem, the operator must obtain a new provider
+event and issue a new typed request with that event's opaque source reference.
+
 ### Post-writeback hook boundary
 
 The optional automatic path uses the provider-neutral TypeScript

@@ -139,7 +139,7 @@ def _message(
         "create_time": create_time,
         "content": content,
         "deleted": False,
-        "sender": {"name": "Fixture User"},
+        "sender": {"name": "Fixture User", "sender_type": "user"},
     }
 
 
@@ -331,6 +331,7 @@ def test_history_preserves_structured_negative_mention_evidence(
     )
 
     assert receipt["ok"] is True
+    assert stored["sender_type"] == "user"
     assert stored["addressed_to_bot"] is False
     assert "mentions" not in stored
     assert "mentioned" not in stored

@@ -6,7 +6,7 @@ presentation, and destinations to profiles and adapters.
 
 | Surface | Value |
 | --- | --- |
-| CLI | `loopx periodic-report inspect-profile --preset weekly`, custom `--profile-json <path>`, `evaluate-trigger`, `evaluate-runtime-trigger`, `compose-run`, and optional `archive-openviking` |
+| CLI | `loopx periodic-report inspect-profile --preset weekly`, `request`, `consume-pending`, custom `--profile-json <path>`, `evaluate-trigger`, `evaluate-runtime-trigger`, `compose-run`, and optional `archive-openviking` |
 | Protocol | [`periodic_report_v0`](../../../docs/reference/protocols/periodic-report-v0.md) |
 | Smokes | `python3 examples/periodic-report-smoke.py`, `periodic-report-profile-smoke.py`, `periodic-report-html-smoke.py`, `periodic-report-bindings-smoke.py`, and `openviking-periodic-report-extension-smoke.py` |
 
@@ -55,6 +55,45 @@ There is no issue-fix-specific report capability. Issue Fix, release notes,
 research, operations, and other domains may supply peer source adapters when
 their richer semantics are useful; none is required by the built-in weekly
 profile.
+
+## Request from a Goal Channel
+
+After an Agent reads one addressed Goal Channel item and semantically decides
+that the user is asking it for a report, it records that decision explicitly:
+
+```bash
+loopx periodic-report request \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --source-ref <message-id> \
+  --execute
+```
+
+When exactly one complete source adapter is active, the command selects it
+automatically. With multiple active providers, the Agent selects the provider
+explicitly with `--source-adapter-id <adapter-id>`. The journal retains that
+adapter identity, and later settlement resolves only that owner regardless of
+extension discovery order. A temporarily unavailable owner leaves the request
+pending; LoopX never falls through to another provider.
+
+The adapter id is part of the request idempotency namespace together with the
+Goal, Agent, and provider-local source reference. Two providers may therefore
+use the same opaque source reference without collapsing distinct requests.
+Replay without a selector remains valid when exactly one matching journal entry
+exists; if the same source reference is already owned by multiple providers,
+the Agent must select the intended adapter explicitly.
+
+There is no keyword or regular-expression classifier. The provider adapter
+binds only the exact source selected by the Agent and checks authorship,
+addressing, Goal/Agent connection, target, and inbox identity. A manifest-
+discovered `capability_action` hook supplies the content-free bind and settle
+ports, so this capability and quota import no Lark implementation.
+
+The command persists a replay-safe typed request journal. `consume-pending`
+uses the normal manual trigger, editorial, frozen artifact, Workspace, and
+delivery-Todo pipeline. It acknowledges the provider source only after
+`delivery_ready` durability; failed ACKs become settlement-only retries and do
+not duplicate delivery work.
 
 ## Customize or schedule
 
@@ -402,7 +441,7 @@ external writes remain disabled by default:
   },
   "extension": {
     "extension_id": "loopx-lark",
-    "extension_version": "1.5.0",
+    "extension_version": "1.6.0",
     "protocol": "periodic_report_sink_v0"
   }
 }

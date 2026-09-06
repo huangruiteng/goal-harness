@@ -69,6 +69,25 @@ def find_first_string(
     return None
 
 
+def lark_provider_mention_identities(mention: Mapping[str, Any]) -> set[str]:
+    """Return provider-stable identities carried by one structured mention."""
+
+    identity_keys = ("user_id", "open_id", "union_id", "app_id", "bot_id")
+    identities = {
+        str(mention.get(key) or "").strip()
+        for key in identity_keys
+        if str(mention.get(key) or "").strip()
+    }
+    raw_id = mention.get("id")
+    if isinstance(raw_id, Mapping):
+        identities.update(
+            str(value).strip() for value in raw_id.values() if str(value).strip()
+        )
+    elif str(raw_id or "").strip():
+        identities.add(str(raw_id).strip())
+    return identities
+
+
 def contains_exact_field(
     payload: Any,
     key: str,

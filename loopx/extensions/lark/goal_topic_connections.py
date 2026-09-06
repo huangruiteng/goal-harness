@@ -66,6 +66,7 @@ from .goal_channel_transport import (
     chat_verified,
     find_first_string,
     json_payload,
+    lark_provider_mention_identities,
     lark_args,
     message_readback_verified,
 )
@@ -495,6 +496,9 @@ def connect_lark_goal_topic(
         reply = inbox_payload.get("reply")
         if isinstance(reply, dict):
             reply["bot_display_name"] = str(identity["label"])
+            reply["bot_app_id"] = str(identity["app_id"])
+            if identity.get("open_id"):
+                reply["bot_open_id"] = str(identity["open_id"])
         _write_agent_inbox_config(
             config_path=config_path,
             config_ref=preflight_config_ref,
@@ -1043,23 +1047,15 @@ def is_event_addressed_to_bot(
     if "mentions" in event:
         mentions = event.get("mentions")
         if isinstance(mentions, list):
+            expected_ids = {value for value in (bot_app_id, bot_open_id) if value}
             for item in mentions:
                 if not isinstance(item, Mapping):
                     continue
-                raw_id = item.get("id")
-                candidate_ids: list[str] = []
-                if isinstance(raw_id, Mapping):
-                    candidate_ids.extend([str(v) for v in raw_id.values() if v])
-                elif raw_id is not None:
-                    candidate_ids.append(str(raw_id))
-                for key in ("user_id", "open_id", "union_id", "app_id", "bot_id"):
-                    val = item.get(key)
-                    if val:
-                        candidate_ids.append(str(val))
-                if bot_app_id and any(c == bot_app_id for c in candidate_ids):
+                candidate_ids = lark_provider_mention_identities(item)
+                if expected_ids and candidate_ids.intersection(expected_ids):
                     return True
-                if bot_open_id and any(c == bot_open_id for c in candidate_ids):
-                    return True
+                if expected_ids:
+                    continue
                 norm_item_name = _normalize_mention_name(str(item.get("name") or ""))
                 if norm_bot_display_name and norm_item_name == norm_bot_display_name:
                     return True
