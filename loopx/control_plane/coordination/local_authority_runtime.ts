@@ -700,30 +700,32 @@ export async function updateLocalCoordinationTodo(
     if (input.schema_version !== COORDINATION_TODO_UPDATE_REQUEST_SCHEMA) {
       throw new TypeError("local coordination Todo update request schema mismatch");
     }
-    if (!Array.isArray(input.registered_agents) || !Array.isArray(input.clear_fields)) {
-      throw new TypeError("registered_agents and clear_fields must be JSON arrays");
-    }
     const root = runtimeRoot(input.runtime_root);
     const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
-    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
-      new FileAuthorityStore(authorityDirectory(root), goalId);
-    return {...await executeCoordinationTodoUpdate(store, {
-      goal_id: goalId, todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
-      expected_role: input.role === null || input.role === undefined ? null :
-        requireAuthorityStoreId(input.role, "role"),
-      actor_agent_id: input.actor_agent_id === null || input.actor_agent_id === undefined ? null :
-        claimAgentValue(input.actor_agent_id, "actor_agent_id"),
-      registered_agents: input.registered_agents.map((agent) =>
-        claimAgentValue(agent, "registered agent")),
-      operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
-      patch: requireJsonObject(input.patch, "Todo update patch"),
-      clear_fields: input.clear_fields.map((field) => claimAgentValue(field, "clear field")),
-      dry_run: input.dry_run as boolean,
-      now: claimObservedAt(input.observed_at),
-    }), ...providerEvidence};
+    return await withCanonicalWriter(root, goalId, input.dry_run === true, async () => {
+      if (!Array.isArray(input.registered_agents) || !Array.isArray(input.clear_fields)) {
+        throw new TypeError("registered_agents and clear_fields must be JSON arrays");
+      }
+      const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+        new FileAuthorityStore(authorityDirectory(root), goalId);
+      return {...await executeCoordinationTodoUpdate(store, {
+        goal_id: goalId, todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
+        expected_role: input.role === null || input.role === undefined ? null :
+          requireAuthorityStoreId(input.role, "role"),
+        actor_agent_id: input.actor_agent_id === null || input.actor_agent_id === undefined ? null :
+          claimAgentValue(input.actor_agent_id, "actor_agent_id"),
+        registered_agents: input.registered_agents.map((agent) =>
+          claimAgentValue(agent, "registered agent")),
+        operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+        patch: requireJsonObject(input.patch, "Todo update patch"),
+        clear_fields: input.clear_fields.map((field) => claimAgentValue(field, "clear field")),
+        dry_run: input.dry_run as boolean,
+        now: claimObservedAt(input.observed_at),
+      }), ...providerEvidence};
+    });
   } catch (error) {
     return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA, status: "failed",
-      changed: false, reason_code: "invalid_local_coordination_todo_update_request",
+      changed: false, reason_code: error instanceof ShadowManagementError ? error.reason_code : "invalid_local_coordination_todo_update_request",
       reason: error instanceof Error ? error.message : "invalid Todo update request",
       ...providerEvidence};
   }

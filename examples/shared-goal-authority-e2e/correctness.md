@@ -1,6 +1,6 @@
 # Bounded file outbox correctness
 
-An active shadow captures each canonical primary mutation once. A cursor is a
+An active shadow captures each mutation of its bound primary once. A cursor is a
 position hint: only the actual file provider's committed transaction and receipt
 can authorize deletion of an outbox file. Qualification folds the complete
 baseline and transaction history, then compares the current Todo, handoff mode,
@@ -90,6 +90,12 @@ ordinary writers release primary locks before drain. Legacy fence engagement
 also takes the actual source S and therefore requires its absolute state path
 in the internal RPC request.
 
+Canonical FileAuthorityStore Todo updates, including compatibility v0 records
+already held by that authority, use the same M and maintenance boundary as
+canonical Todo creation. They retain their own transaction receipts and do not
+produce legacy shadow captures. A waiting update rechecks management state after
+acquiring M; invalid or unfinished management state holds before any commit.
+
 Drain checks the real receipt first, persists the cursor second, and reclaims
 each individually verified file last. Missing cursors can be reconstructed from
 complete continuous history; malformed or unreadable cursors are never silently
@@ -116,7 +122,7 @@ Install the repository test extra and Node dependencies. Run the long tests
 separately without skip or relaxation flags:
 
 ```bash
-python -m pip install -e '.[test]' 'build>=1,<2'
+python -m pip install -e '.[test]' 'build==1.6.0'
 npm ci --ignore-scripts
 python -m pytest -q -m stage2c_e2e --junitxml=stage2c-e2e.xml
 python examples/shared-goal-authority-e2e/mutants.py --output .local/stage2c-mutants
@@ -133,6 +139,12 @@ python examples/control_plane/cli-output-budget-regression-smoke.py
 loopx --format json canary premerge --from-git-diff
 ```
 
+The Linux/Python 3.11 CI job uses the exact dependency versions and hashes in
+`tests/requirements-stage2c-linux-py311.txt`, including pytest 9.1.1. It builds
+the checked-out source wheel, verifies its hash during installation, and removes
+its generated build tree before normal pytest discovery. The workflow records
+the complete installation sequence and retains normal source discovery.
+
 The full TS suite's PostgreSQL conformance requires `LOOPX_TEST_POSTGRES_URL`
 pointing to a disposable test database. Source smoke success does not replace
 installed-package evidence: the package runner creates an empty environment,
@@ -146,6 +158,7 @@ Python/TS/JSON provenance, and reads back through an independent native process.
 | Primary and drain process death, lost ACK, prepared-only A → B → A | `test_shadow_drain_e2e.py`, `test_shadow_management_e2e.py` |
 | Every bootstrap/rollback durable window, raw archive fidelity, late requests and other-Goal isolation | `shadow_management.test.ts`, `test_shadow_management_e2e.py` |
 | Fence and maintenance boundaries, source override races, whole-file durability, paragraph injection, refresh CAS | `test_shadow_writer_boundaries.py`, `shadow_native_writer_boundary.test.ts`, `test_shadow_drain_adversarial.py` |
+| Canonical native/v0 Todo updates through CLI and native RPC, real pending management, M ordering, and unchanged authority on hold | `test_shadow_native_todo_update_e2e.py` |
 | History flaws despite equal snapshots, legacy mixed profile, source drift, event-only hold, qualified reads | `coordination_runtime_shadow.test.ts`, `file_outbox_qualification.test.ts`, `test_runtime_shadow_bounded_e2e.py` |
 | Installed lifecycle and resource provenance in wheel and sdist | `installed.py` |
 | Missing checks, lock placement, duplicate mirror, early marker, cursor regression | `mutants.py` with unchanged GREEN controls and assertion RED results |

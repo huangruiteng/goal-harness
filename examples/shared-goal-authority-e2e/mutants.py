@@ -95,6 +95,18 @@ def remove_fence(source: str) -> str:
     return "".join(lines[:function.body[0].lineno - 1]) + "    return\n" + "".join(lines[function.end_lineno:])
 
 
+def remove_native_update_maintenance(source: str) -> str:
+    start = source.index("export async function updateLocalCoordinationTodo(")
+    end = source.index("export async function editLocalCoordinationTodo(", start)
+    function = source[start:end]
+    function = replacement(
+        "return await withCanonicalWriter(root, goalId, input.dry_run === true, async () => {",
+        "return await (async () => {",
+    )(function)
+    function = replacement("    });\n  } catch (error) {", "    })();\n  } catch (error) {")(function)
+    return source[:start] + function + source[end:]
+
+
 def move_guard_outside_lock(name: str) -> Callable[[str], str]:
     def apply(source: str) -> str:
         function = next(node for node in ast.parse(source).body
@@ -120,6 +132,9 @@ def move_guard_outside_lock(name: str) -> Callable[[str], str]:
 WRITER_TEST = "tests/control_plane/test_shadow_writer_boundaries.py::"
 FENCE_TEST = WRITER_TEST + "test_cli_waiting_for_todo_mutex_rechecks_fence_after_engagement"
 CASES.extend([
+    Case("native_update_maintenance", ((COORDINATION + "local_authority_runtime.ts",
+         remove_native_update_maintenance),),
+         "tests/control_plane/test_shadow_native_todo_update_e2e.py::test_native_update_holds_before_primary_for_management[native-bootstrapping-cli]"),
     Case("remove_fence", ((COORDINATION + "legacy_writer_fence.py", remove_fence),), FENCE_TEST),
     Case("fence_outside_lock", ((COORDINATION + "legacy_writer_fence.py",
          move_guard_outside_lock("require_legacy_coordination_write_allowed")),), FENCE_TEST),
