@@ -587,8 +587,18 @@ class ChatSessionStore:
             ):
                 existing = self.turn_for_client(session_id, client_id)
                 if existing is not None:
+                    # Attachments live in the transcript, not the Turn record.
+                    # This also supports pre-existing Turns without a migration.
+                    original = next(
+                        (row for row in self.messages(session_id)
+                         if row.get("role") == "user"
+                         and row.get("turn_id") == existing["turn_id"]),
+                        None,
+                    )
+                    if original is None:
+                        raise ValueError("client_turn_id original request is unavailable")
                     _require_matching_replay(
-                        existing,
+                        {**existing, "attachments": original.get("attachments") or None},
                         identity="client_turn_id",
                         request={
                             "message": str(message),
