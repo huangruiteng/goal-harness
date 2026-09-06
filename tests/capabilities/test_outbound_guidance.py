@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime
 
@@ -300,3 +301,127 @@ def test_unnormalized_agent_id_and_scope_drift_fail_open(tmp_path, monkeypatch):
             f"agent_id={raw_agent_id!r} must normalize to the configured scope"
         )
         assert hook("sha256:intent")["status"] == "applied"
+
+
+def test_destination_and_purpose_queries_merge_without_private_id(
+    tmp_path, monkeypatch
+):
+    config, provider = configure(tmp_path, monkeypatch)
+    chat = "oc_example_group"
+    digest = hashlib.sha256(chat.encode()).hexdigest()
+    config["surfaces"][outbound.SURFACE]["destinations"] = {
+        digest: {"query_label": "Example Team", "required_candidate_refs": []}
+    }
+    hook = outbound.outbound_guidance_hook(
+        registry_path=tmp_path / "registry.json", goal_id="goal", agent_id="pilot"
+    )
+    result = hook.for_destination(chat)("intent")
+    assert provider.calls == 2
+    assert "Example Team" in provider.queries[0]
+    assert digest in provider.queries[0]
+    assert all(chat not in q for q in provider.queries)
+    assert len(result["guidance"]) == 1
+    assert result["telemetry"]["provider_call_count"] == 2
+    other = hook.for_destination("oc_other_group")("intent")
+    assert "Example Team" not in provider.queries[2]
+    assert other["review_digest"] != result["review_digest"]
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_required_guidance_missing_blocks_urgent_and_review_override(
+    tmp_path, monkeypatch, unavailable
+):
+    config, _ = configure(tmp_path, monkeypatch, unavailable=unavailable)
+    chat = "oc_example_group"
+    config["surfaces"][outbound.SURFACE]["destinations"] = {
+        hashlib.sha256(chat.encode()).hexdigest(): {
+            "query_label": "Example Team",
+            "required_candidate_refs": ["candidate:missing"],
+        }
+    }
+    kwargs = dict(
+        registry_path=tmp_path / "registry.json",
+        goal_id="goal",
+        agent_id="pilot",
+        purpose="urgent",
+    )
+    first = outbound.outbound_guidance_hook(**kwargs).for_destination(chat)("intent")
+    assert first["status"] == "required_guidance_missing"
+    assert not first["continue_delivery"]
+    again = outbound.outbound_guidance_hook(
+        **kwargs, reviewed_digest=first["review_digest"]
+    ).for_destination(chat)("intent")
+    assert not again["continue_delivery"]
+    # A restriction on one destination cannot silently constrain another.
+    assert outbound.outbound_guidance_hook(**kwargs).for_destination("oc_other")(
+        "intent"
+    )["continue_delivery"]
+
+
+def test_required_guidance_has_separate_lookup_and_review(tmp_path, monkeypatch):
+    config, provider = configure(tmp_path, monkeypatch)
+    chat = "oc_example_group"
+    config["surfaces"][outbound.SURFACE]["destinations"] = {
+        hashlib.sha256(chat.encode()).hexdigest(): {
+            "query_label": "Example Team",
+            "required_candidate_refs": ["candidate:guidance"],
+        }
+    }
+    hook = outbound.outbound_guidance_hook(
+        registry_path=tmp_path / "registry.json",
+        goal_id="goal",
+        agent_id="pilot",
+        purpose="urgent",
+    )
+    result = hook.for_destination(chat)("intent")
+    assert provider.queries[0] == "candidate:guidance"
+    assert result["required_guidance_complete"]
+    assert result["agent_review_required"]
+    assert len(result["guidance"]) == 1
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"destination_digest": "group-name"},
+        {
+            "destination_digest": "a" * 64,
+            "required_candidate_refs": ["not-a-candidate"],
+        },
+        {
+            "destination_digest": "a" * 64,
+            "required_candidate_refs": ["candidate:x"] * 2,
+        },
+    ],
+)
+def test_destination_config_rejects_ambiguous_identity(tmp_path, invalid):
+    raw = turn.raw_config()
+    raw["corpora"][0]["corpus"]["scope"]["surface_ids"] = [outbound.SURFACE]
+    raw["surfaces"][0]["surface_id"] = outbound.SURFACE
+    raw["surfaces"][0]["destinations"] = [invalid]
+    (tmp_path / "memory.json").write_text(json.dumps(raw))
+    with pytest.raises(ValueError):
+        load_reward_memory_experiment_config(
+            project=tmp_path, config_path="memory.json"
+        )
+
+
+def test_destination_config_roundtrip(tmp_path):
+    raw = turn.raw_config()
+    raw["corpora"][0]["corpus"]["scope"]["surface_ids"] = [outbound.SURFACE]
+    raw["surfaces"][0]["surface_id"] = outbound.SURFACE
+    raw["surfaces"][0]["destinations"] = [
+        {
+            "destination_digest": "a" * 64,
+            "query_label": "Example Team",
+            "required_candidate_refs": ["candidate:rule"],
+        }
+    ]
+    (tmp_path / "memory.json").write_text(json.dumps(raw))
+    config = load_reward_memory_experiment_config(
+        project=tmp_path, config_path="memory.json"
+    )
+    assert config["surfaces"][outbound.SURFACE]["destinations"]["a" * 64] == {
+        "query_label": "Example Team",
+        "required_candidate_refs": ["candidate:rule"],
+    }

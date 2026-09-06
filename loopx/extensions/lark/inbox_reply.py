@@ -375,14 +375,16 @@ def _deliver_lark_inbox_outbound(
     guidance = None
     if before_send is not None:
         # Bind review to destination/profile as well as content and placement.
-        # None of these private values are supplied to the memory provider.
+        # The optional binder hashes the verified destination before retrieval.
         intent_digest = (
             "sha256:"
             + hashlib.sha256(
                 json.dumps([profile, chat_id, receipt]).encode("utf-8")
             ).hexdigest()
         )
-        guidance = before_send(intent_digest)
+        bind_destination = getattr(before_send, "for_destination", None)
+        scoped_hook = bind_destination(chat_id) if bind_destination else before_send
+        guidance = scoped_hook(intent_digest)
         if guidance.get("continue_delivery") is not True or not execute:
             return _result(
                 status="agent_review_required"

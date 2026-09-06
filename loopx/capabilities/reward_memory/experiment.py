@@ -46,6 +46,7 @@ _SURFACE_FIELDS = {
     "corpus_ids",
     "ingest_corpus_id",
     "recall_profile",
+    "destinations",
 }
 _RECALL_PROFILE_FIELDS = {"profile_id", "mode", "max_queries", "limit"}
 _AUTOMATION_FIELDS = {"automatic_recall", "automatic_ingest", "fail_open"}
@@ -325,6 +326,55 @@ def _normalize_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
                 ),
             },
         }
+        if "destinations" in surface:
+            if surface_id != "outbound_message.before_send":
+                raise ValueError("destinations require the outbound surface")
+            destinations = {}
+            for destination in _bounded_objects(
+                surface["destinations"], label="destinations", maximum=20
+            ):
+                entry = _strict_object(
+                    destination,
+                    label="destination",
+                    allowed={
+                        "destination_digest",
+                        "query_label",
+                        "required_candidate_refs",
+                    },
+                )
+                digest = str(entry.get("destination_digest") or "")
+                if len(digest) != 64 or any(
+                    c not in "0123456789abcdef" for c in digest
+                ):
+                    raise ValueError("destination_digest must be a SHA-256 hex digest")
+                if digest in destinations:
+                    raise ValueError("destination_digest must be unique")
+                label = entry.get("query_label", "")
+                if not isinstance(label, str) or len(label) > 120:
+                    raise ValueError(
+                        "destination query_label must be at most 120 characters"
+                    )
+                refs = entry.get("required_candidate_refs", [])
+                if (
+                    not isinstance(refs, list)
+                    or len(refs) > 3
+                    or any(
+                        not isinstance(ref, str)
+                        or not ref.startswith("candidate:")
+                        or len(ref) > 100
+                        or any(c.isspace() for c in ref)
+                        for ref in refs
+                    )
+                    or len(set(refs)) != len(refs)
+                ):
+                    raise ValueError(
+                        "required_candidate_refs must contain up to three unique candidate refs"
+                    )
+                destinations[digest] = {
+                    "query_label": label,
+                    "required_candidate_refs": refs,
+                }
+            surfaces[surface_id]["destinations"] = destinations
         referenced_corpora.update(corpus_ids)
     if referenced_corpora != set(corpora):
         raise ValueError(

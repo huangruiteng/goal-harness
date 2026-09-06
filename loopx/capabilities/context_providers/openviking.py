@@ -198,7 +198,10 @@ class OpenVikingContextProvider:
         namespace = _compact(namespace, limit=120)
         query = _compact(query, limit=500)
         query_summary = _compact(query_summary, limit=220)
-        requested_limit = min(max(1, int(max_results)), MAX_OPENVIKING_RESULTS)
+        requested_limit = min(
+            max(1, int(max_results)),
+            24 if namespace == "reward_memory" else MAX_OPENVIKING_RESULTS,
+        )
         if not namespace or not query or not query_summary:
             raise ValueError("namespace, query, and query_summary are required")
         if not scope_ref.startswith("viking://"):
@@ -221,6 +224,9 @@ class OpenVikingContextProvider:
             )
 
         try:
+            # Reward records require full structured bodies. Summaries and
+            # duplicate chunks must not consume their final result budget.
+            reward_records = namespace == "reward_memory"
             search_result = self._run(
                 [
                     "search",
@@ -228,7 +234,12 @@ class OpenVikingContextProvider:
                     "-u",
                     scope_ref,
                     "-n",
-                    str(requested_limit),
+                    str(
+                        min(32, requested_limit * 4)
+                        if reward_records
+                        else requested_limit
+                    ),
+                    *(["-L", "2"] if reward_records else []),
                     "-o",
                     "json",
                     "-c",
@@ -278,6 +289,13 @@ class OpenVikingContextProvider:
         read_attempted = False
         for row in rows:
             resource_ref = _resource_ref(row)
+            if reward_records:
+                resource_ref = resource_ref.split("#", 1)[0]
+                if row.get("level") in (0, 1) or resource_ref.rsplit("/", 1)[-1] in {
+                    ".overview.md",
+                    ".abstract.md",
+                }:
+                    continue
             if not resource_ref or not (
                 resource_ref == scope_ref
                 or resource_ref.startswith(scope_ref.rstrip("/") + "/")
@@ -303,6 +321,16 @@ class OpenVikingContextProvider:
                 continue
             if not content:
                 continue
+            if reward_records:
+                try:
+                    record = json.loads(content)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    not isinstance(record, Mapping)
+                    or record.get("schema_version") != "reward_memory_active_record_v0"
+                ):
+                    continue
             items.append(
                 ContextProviderItem(
                     resource_ref=resource_ref,
