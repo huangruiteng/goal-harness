@@ -29,9 +29,7 @@ from .control_plane.quota.settlement import (
     render_refresh_recovery_markdown,
     settlement_result_payload,
 )
-from .control_plane.quota.settlement_workspace_causality import (
-    resolve_settlement_workspace_requirement,
-)
+from .control_plane.quota.settlement_workspace_causality import resolve_settlement_workspace_requirement
 from .control_plane.quota.codex_session_usage import (
     book_codex_session_usage,
     usage_booking_lock_target,
@@ -77,9 +75,7 @@ from .history import (
     reserve_unique_run_paths,
     unique_run_paths,
 )
-from .control_plane.runtime.local_state_write_correctness import (
-    build_local_state_write_correctness_dry_run_packet,
-)
+from .control_plane.runtime.local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
 from .paths import resolve_runtime_root
 from .control_plane.goals.vision_checkpoint import (
     build_vision_checkpoint,
@@ -210,9 +206,7 @@ def registered_agents_for_goal(registry_goal: dict[str, Any] | None) -> list[str
         if registry_goal and isinstance(registry_goal.get("coordination"), dict)
         else {}
     )
-    registered_raw = (
-        coordination.get("registered_agents") if isinstance(coordination, dict) else []
-    )
+    registered_raw = coordination.get("registered_agents") if isinstance(coordination, dict) else []
     registered_values = registered_raw if isinstance(registered_raw, list) else []
     registered_agents: list[str] = []
     for value in registered_values:
@@ -336,10 +330,7 @@ def resolve_goal_state(
     project_override: Path | None,
     state_file_override: Path | None,
 ) -> tuple[dict[str, Any] | None, Path | None, Path]:
-    goal = next(
-        (item for item in registry_goals(registry) if str(item.get("id")) == goal_id),
-        None,
-    )
+    goal = next((item for item in registry_goals(registry) if str(item.get("id")) == goal_id), None)
     project = project_override.expanduser().resolve() if project_override else None
     if project is None and goal and goal.get("repo"):
         project = Path(str(goal.get("repo"))).expanduser()
@@ -353,9 +344,7 @@ def resolve_goal_state(
     if state_file is None and goal:
         state_file = registered_state_file
     if state_file is None:
-        raise ValueError(
-            "state file is required when the goal is not resolvable from registry"
-        )
+        raise ValueError("state file is required when the goal is not resolvable from registry")
     if not state_file.is_absolute():
         if project is None:
             raise ValueError("relative state file requires --project or registry repo")
@@ -363,13 +352,9 @@ def resolve_goal_state(
     state_file = state_file.resolve()
     if state_file_override is not None:
         if project is None:
-            raise ValueError(
-                "--state-file override requires --project or a registry goal with repo"
-            )
+            raise ValueError("--state-file override requires --project or a registry goal with repo")
         registered_resolved = (
-            registered_state_file.resolve()
-            if registered_state_file is not None
-            else None
+            registered_state_file.resolve() if registered_state_file is not None else None
         )
         if state_file != registered_resolved and not state_file.is_relative_to(project):
             raise ValueError(
@@ -459,7 +444,9 @@ def build_state_refresh_record(
         if settlement_identity.todo_id:
             record["todo_id"] = settlement_identity.todo_id
         if settlement_identity.replan_obligation_id:
-            record["replan_obligation_id"] = settlement_identity.replan_obligation_id
+            record["replan_obligation_id"] = (
+                settlement_identity.replan_obligation_id
+            )
     if autonomous_replan_recorded:
         record["autonomous_replan_ack"] = {
             "schema_version": "autonomous_replan_ack_v0",
@@ -469,7 +456,9 @@ def build_state_refresh_record(
         if repair_delta_contract:
             record["autonomous_replan_ack"]["delta_contract"] = repair_delta_contract
         if replan_semantic_delta:
-            record["autonomous_replan_ack"]["semantic_delta"] = replan_semantic_delta
+            record["autonomous_replan_ack"]["semantic_delta"] = (
+                replan_semantic_delta
+            )
         if autonomous_replan_frontier_identity:
             record["autonomous_replan_ack"]["frontier_identity"] = (
                 autonomous_replan_frontier_identity
@@ -508,25 +497,19 @@ def _build_state_refresh_output_projections(
     index_record = {
         field: record[field]
         for field in (
-            "generated_at",
-            "goal_id",
-            "classification",
-            "recommended_action",
-            "recommended_action_source",
-            "health_check",
+            "generated_at", "goal_id", "classification", "recommended_action",
+            "recommended_action_source", "health_check",
         )
     }
-    index_record.update(
-        {
-            "json_path": str(json_path),
-            "markdown_path": str(markdown_path),
-            "state": {
-                "sha256_16": record_state.get("sha256_16"),
-                "frontmatter": {"updated_at": record_frontmatter.get("updated_at")},
-            },
-            "runtime_projection_route": record["runtime_projection_route"],
-        }
-    )
+    index_record.update({
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+        "state": {
+            "sha256_16": record_state.get("sha256_16"),
+            "frontmatter": {"updated_at": record_frontmatter.get("updated_at")},
+        },
+        "runtime_projection_route": record["runtime_projection_route"],
+    })
     for field in (
         "recommended_action_resolution",
         "delivery_batch_scale",
@@ -545,22 +528,15 @@ def _build_state_refresh_output_projections(
     if autonomous_replan_recorded_requested or replan_ack.get("recorded") is True:
         index_record["autonomous_replan_ack"] = replan_ack
         if replan_ack.get("requested_classification"):
-            index_record["requested_classification"] = replan_ack[
-                "requested_classification"
-            ]
+            index_record["requested_classification"] = replan_ack["requested_classification"]
 
     agent_vision = record.get("agent_vision")
     if isinstance(agent_vision, dict):
         index_record["agent_vision"] = {
             field: agent_vision.get(field)
             for field in (
-                "schema_version",
-                "agent_id",
-                "state",
-                "vision_patch",
-                "todo_delta",
-                "fallback_declarations",
-                "vision_budget",
+                "schema_version", "agent_id", "state", "vision_patch",
+                "todo_delta", "fallback_declarations", "vision_budget",
             )
         }
         if isinstance(agent_vision.get("path_delta"), dict):
@@ -584,42 +560,26 @@ def _build_state_refresh_output_projections(
         "runtime_root": str(runtime_root),
         "project": str(project) if project else None,
     }
-    payload.update(
-        {
-            field: record.get(field)
-            for field in (
-                "goal_id",
-                "classification",
-                "progress_scope",
-                "agent_id",
-                "agent_lane",
-            )
-        }
-    )
-    payload.update(
-        {
-            "autonomous_replan_recorded": bool(replan_ack.get("recorded")),
-            "autonomous_replan_recorded_requested": autonomous_replan_recorded_requested,
-            "repair_delta_contract": replan_ack.get("delta_contract"),
-            "json_path": str(json_path),
-            "markdown_path": str(markdown_path),
-            "index_path": str(index_path),
-        }
-    )
-    payload.update(
-        {
-            field: record.get(field)
-            for field in (
-                "agent_vision",
-                "vision_checkpoint",
-                "recommended_action",
-                "recommended_action_source",
-                "active_state_next_action_update",
-                "generated_at",
-                "health_check",
-            )
-        }
-    )
+    payload.update({
+        field: record.get(field)
+        for field in ("goal_id", "classification", "progress_scope", "agent_id", "agent_lane")
+    })
+    payload.update({
+        "autonomous_replan_recorded": bool(replan_ack.get("recorded")),
+        "autonomous_replan_recorded_requested": autonomous_replan_recorded_requested,
+        "repair_delta_contract": replan_ack.get("delta_contract"),
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+        "index_path": str(index_path),
+    })
+    payload.update({
+        field: record.get(field)
+        for field in (
+            "agent_vision", "vision_checkpoint", "recommended_action",
+            "recommended_action_source", "active_state_next_action_update",
+            "generated_at", "health_check",
+        )
+    })
     payload.update(record)
     return index_record, payload
 
@@ -629,9 +589,7 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
     if recovery_markdown is not None:
         return recovery_markdown
     state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
-    frontmatter = (
-        state.get("frontmatter") if isinstance(state.get("frontmatter"), dict) else {}
-    )
+    frontmatter = state.get("frontmatter") if isinstance(state.get("frontmatter"), dict) else {}
     lines = [
         "# LoopX State Refresh",
         "",
@@ -738,9 +696,7 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
             f"target_roles={','.join(projection_gap.get('target_roles') or [])}"
         )
         if projection_gap.get("recommended_action"):
-            lines.append(
-                f"- state_projection_gap_action: {projection_gap.get('recommended_action')}"
-            )
+            lines.append(f"- state_projection_gap_action: {projection_gap.get('recommended_action')}")
 
     next_action_update = (
         payload.get("active_state_next_action_update")
@@ -765,16 +721,8 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
         else {}
     )
     if write_correctness:
-        intent = (
-            write_correctness.get("write_intent")
-            if isinstance(write_correctness.get("write_intent"), dict)
-            else {}
-        )
-        preview = (
-            write_correctness.get("preview")
-            if isinstance(write_correctness.get("preview"), dict)
-            else {}
-        )
+        intent = write_correctness.get("write_intent") if isinstance(write_correctness.get("write_intent"), dict) else {}
+        preview = write_correctness.get("preview") if isinstance(write_correctness.get("preview"), dict) else {}
         apply_result = (
             write_correctness.get("apply_result")
             if isinstance(write_correctness.get("apply_result"), dict)
@@ -788,11 +736,7 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
             f"non_destructive={preview.get('non_destructive')}"
         )
 
-    global_sync = (
-        payload.get("global_sync")
-        if isinstance(payload.get("global_sync"), dict)
-        else {}
-    )
+    global_sync = payload.get("global_sync") if isinstance(payload.get("global_sync"), dict) else {}
     if global_sync:
         lines.extend(
             [
@@ -821,7 +765,9 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
             f"`{recommendation_resolution.get('settlement_alignment')}`"
         )
         if recommendation_resolution.get("todo_id"):
-            lines.append(f"- todo_id: `{recommendation_resolution.get('todo_id')}`")
+            lines.append(
+                f"- todo_id: `{recommendation_resolution.get('todo_id')}`"
+            )
     lines.append(str(payload.get("recommended_action") or ""))
     for heading, key in (
         ("Next Action", "next_action"),
@@ -890,9 +836,7 @@ def refresh_state_run(
         raise ValueError("--agent-lane requires --agent-id so the lane has an owner")
     normalized_progress_scope = normalize_progress_scope(progress_scope)
     normalized_delivery_batch_scale = (
-        require_delivery_batch_scale(delivery_batch_scale).value
-        if delivery_batch_scale
-        else None
+        require_delivery_batch_scale(delivery_batch_scale).value if delivery_batch_scale else None
     )
     normalized_delivery_outcome = (
         require_delivery_outcome(delivery_outcome).value if delivery_outcome else None
@@ -960,9 +904,7 @@ def refresh_state_run(
             },
         )
         if settlement_readback is None:
-            raise RuntimeError(
-                "exact settlement readback unexpectedly returned not-found"
-            )
+            raise RuntimeError("exact settlement readback unexpectedly returned not-found")
         settlement_result = settlement_readback.identity
         if settlement_result.failure is not None:
             raise ValueError(settlement_result.failure.reason)
@@ -1001,8 +943,7 @@ def refresh_state_run(
                 )
             return payload
         settlement_workspace_requirement = resolve_settlement_workspace_requirement(
-            delivery_workspace_causality,
-            settlement_binding_kind=settlement_identity.binding_kind.value,
+            delivery_workspace_causality, settlement_binding_kind=settlement_identity.binding_kind.value
         )
     runtime_projection_route = resolve_runtime_projection_route(
         registry_path=registry_path,
@@ -1038,9 +979,7 @@ def refresh_state_run(
             todo_id=(settlement_identity.todo_id if settlement_identity else None),
             agent_id=normalized_agent_id or None,
         )
-    normalized_next_action = (
-        normalize_next_action_text(next_action) if next_action else None
-    )
+    normalized_next_action = normalize_next_action_text(next_action) if next_action else None
     registered_agents = registered_agents_for_goal(registry_goal)
     known_agents = {agent for agent in registered_agents if agent}
     multi_agent_goal = len(known_agents) > 1
@@ -1079,9 +1018,7 @@ def refresh_state_run(
     if normalized_progress_scope == GOAL_PROGRESS_SCOPE:
         if normalized_agent_lane:
             raise ValueError("--agent-lane requires --progress-scope agent_lane")
-    if (
-        agent_vision_packet is not None or vision_unchanged_reason
-    ) and not normalized_agent_id:
+    if (agent_vision_packet is not None or vision_unchanged_reason) and not normalized_agent_id:
         raise ValueError("vision writeback requires --agent-id")
     agent_vision: dict[str, Any] | None = None
     existing_agent_vision: dict[str, Any] | None = None
@@ -1170,13 +1107,15 @@ def refresh_state_run(
         existing_agent_vision=existing_agent_vision,
         agent_id=normalized_agent_id,
         dry_run=dry_run,
-        settlement_todo_id=(
-            settlement_identity.todo_id if settlement_identity else None
+        settlement_todo_id=(settlement_identity.todo_id if settlement_identity else None),
+        settlement_guard_scoped=(
+            settlement_replan_guard.get("scope") == "turn_guard"
         ),
-        settlement_guard_scoped=(settlement_replan_guard.get("scope") == "turn_guard"),
         settlement_guard_semantic_replan_obligation_id=(
             settlement_replan_guard.get("selected_obligation_id")
-            if isinstance(settlement_replan_guard.get("selected_obligation_id"), str)
+            if isinstance(
+                settlement_replan_guard.get("selected_obligation_id"), str
+            )
             else None
         ),
         newest_first_runs=newest_first_runs,
@@ -1243,9 +1182,13 @@ def refresh_state_run(
                 else None
             ),
         )
-        if peer_independent_worktree_required and (
-            delivery_workspace is None
-            or delivery_workspace.get("workspace_kind") != "independent_git_worktree"
+        if (
+            peer_independent_worktree_required
+            and (
+                delivery_workspace is None
+                or delivery_workspace.get("workspace_kind")
+                != "independent_git_worktree"
+            )
         ):
             raise ValueError(
                 "accountable peer delivery must be refreshed from the independent "
@@ -1312,7 +1255,9 @@ def refresh_state_run(
     if refresh_recovery:
         record["refresh_recovery"] = refresh_recovery
     if settlement_workspace_requirement:
-        record["settlement_workspace_requirement"] = settlement_workspace_requirement
+        record["settlement_workspace_requirement"] = (
+            settlement_workspace_requirement
+        )
     if autonomous_replan_recorded:
         if "autonomous_replan_ack" not in record:
             record["autonomous_replan_ack"] = {
@@ -1327,9 +1272,7 @@ def refresh_state_run(
                 autonomous_replan_frontier_identity
             )
         if requested_classification != classification:
-            record["autonomous_replan_ack"]["requested_classification"] = (
-                requested_classification
-            )
+            record["autonomous_replan_ack"]["requested_classification"] = requested_classification
             record["autonomous_replan_noop"] = {
                 "schema_version": REPAIR_NOOP_SCHEMA_VERSION,
                 "classification": classification,
@@ -1345,7 +1288,9 @@ def refresh_state_run(
                 "source": "refresh_state_semantic_delta",
             },
         )
-        record["autonomous_replan_ack"]["semantic_delta"] = replan_semantic_delta
+        record["autonomous_replan_ack"]["semantic_delta"] = (
+            replan_semantic_delta
+        )
     if active_state_next_action_update:
         record["active_state_next_action_update"] = active_state_next_action_update
     compact_route = compact_runtime_projection_route(runtime_projection_route)
@@ -1394,9 +1339,7 @@ def refresh_state_run(
             payload["usage"] = dict(record["usage"])
         if dry_run:
             expected_write_scopes = ["runtime_history"]
-            if active_state_next_action_update and active_state_next_action_update.get(
-                "would_update"
-            ):
+            if active_state_next_action_update and active_state_next_action_update.get("would_update"):
                 expected_write_scopes.insert(0, "active_state")
             if sync_global and route_status in {"resolved", "single_runtime"}:
                 expected_write_scopes.append("global_registry")
@@ -1411,40 +1354,31 @@ def refresh_state_run(
             if sync_global and route_status in {"resolved", "single_runtime"}:
                 patch_parts.append("sync public-safe registry projection")
             elif sync_global:
-                patch_parts.append(
-                    f"block global sync on {route_status} runtime projection route"
-                )
+                patch_parts.append(f"block global sync on {route_status} runtime projection route")
             if shared_runtime_root:
-                patch_parts.append(
-                    "project compact refresh to registered shared runtime"
-                )
-            payload["local_state_write_correctness"] = (
-                build_local_state_write_correctness_dry_run_packet(
-                    goal_id=safe_goal_id,
-                    writer_id=normalized_agent_id or "loopx.refresh-state",
-                    write_class="refresh_state",
-                    state_text=expected_write_state_text,
-                    target_refs={
-                        "state_file_ref": "registry.goal.state_file",
-                        "run_history_ref": "runtime.goal.runs",
-                        "index_ref": "runtime.goal.runs.index",
-                        "global_registry_ref": (
-                            "runtime.registry.global"
-                            if sync_global
-                            and route_status in {"resolved", "single_runtime"}
-                            else None
-                        ),
-                        "shared_runtime_projection_ref": (
-                            "shared_runtime.goal.runs.index"
-                            if shared_runtime_root
-                            else None
-                        ),
-                    },
-                    patch_summary="; ".join(patch_parts),
-                    expected_write_scopes=expected_write_scopes,
-                    lease_ref=None,
-                    projection_status_surface=f"refresh-state dry-run: {classification}",
-                )
+                patch_parts.append("project compact refresh to registered shared runtime")
+            payload["local_state_write_correctness"] = build_local_state_write_correctness_dry_run_packet(
+                goal_id=safe_goal_id,
+                writer_id=normalized_agent_id or "loopx.refresh-state",
+                write_class="refresh_state",
+                state_text=expected_write_state_text,
+                target_refs={
+                    "state_file_ref": "registry.goal.state_file",
+                    "run_history_ref": "runtime.goal.runs",
+                    "index_ref": "runtime.goal.runs.index",
+                    "global_registry_ref": (
+                        "runtime.registry.global"
+                        if sync_global and route_status in {"resolved", "single_runtime"}
+                        else None
+                    ),
+                    "shared_runtime_projection_ref": (
+                        "shared_runtime.goal.runs.index" if shared_runtime_root else None
+                    ),
+                },
+                patch_summary="; ".join(patch_parts),
+                expected_write_scopes=expected_write_scopes,
+                lease_ref=None,
+                projection_status_surface=f"refresh-state dry-run: {classification}",
             )
         if not dry_run:
             runs_dir.mkdir(parents=True, exist_ok=True)
@@ -1454,17 +1388,12 @@ def refresh_state_run(
             payload["json_path"] = str(json_path)
             payload["markdown_path"] = str(markdown_path)
             json_path.write_text(
-                json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False)
-                + "\n",
+                json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
                 encoding="utf-8",
             )
-            markdown_path.write_text(
-                render_state_refresh_markdown(payload) + "\n", encoding="utf-8"
-            )
+            markdown_path.write_text(render_state_refresh_markdown(payload) + "\n", encoding="utf-8")
             with index_path.open("a", encoding="utf-8") as f:
-                f.write(
-                    json.dumps(index_record, ensure_ascii=False, allow_nan=False) + "\n"
-                )
+                f.write(json.dumps(index_record, ensure_ascii=False, allow_nan=False) + "\n")
     if sync_global and route_status in {"missing", "ambiguous"}:
         payload["ok"] = False
         payload["partial_write"] = not dry_run
