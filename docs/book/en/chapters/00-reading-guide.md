@@ -114,8 +114,8 @@ Do not bypass a newer permission or lifecycle check just to make an older exampl
 
 ## Version baseline
 
-The current release anchor is LoopX GitHub release `v0.5.4`. Local command examples were checked against
-the public `loopx 0.5.4` CLI and protocol surface. This release requires Python 3.11+ and Node.js 22.6+.
+The current release anchor is LoopX GitHub release `v1.0.0`. Local command examples were checked against
+the public `loopx 1.0.0` CLI and protocol surface. This release requires Python 3.11+ and Node.js 22.6+.
 LoopX starts and reuses its managed, idle-exiting TypeScript Effect runtime automatically; users do not
 operate that runtime as a manual daemon.
 
@@ -143,7 +143,7 @@ different version identifiers imply.
 
 ### How to read the TypeScript migration
 
-`v0.5.4` does not mean that all of LoopX has been rewritten in TypeScript. The current release baseline is:
+`v1.0.0` does not mean that all of LoopX has been rewritten in TypeScript. The current release baseline is:
 
 - TypeScript owns the canonical semantics for migrated slices of the Effect Program, Turn and Host Todo
   settlement, Todo completion, quota delivery/spend/void/monitor-poll, the local task-lease lifecycle,
@@ -155,20 +155,20 @@ different version identifiers imply.
 - current `main` is in the transaction-payoff phase: later progress is measured by complete transaction
   cutovers and deleted legacy semantics, not by accumulating leaf helpers and bridge calls.
 
-Treat the `v0.5.4` tag and release notes as the shipped baseline. Use the current status of the
+Treat the `v1.0.0` tag and release notes as the shipped baseline. Use the current status of the
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)
-for later cutovers and final CLI/App convergence. `v0.5.4` ships only the first receipt-bound scheduler
+for later cutovers and final CLI/App convergence. `v1.0.0` ships only the first receipt-bound scheduler
 follow-up slice of Stage 3; broader CLI/App convergence and Stage 4 distribution cleanup remain future
 work.
 
-### Updating your mental model from `v0.4.4` to `v0.5.4`
+### Updating your mental model from `v0.4.4` to `v1.0.0`
 
 If you read an earlier edition of the Dev Book, recalibrate these four areas first:
 
-| Area | Shipped in `v0.5.4` | Continue with |
+| Area | Shipped in `v1.0.0` | Continue with |
 | --- | --- | --- |
 | Control Plane | Complete Turn/Host Todo settlement, quota commit, task-lease lifecycle, Vision refresh, and scheduler-heartbeat transactions have typed TypeScript owners; Python facades still carry migration-time boundaries | [Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/) |
-| Operator surface | Personal Workspace exposes Goal, Task, Chat, and read-only status-source entrypoints; the UI is not a new source of truth | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v0.5.4/apps/presentation/dashboard/README.md) |
+| Operator surface | Personal Workspace exposes Goal, Task, Chat, and read-only status-source entrypoints; the UI is not a new source of truth | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v1.0.0/apps/presentation/dashboard/README.md) |
 | Host runtime | Codex, Claude Code, OpenCode, Pi, KunlunCode, DeepSeek Harness, and custom runners have distinct activation and stop contracts | [Runtime Connector Catalog](/loopx/docs/integrations/runtime-connector-catalog/) |
 | Capability and Provider | A Capability is defined by a package-owned catalog entry, a real command, and durable validation; a Provider or Extension does not inherit Kernel authority | [Capability Catalog](/loopx/docs/capabilities/) |
 | Shared authority | File, NoKV, and PostgreSQL providers remain staged candidates; installing a Provider does not change the default local authority | [Shared Authority RFC](/loopx/docs/architecture/rfcs/shared-goal-authority-state-provider-v0/) |
