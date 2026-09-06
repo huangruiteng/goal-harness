@@ -36,9 +36,8 @@ concurrency:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    # The parallel suite can take more than 15 minutes through coverage
-    # collation on the hosted runner. Keep the fail-safe bounded while leaving
-    # enough headroom for runner variance and post-test coverage reporting.
+    # Keep a bounded fail-safe for runner variance and coverage collation;
+    # throughput is controlled by the capped xdist worker pool below.
     timeout-minutes: 30
     steps:
       - name: Check out repository
@@ -87,7 +86,8 @@ jobs:
 
       - name: Run fast tests
         run: >-
-          python -m pytest -q -n 2
+          python -m pytest -q -n auto --maxprocesses=4 --dist=worksteal
+          --durations=25 --durations-min=1
           --cov=loopx
           --cov-report=term
           --cov-fail-under=19.6
