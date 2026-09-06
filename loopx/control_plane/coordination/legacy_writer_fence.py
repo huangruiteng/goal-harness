@@ -17,6 +17,8 @@ from ..effect_runtime import effect_runtime_result
 from ...file_lock import exclusive_cross_runtime_file_lock
 from ...history import load_registry
 from ...paths import resolve_runtime_root
+from ...registry import registry_goals, resolve_state_file
+from ..goals.active_state_metadata import parse_state_frontmatter
 from .shadow_management import (
     ShadowManagementError, read_shadow_bootstrap_source_path, read_shadow_management_state, require_shadow_primary_write_allowed,
 )
@@ -61,6 +63,45 @@ def legacy_coordination_todo_lock_path(*, runtime_root: Path, goal_id: str) -> P
     )
 
 
+def _require_other_goal_source_write_allowed(
+    *, registry: dict[str, Any], runtime_roots: set[Path], goal_id: str,
+    state_file: Path, canonical_mutation: bool,
+) -> None:
+    """A goal override cannot cancel the existing authority of this one source.
+
+    The caller holds S. Reuse its frontmatter and current registry paths rather
+    than persisting another source index or acquiring another goal's locks.
+    Unbound legacy shared-state writes remain valid.
+    """
+
+    resolved_source = state_file.resolve(strict=False)
+    try:
+        owner = parse_state_frontmatter(state_file.read_text(encoding="utf-8")).get("goal_id")
+    except FileNotFoundError:
+        owner = None
+    owners = {owner} if owner else set()
+    for goal in registry_goals(registry):
+        repo, path = goal.get("repo"), goal.get("state_file")
+        if not isinstance(repo, str) or not isinstance(path, str):
+            continue
+        registered_source = resolve_state_file(Path(repo).expanduser(), path)
+        if registered_source is not None and registered_source.resolve(strict=False) == resolved_source:
+            owners.add(str(goal["id"]))
+    for owner in sorted(owners - {goal_id}):
+        for root in sorted(runtime_roots):
+            binding = require_shadow_primary_write_allowed(root, owner)
+            if not canonical_mutation:
+                continue
+            if binding is not None:
+                bound_source = read_shadow_bootstrap_source_path(root, owner, binding)
+                if bound_source.resolve(strict=False) == resolved_source:
+                    raise ShadowManagementError(
+                        "shadow_source_goal_mismatch",
+                        "the state source has another goal's active capture binding; write through its goal",
+                    )
+            require_legacy_coordination_write_allowed(runtime_root=root, goal_id=owner)
+
+
 def require_registry_source_write_allowed(
     *, registry_path: Path, runtime_root: Path, goal_id: str, state_file: Path,
     canonical_mutation: bool = True,
@@ -81,9 +122,14 @@ def require_registry_source_write_allowed(
                 "the state file is not the source established by the active capture binding",
             )
     registry = load_registry(registry_path)
+    registered_root = resolve_runtime_root(registry, None, registry_path=registry_path)
+    _require_other_goal_source_write_allowed(
+        registry=registry,
+        runtime_roots={runtime_root.expanduser().resolve(strict=False), registered_root.expanduser().resolve(strict=False)},
+        goal_id=goal_id, state_file=state_file, canonical_mutation=canonical_mutation,
+    )
     if not any(isinstance(goal, dict) and goal.get("id") == goal_id for goal in registry.get("goals", [])):
         return
-    registered_root = resolve_runtime_root(registry, None, registry_path=registry_path)
     if registered_root.expanduser().resolve(strict=False) == runtime_root.expanduser().resolve(strict=False):
         return
     binding = require_shadow_primary_write_allowed(registered_root, goal_id)
