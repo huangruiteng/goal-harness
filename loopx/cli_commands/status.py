@@ -236,7 +236,7 @@ def handle_status_command(
             )
             compact_agent_lane_todo_index_for_status_display(payload)
         pending_composition_retries = collect_pending_composition_retry_projection(
-            runtime_root, args.goal_id
+            runtime_root, args.goal_id, agent_id=args.agent_id
         )
         if pending_composition_retries is not None:
             payload["pending_composition_retry_receipts"] = (

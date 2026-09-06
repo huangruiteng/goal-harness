@@ -421,6 +421,7 @@ def collect_pending_composition_retry_projection(
     runtime_root: Path,
     goal_id: str | None,
     *,
+    agent_id: str | None = None,
     max_items: int = 20,
 ) -> dict[str, Any] | None:
     """Collect pending composition retry receipts for status/doctor readback.
@@ -443,21 +444,29 @@ def collect_pending_composition_retry_projection(
         ]
     else:
         journal_paths = []
+    selector_agent_id = str(agent_id or "") if agent_id else ""
     pending: list[dict[str, Any]] = []
+    total_matching = 0
     for journal_path in journal_paths:
         if not journal_path.is_file():
             continue
         for row in pending_composition_retry_receipts_for_path(journal_path):
-            pending.append(row)
-            if len(pending) >= max_items:
-                break
-        if len(pending) >= max_items:
-            break
+            if (
+                selector_agent_id
+                and str((row.get("identity") or {}).get("agent_id") or "")
+                != selector_agent_id
+            ):
+                continue
+            total_matching += 1
+            if len(pending) < max_items:
+                pending.append(row)
+    if not total_matching:
+        return None
     if not pending:
         return None
     return {
         "schema_version": POST_WRITEBACK_COMPOSITION_RETRY_PROJECTION_SCHEMA_VERSION,
-        "pending_count": len(pending),
+        "pending_count": total_matching,
         "pending": pending,
         "replay_action": POST_WRITEBACK_COMPOSITION_RETRY_REPLAY_ACTION,
     }

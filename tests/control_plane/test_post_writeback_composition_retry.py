@@ -942,3 +942,74 @@ def test_receipt_identity_separates_policy_versions(tmp_path: Path) -> None:
     assert settled_flag is True
     assert settled["status"] == "settled"
     assert pending_composition_retry_receipts(runtime_root, "goal-1") == []
+
+
+def test_agent_scoped_projection_excludes_peer_work_and_caps_after_filter(
+    tmp_path: Path,
+) -> None:
+    """An agent selector must filter before counting and display truncation."""
+
+    _registry, runtime_root = _write_registry(tmp_path)
+    journal_path = composition_retry_receipt_log_path(runtime_root, "goal-1")
+    peer_identity = dict(_identity())
+    peer_identity["agent_id"] = "agent-peer"
+    for index in range(6):
+        peer_identity["todo_id"] = f"todo_peer_{index:03d}"
+        append_composition_retry_receipt(
+            journal_path,
+            build_composition_retry_receipt(
+                goal_id="goal-1",
+                event_kind="todo_complete",
+                identity=peer_identity,
+                state_version=f"peer-{index}",
+                committed_at="2026-09-06T00:00:00Z",
+                hook_identities=[
+                    {
+                        "hook_id": "periodic_report.stage_completion",
+                        "capability_id": "periodic-report",
+                        "policy_version": "v0",
+                    }
+                ],
+                error_code="source_projection_failed",
+            ),
+        )
+    own_identity = dict(_identity())
+    own_identity["agent_id"] = "agent-own"
+    own_identity["todo_id"] = "todo_own_000"
+    append_composition_retry_receipt(
+        journal_path,
+        build_composition_retry_receipt(
+            goal_id="goal-1",
+            event_kind="todo_complete",
+            identity=own_identity,
+            state_version="own-0",
+            committed_at="2026-09-06T00:00:00Z",
+            hook_identities=[
+                {
+                    "hook_id": "periodic_report.stage_completion",
+                    "capability_id": "periodic-report",
+                    "policy_version": "v0",
+                }
+            ],
+            error_code="source_projection_failed",
+        ),
+    )
+
+    own = collect_pending_composition_retry_projection(
+        runtime_root, "goal-1", agent_id="agent-own", max_items=5
+    )
+    assert own is not None
+    assert own["pending_count"] == 1
+    assert [row["identity"]["agent_id"] for row in own["pending"]] == ["agent-own"]
+
+    global_view = collect_pending_composition_retry_projection(
+        runtime_root, "goal-1", max_items=5
+    )
+    assert global_view is not None
+    assert global_view["pending_count"] == 7
+    assert len(global_view["pending"]) == 5
+
+    lonely = collect_pending_composition_retry_projection(
+        runtime_root, "goal-1", agent_id="agent-nobody"
+    )
+    assert lonely is None
