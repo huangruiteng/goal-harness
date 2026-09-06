@@ -1,44 +1,19 @@
 name: SonarCloud
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/sonarcloud.yml"
-      - "sonar-project.properties"
-      - "loopx/**"
-      - "apps/**"
-      - "scripts/**"
-      - "tests/**"
-      - "package.json"
-      - "package-lock.json"
-      - "pyproject.toml"
-      - "tsconfig.control-plane.json"
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/sonarcloud.yml"
-      - "sonar-project.properties"
-      - "loopx/**"
-      - "apps/**"
-      - "scripts/**"
-      - "tests/**"
-      - "package.json"
-      - "package-lock.json"
-      - "pyproject.toml"
-      - "tsconfig.control-plane.json"
+  workflow_call:
+    secrets:
+      SONAR_TOKEN:
+        required: false
 
 permissions:
   contents: read
-
-concurrency:
-  group: sonarcloud-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   sonar:
     name: SonarCloud analysis (non-blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Detect whether the token is available
         id: sonar-token
@@ -61,25 +36,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Download this run's combined coverage
         if: steps.sonar-token.outputs.available == 'true'
-        uses: actions/setup-python@v6
+        uses: actions/download-artifact@v7
         with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install test dependencies
-        if: steps.sonar-token.outputs.available == 'true'
-        run: python -m pip install --disable-pip-version-check -e ".[test]"
-
-      - name: Run fast tests with coverage XML
-        if: steps.sonar-token.outputs.available == 'true'
-        run: >-
-          python -m pytest -q -n 2
-          --durations=25 --durations-min=1
-          --cov=loopx
-          --cov-report=term
-          --cov-report=xml:coverage.xml
+          name: python-coverage-xml
 
       - name: SonarCloud scan
         if: steps.sonar-token.outputs.available == 'true'
