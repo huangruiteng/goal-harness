@@ -347,11 +347,22 @@ def main() -> None:
                     return successful_runner(args)
                 if args[3:6] == ["im", "chats", "get"]:
                     return {"returncode": 0, "stdout": "{}", "stderr": ""}
-                if args[3:6] == ["im", "chat.members", "get"]:
+                if args[3:5] == ["im", "+chat-members-list"]:
                     return {
                         "returncode": 0,
                         "stdout": json.dumps(
-                            {"items": [{"member_id": "ou_reviewer_fixture"}]}
+                            {
+                                "ok": True,
+                                "data": {
+                                    "users": [],
+                                    "bots": [
+                                        {
+                                            "app_id": "cli_reviewer_fixture",
+                                            "member_id": "ou_reviewer_fixture",
+                                        }
+                                    ],
+                                },
+                            }
                         ),
                         "stderr": "",
                     }
@@ -380,10 +391,7 @@ def main() -> None:
                                         "mentions": [
                                             {
                                                 "key": "@_user_1",
-                                                "id": {
-                                                    "open_id": readback_open_id,
-                                                    "user_id": "fixture-user-id",
-                                                },
+                                                "id": readback_open_id,
                                                 "name": "Reviewer",
                                             }
                                         ],
@@ -398,14 +406,14 @@ def main() -> None:
 
             return run
 
-        mention_reply = '<at user_id="ou_reviewer_fixture">Reviewer</at> 已记录并修正。'
+        mention_reply = '<at open_id="ou_reviewer_fixture">Reviewer</at> 已记录并修正。'
         normalized_mention = reply_lark_event_inbox(
             project=project,
             config_path=config,
             message_id="om_review_2",
             text=mention_reply,
             execute=True,
-            runner=mention_runner(readback_open_id="ou_reviewer_fixture"),
+            runner=mention_runner(readback_open_id="cli_reviewer_fixture"),
         )
         assert normalized_mention["status"] == "sent_verified", normalized_mention
 

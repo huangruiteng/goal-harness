@@ -325,6 +325,8 @@ class ReplyRunner:
         readback_text: str | None = None,
         readback_mentions: list[dict[str, Any]] | None = None,
         include_mentioned_member: bool = True,
+        member_bucket: str = "users",
+        member_read_denied: bool = False,
     ) -> None:
         self.calls: list[list[str]] = []
         self.matching_readback = matching_readback
@@ -332,6 +334,8 @@ class ReplyRunner:
         self.readback_text = readback_text
         self.readback_mentions = readback_mentions
         self.include_mentioned_member = include_mentioned_member
+        self.member_bucket = member_bucket
+        self.member_read_denied = member_read_denied
 
     def __call__(self, args: Sequence[str]) -> dict[str, Any]:
         call = list(args)
@@ -354,20 +358,26 @@ class ReplyRunner:
             }
         if call[3:6] == ["im", "chats", "get"]:
             return {"returncode": 0, "stdout": "{}", "stderr": ""}
-        if "chat.members" in call and "get" in call:
+        if "+chat-members-list" in call:
+            if self.member_read_denied:
+                return {"returncode": 1, "stdout": "", "stderr": "missing_scope"}
             return {
                 "returncode": 0,
                 "stdout": json.dumps(
                     {
-                        "items": [
-                            {
-                                "member_id": (
-                                    "ou_public_reviewer"
-                                    if self.include_mentioned_member
-                                    else "ou_someone_else"
-                                )
-                            }
-                        ]
+                        "ok": True,
+                        "data": {
+                            self.member_bucket: [
+                                {
+                                    "app_id": "cli_public_reviewer",
+                                    "member_id": (
+                                        "ou_public_reviewer"
+                                        if self.include_mentioned_member
+                                        else "ou_someone_else"
+                                    ),
+                                }
+                            ]
+                        },
                     }
                 ),
                 "stderr": "",
@@ -930,8 +940,178 @@ def test_structured_mention_queries_the_declared_member_identity_kind(
     )
 
     assert result["ok"] is True
-    member_call = next(call for call in runner.calls if "chat.members" in call)
+    member_call = next(call for call in runner.calls if "+chat-members-list" in call)
     assert member_call[member_call.index("--member-id-type") + 1] == "open_id"
+
+
+@pytest.mark.parametrize("placement", ["reply", "chat_root"])
+@pytest.mark.parametrize("member_read_denied", [False, True])
+@pytest.mark.parametrize("member_bucket", ["users", "bots"])
+@pytest.mark.parametrize(
+    "readback_id", ["ou_public_reviewer", "cli_public_reviewer", "cli_unrelated"]
+)
+def test_bot_mention_uses_bot_member_bucket_without_bypassing_scope(
+    tmp_path: Path,
+    placement: str,
+    member_read_denied: bool,
+    readback_id: str,
+    member_bucket: str,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        member_bucket=member_bucket,
+        member_read_denied=member_read_denied,
+        readback_text="@_user_1 please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Public Reviewer",
+                "id": readback_id,
+            }
+        ],
+    )
+    kwargs = dict(
+        project=project,
+        config_path=config,
+        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        execute=True,
+        runner=runner,
+    )
+    result = (
+        reply_lark_event_inbox(message_id="om_reaction_fixture", **kwargs)
+        if placement == "reply"
+        else send_lark_inbox_message(**kwargs)
+    )
+
+    member_call = next(call for call in runner.calls if "+chat-members-list" in call)
+    assert member_call[member_call.index("--member-types") + 1] == "user,bot"
+    assert member_call[member_call.index("--member-id-type") + 1] == "open_id"
+    assert member_call[member_call.index("--as") + 1] == "bot"
+    assert "--page-all" in member_call
+    assert not any("chat.members" in call for call in runner.calls)
+    if member_read_denied:
+        assert result["status"] == "gate_required"
+        assert not any(
+            "+messages-send" in call or "+messages-reply" in call
+            for call in runner.calls
+        )
+    elif readback_id == "cli_unrelated" or (
+        member_bucket == "users" and readback_id == "cli_public_reviewer"
+    ):
+        assert result["status"] == "sent_unverified"
+        assert result["reply_verified"] is False
+    else:
+        assert result["ok"] is True
+        assert result["reply_verified"] is True
+
+
+def test_bot_mention_rejects_ambiguous_app_id_mapping(tmp_path: Path) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        member_bucket="bots",
+        readback_text="@_user_1 and @_user_2 please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Public Reviewer",
+                "id": "cli_public_reviewer",
+            },
+            {
+                "key": "@_user_2",
+                "name": "Other Reviewer",
+                "id": "cli_public_reviewer",
+            },
+        ],
+    )
+
+    def ambiguous_runner(args: Sequence[str]) -> dict[str, Any]:
+        result = runner(args)
+        if "+chat-members-list" in args:
+            payload = json.loads(result["stdout"])
+            payload["data"]["bots"].append(
+                {
+                    "app_id": "cli_public_reviewer",
+                    "member_id": "ou_other_reviewer",
+                }
+            )
+            result["stdout"] = json.dumps(payload)
+        return result
+
+    result = send_lark_inbox_message(
+        project=project,
+        config_path=config,
+        text=(
+            '<at open_id="ou_public_reviewer">Public Reviewer</at> and '
+            '<at open_id="ou_other_reviewer">Other Reviewer</at> please review'
+        ),
+        execute=True,
+        runner=ambiguous_runner,
+    )
+    assert result["status"] == "sent_unverified"
+    assert result["reply_verified"] is False
+
+
+def test_bot_alias_is_scoped_to_its_declared_identity_kind(tmp_path: Path) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="@_user_1 please review with @_user_2",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Review Bot",
+                "id": "cli_review_bot",
+            },
+            {
+                "key": "@_user_2",
+                "name": "Human Reviewer",
+                "id": {"user_id": "u_human_reviewer"},
+            },
+        ],
+    )
+
+    def mixed_identity_runner(args: Sequence[str]) -> dict[str, Any]:
+        if "+chat-members-list" not in args:
+            return runner(args)
+        runner.calls.append(list(args))
+        identity_kind = args[args.index("--member-id-type") + 1]
+        member_data = {
+            "open_id": {
+                "users": [],
+                "bots": [
+                    {"app_id": "cli_review_bot", "member_id": "ou_review_bot"}
+                ],
+            },
+            "user_id": {
+                "users": [{"member_id": "u_human_reviewer"}],
+                "bots": [
+                    {"app_id": "cli_review_bot", "member_id": "u_review_bot"}
+                ],
+            },
+        }
+        return {
+            "returncode": 0,
+            "stdout": json.dumps({"ok": True, "data": member_data[identity_kind]}),
+            "stderr": "",
+        }
+
+    result = send_lark_inbox_message(
+        project=project,
+        config_path=config,
+        text=(
+            '<at open_id="ou_review_bot">Review Bot</at> please review with '
+            '<at user_id="u_human_reviewer">Human Reviewer</at>'
+        ),
+        execute=True,
+        runner=mixed_identity_runner,
+    )
+
+    assert result["status"] == "sent_verified"
+    assert result["reply_verified"] is True
+    assert {
+        call[call.index("--member-id-type") + 1]
+        for call in runner.calls
+        if "+chat-members-list" in call
+    } == {"open_id", "user_id"}
 
 
 def test_plain_reply_rejects_unexpected_provider_mention(tmp_path: Path) -> None:
