@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { z } from "zod";
 import type { WorkspaceAgentTodo, WorkspaceDrawerSelection, WorkspaceGoal } from "./personal-workspace-model";
 import { useWorkspaceI18n } from "./i18n";
@@ -7,14 +7,17 @@ const pageSchema = z.object({
   ok: z.literal(true), total: z.number().int().nonnegative(), next_cursor: z.string().nullable(),
   items: z.array(z.object({ todo_id: z.string(), text: z.string(), claimed_by: z.string().nullable(), evidence: z.string().nullable(), priority: z.string().nullable(), task_class: z.string().nullable() })).max(40),
 });
-const rowHeight = 148;
 
 /** Fixed-height previews keep layout/DOM cost bounded; the drawer retains full text. */
-export function CompletedTaskLane({ goal, agentId, seed, enabled, onSelect }: {
+export function CompletedTaskLane({ goal, agentId, seed, enabled, listView = false, onSelect }: {
   goal: WorkspaceGoal; agentId: string; seed: WorkspaceAgentTodo[]; enabled: boolean;
-  onSelect: (selection: WorkspaceDrawerSelection) => void;
+  listView?: boolean; onSelect: (selection: WorkspaceDrawerSelection) => void;
 }) {
   const { t } = useWorkspaceI18n();
+  const historyId = useId();
+  const [expanded, setExpanded] = useState(false);
+  const visible = !listView || expanded;
+  const rowHeight = listView ? 96 : 148;
   const [rows, setRows] = useState(seed);
   const [total, setTotal] = useState(agentId === "all" ? goal.doneTodoCount ?? seed.length : seed.length);
   const [cursor, setCursor] = useState<string | null | undefined>(undefined);
@@ -35,7 +38,7 @@ export function CompletedTaskLane({ goal, agentId, seed, enabled, onSelect }: {
   }, []);
   const needsPage = cursor === undefined || viewport.top + viewport.height >= rows.length * rowHeight - rowHeight * 2;
   useEffect(() => {
-    if (!enabled || !needsPage || cursor === null || error || request.current) return;
+    if (!enabled || !visible || !needsPage || cursor === null || error || request.current) return;
     const controller = new AbortController();
     request.current = controller;
     setBusy(true);
@@ -54,14 +57,19 @@ export function CompletedTaskLane({ goal, agentId, seed, enabled, onSelect }: {
     }).catch(() => { if (!controller.signal.aborted) setError(true); }).finally(() => {
       if (!controller.signal.aborted) { request.current = null; setBusy(false); }
     });
-  }, [enabled, needsPage, cursor, error, retry, goal.goalId, agentId, busy]);
+  }, [enabled, visible, needsPage, cursor, error, retry, goal.goalId, agentId, busy]);
+  useEffect(() => {
+    if (scroll.current) scroll.current.scrollTop = 0;
+    setViewport({ top: 0, height: scroll.current?.clientHeight ?? 600 });
+    setFocused(null);
+  }, [listView]);
   const first = Math.max(0, Math.floor(viewport.top / rowHeight) - 3);
   const last = Math.min(rows.length, Math.ceil((viewport.top + viewport.height) / rowHeight) + 3);
   const indices = Array.from({ length: Math.max(0, last - first) }, (_, index) => first + index);
   if (focused !== null && focused < rows.length && !indices.includes(focused)) indices.push(focused);
-  return <section className="personal-object-list personal-task-lane" data-testid="completed-task-lane">
-    <header><strong><i aria-hidden="true" className="personal-kanban-dot tone-done" />{t("tasks.completed")}</strong><span>{total}</span></header>
-    <div aria-label={t("tasks.completed")} className="personal-task-lane-scroll" ref={scroll} role="region" tabIndex={0} onScroll={(event) => setViewport({ top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight })}>
+  return <section className={`personal-object-list personal-task-lane${listView ? " personal-completed-list" : ""}`} data-testid="completed-task-lane">
+    <header>{listView ? <button type="button" aria-controls={historyId} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span aria-hidden="true">{expanded ? "▾" : "▸"}</span> {t("tasks.completed")}</button> : <strong><i aria-hidden="true" className="personal-kanban-dot tone-done" />{t("tasks.completed")}</strong>}<span>{total}</span></header>
+    <div id={historyId} hidden={!visible} aria-label={t("tasks.completed")} className="personal-task-lane-scroll" ref={scroll} role="region" tabIndex={0} onScroll={(event) => setViewport({ top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight })}>
       <div className="personal-completed-window" style={{ height: rows.length * rowHeight }}>
         {indices.map((index) => {
           const todo = rows[index]!;

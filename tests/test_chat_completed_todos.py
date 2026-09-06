@@ -1,11 +1,14 @@
 import json
 import threading
 from urllib.request import urlopen
+from urllib.request import Request
+from urllib.error import HTTPError
 
 import pytest
 
 from loopx.chat_completed_todos import CompletedTodoPages
 from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
+from loopx.control_plane.todos.contract import encode_metadata_value
 
 
 def test_snapshot_pagination_is_bounded_and_stable():
@@ -57,8 +60,10 @@ def test_snapshot_byte_budget_is_enforced():
 @pytest.mark.parametrize("count", [85, 4087])
 def test_http_history_reads_real_markdown_without_writes(tmp_path, count):
     state = tmp_path / "active.md"
+    text = (f"Inspect {tmp_path}/results.txt " + "complete task description " * 25)[:420]
+    evidence = f"Verified output at {tmp_path}/results.txt"
     state.write_text("# Synthetic Goal\n\n## Agent Todo\n" + "\n".join(
-        f"- [x] Completed {index} <!-- todo:id=todo_history_{index} -->" for index in range(count)
+        f"- [x] {text}{index}\n  <!-- loopx:todo todo_id=todo_history_{index} status=done task_class=advancement_task note={encode_metadata_value(evidence)} -->" for index in range(count)
     ) + "\n\n## User Todo\n", encoding="utf-8")
     registry = tmp_path / "registry.json"
     registry.write_text(json.dumps({"runtime_root": str(tmp_path / "runtime"), "goals": [{"id": "history-goal", "repo": str(tmp_path), "state_file": "active.md"}]}))
@@ -76,7 +81,12 @@ def test_http_history_reads_real_markdown_without_writes(tmp_path, count):
         assert page["total"] == count
         assert len(page["items"]) == 40
         assert page["next_cursor"]
-        assert str(tmp_path) not in json.dumps(page)
+        assert page["items"][0]["text"].startswith(text)
+        assert len(page["items"][0]["text"]) > 400
+        assert page["items"][0]["evidence"] == evidence
+        with pytest.raises(HTTPError) as denied:
+            urlopen(Request(url, headers={"Origin": "https://unrelated.example"}))
+        assert denied.value.code == 403
         assert state.read_bytes() == before
     finally:
         server.shutdown()
