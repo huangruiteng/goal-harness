@@ -153,16 +153,14 @@ class CPAOperator(ObservationMixin):
         return key
 
     def ark_fallback_models(self) -> list[str]:
-        aliases = [slug for (slug, route) in ROUTES.items() if route["tail"]] + list(
-            MODEL_FAMILIES
-        )
         lines = []
-        for alias in aliases:
-            route = ROUTES.get(alias, ROUTES.get(f"auto/{alias}"))
+        for slug, route in ROUTES.items():
+            if not route["tail"]:
+                continue
             lines.extend(
                 [
                     f"      - name: {yaml_quote(self.ARK_MODEL)}",
-                    f"        alias: {yaml_quote(alias)}",
+                    f"        alias: {yaml_quote(slug)}",
                     f"        display-name: {yaml_quote(route['display_name'])}",
                     "        force-mapping: true",
                     "        is-compat: true",
@@ -491,6 +489,50 @@ class CPAOperator(ObservationMixin):
                 "CPA management endpoint returned an invalid auth-file list"
             )
         return [item for item in files if isinstance(item, dict)]
+
+    def reset_cooldown(self, slot: str) -> dict[str, Any]:
+        """Permit a fresh attempt after an externally confirmed early quota recovery.
+
+        This clears only CPA routing memory; it does not replenish upstream quota
+        or declare the account healthy. The next request supplies fresh evidence.
+        """
+        if slot not in SLOTS:
+            raise ValueError("unknown OAuth slot")
+        name = self.load_slots().get(slot)
+        matches = [
+            entry
+            for entry in self.fetch_management_auth_files()
+            if name is not None and entry.get("name") == name
+        ]
+        if len(matches) != 1:
+            raise RuntimeError("expected exactly one registered slot credential")
+        entry = matches[0]
+        if entry.get("disabled"):
+            raise RuntimeError("refusing to recover an explicitly disabled slot")
+        auth_index = entry.get("auth_index")
+        if not isinstance(auth_index, str) or not auth_index.strip():
+            raise RuntimeError("registered slot has no management auth index")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.PORT}/v0/management/reset-quota",
+            data=json.dumps({"auth_index": auth_index}).encode(),
+            headers={
+                "Authorization": "Bearer " + self.management_key(),
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = json.load(response)
+        except (urllib.error.URLError, TimeoutError) as error:
+            raise RuntimeError("CPA cooldown reset failed") from error
+        if not isinstance(payload, dict) or payload.get("status") != "ok":
+            raise RuntimeError("CPA cooldown reset was not acknowledged")
+        return {
+            "profile_id": f"codex-{slot}",
+            "cooldown_cleared": True,
+            "live_verification_required": True,
+        }
 
     def fetch_management_plugins(self, port: int | None = None) -> list[dict[str, Any]]:
         if port is None:

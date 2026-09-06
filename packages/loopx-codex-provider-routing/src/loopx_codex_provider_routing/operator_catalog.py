@@ -14,7 +14,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .selectors import FAST_MODELS, MODEL_FAMILIES, ROUTES, SLOTS
+from .selectors import FAST_MODELS, MODEL_FAMILIES, ROUTES, SLOTS, VISIBLE_SELECTORS
 
 SELECTORS = {slug: route["display_name"] for (slug, route) in ROUTES.items()}
 SELECTORS.update(
@@ -141,7 +141,7 @@ class AppCatalog:
             route = ROUTES.get(slug)
             if route:
                 source = deepcopy(sources[route["model"]])
-                if slug.removeprefix("fast/").startswith("auto/"):
+                if slug.removeprefix("fast/").startswith(("auto/", "auto-with-ds/")):
                     source["default_reasoning_level"] = "high"
                     source["supported_reasoning_levels"] = [
                         level
@@ -153,6 +153,10 @@ class AppCatalog:
                     slug if slug.endswith("260813") else "deepseek-v4-flash-ga-260731"
                 )
             entry = make_entry(source, slug, label, len(entries) + 1)
+            entry["visibility"] = "list" if slug in VISIBLE_SELECTORS else "hide"
+            if route and route["tail"]:
+                entry["additional_speed_tiers"] = []
+                entry["service_tiers"] = []
             entry["default_service_tier"] = "fast" if slug in FAST_SELECTORS else None
             entries.append(entry)
         return {"models": entries}
@@ -195,14 +199,8 @@ class AppCatalog:
             ordered = [member for (member, _) in members] + list(tail)
             rows[route] = {
                 "entrypoint": "affinity_then_first"
-                if route
-                in {
-                    "auto/gpt-5.6-sol",
-                    "fast/auto/gpt-5.6-sol",
-                    "auto/gpt-6-astra",
-                    "fast/auto/gpt-6-astra",
-                    "gpt-5.6-luna",
-                }
+                if route.removeprefix("fast/").startswith(("auto/", "auto-with-ds/"))
+                or route == "gpt-5.6-luna"
                 else ordered[0],
                 "ordered_candidates": ordered,
                 "fallback_tail": list(tail),
@@ -225,7 +223,7 @@ class AppCatalog:
                 f'model_catalog_json = "{self.OUTPUT}"',
                 "",
                 "[model_providers.cpa]",
-                'name = "CPA · Codex A → B → C → Ark"',
+                'name = "CPA · Auto"',
                 f'base_url = "http://127.0.0.1:{self.PORT}/v1"',
                 'wire_api = "responses"',
                 "requires_openai_auth = false",
@@ -285,7 +283,7 @@ class AppCatalog:
                         {
                             "method": "model/list",
                             "id": 2,
-                            "params": {"limit": 50, "includeHidden": False},
+                            "params": {"limit": 50, "includeHidden": True},
                         }
                     )
                     + "\n"
@@ -296,7 +294,7 @@ class AppCatalog:
                     (3, "auto/gpt-5.6-sol"),
                     (4, "fast/auto/gpt-5.6-sol"),
                     (5, "auto/gpt-6-astra"),
-                    (6, "fast/codex-c/gpt-6-astra"),
+                    (6, "auto-with-ds/gpt-6-astra"),
                 ):
                     process.stdin.write(
                         json.dumps(
@@ -325,6 +323,13 @@ class AppCatalog:
         if "error" in response:
             raise RuntimeError("app-server model/list returned an error")
         data = response.get("result", {}).get("data", [])
+        unexpected_visible = sorted(
+            str(row.get("id"))
+            for row in data
+            if isinstance(row, dict)
+            and not row.get("hidden")
+            and row.get("id") not in SELECTORS
+        )
         rows = {
             str(row.get("id")): {
                 "displayName": row.get("displayName"),
@@ -343,7 +348,11 @@ class AppCatalog:
             if isinstance(row, dict) and row.get("id") in SELECTORS
         }
         missing = sorted(set(SELECTORS) - set(rows))
-        hidden = sorted(key for (key, row) in rows.items() if row.get("hidden"))
+        hidden = sorted(
+            key
+            for key, row in rows.items()
+            if bool(row.get("hidden")) != (key not in VISIBLE_SELECTORS)
+        )
         wrong_display_names = sorted(
             key
             for (key, display_name) in SELECTORS.items()
@@ -383,8 +392,12 @@ class AppCatalog:
             "catalog_path": str(self.OUTPUT),
             "expected_selectors": sorted(SELECTORS),
             "projected_selectors": rows,
+            "visible_selectors": sorted(
+                key for key, row in rows.items() if not row.get("hidden")
+            ),
             "route_traversal": route_traversal,
             "missing": missing,
+            "unexpected_visible": unexpected_visible,
             "hidden": hidden,
             "wrong_display_names": wrong_display_names,
             "wrong_default_service_tiers": wrong_default_service_tiers,
@@ -396,6 +409,7 @@ class AppCatalog:
             "passed": not any(
                 (
                     missing,
+                    unexpected_visible,
                     hidden,
                     wrong_display_names,
                     wrong_default_service_tiers,

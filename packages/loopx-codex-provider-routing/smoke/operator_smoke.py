@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from loopx_codex_provider_routing.operator import rollback, run, snapshot
 from loopx_codex_provider_routing.operator_catalog import AppCatalog
@@ -19,6 +20,7 @@ from loopx_codex_provider_routing.operator_runtime import (
 from loopx_codex_provider_routing.operator_settings import OperatorSettings
 from loopx_codex_provider_routing.selectors import (
     ROUTES,
+    VISIBLE_SELECTORS,
     aliases_for_slot,
     compiled_routes,
 )
@@ -135,12 +137,73 @@ class OperatorTests(unittest.TestCase):
                     )
                     self.assertEqual(actual, order)
                     self.assertTrue(all(e["name"] == model for e in entries.values()))
-                    self.assertEqual(ROUTES[slug]["tail"], [] if fast else ["ark-text"])
+                    self.assertEqual(ROUTES[slug]["tail"], [])
         self.assertEqual(ROUTES["gpt-5.6-luna"]["tail"], [])
         compiled = compiled_routes()
         for row in compiled["selector_rows"]:
-            if row["slug"].startswith("fast/"):
-                self.assertNotIn("ark-text", row["candidates"])
+            expected_tail = (
+                ["ark-text"] if row["slug"].startswith("auto-with-ds/") else []
+            )
+            self.assertEqual(
+                [p for p in row["candidates"] if p == "ark-text"], expected_tail
+            )
+
+    def test_runtime_never_maps_subscription_selectors_to_ark(self):
+        config = self.runtime.runtime_config("fixture-key", management_secret="fixture")
+        compatibility = config.split("openai-compatibility:", 1)[1]
+        self.assertIn('alias: "ark/deepseek-v4-flash"', compatibility)
+        native_only = [slug for slug, route in ROUTES.items() if not route["tail"]]
+        for alias in (*native_only, "gpt-5.6-sol", "gpt-6-astra"):
+            self.assertNotIn(f'alias: "{alias}"', compatibility)
+        self.assertIn("disable-cooling: false", config)
+
+    def test_cooldown_reset_is_scoped_and_not_a_health_claim(self):
+        self.seed()
+        entry = {"name": "b.json", "auth_index": "fixture-index", "disabled": False}
+        with (
+            patch.object(
+                self.runtime, "fetch_management_auth_files", return_value=[entry]
+            ),
+            patch("urllib.request.urlopen") as urlopen,
+        ):
+            urlopen.return_value.__enter__.return_value = io.StringIO('{"status":"ok"}')
+            result = self.runtime.reset_cooldown("b")
+            request = urlopen.call_args.args[0]
+            self.assertTrue(request.full_url.endswith("/v0/management/reset-quota"))
+            self.assertEqual(json.loads(request.data), {"auth_index": "fixture-index"})
+            self.assertEqual(result["profile_id"], "codex-b")
+            self.assertTrue(result["live_verification_required"])
+            self.assertNotIn("fixture-index", json.dumps(result))
+
+    def test_cooldown_reset_rejects_disabled_missing_and_ambiguous_slots(self):
+        self.seed()
+        for entries in (
+            [],
+            [{"name": "b.json", "disabled": True, "auth_index": "fixture"}],
+            [{"name": "b.json"}],
+            [{"name": "b.json"}, {"name": "b.json"}],
+        ):
+            with (
+                patch.object(
+                    self.runtime, "fetch_management_auth_files", return_value=entries
+                ),
+                patch("urllib.request.urlopen") as urlopen,
+            ):
+                with self.assertRaises(RuntimeError):
+                    self.runtime.reset_cooldown("b")
+                urlopen.assert_not_called()
+
+    def test_cooldown_reset_requires_slot_and_explicit_execution(self):
+        with self.assertRaises(ValueError):
+            run(["--config", str(self.config), "reset-cooldown"])
+        with (
+            patch.object(CPAOperator, "reset_cooldown") as reset,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                run(["--config", str(self.config), "reset-cooldown", "--slot", "b"]), 0
+            )
+            reset.assert_not_called()
 
     def test_reconcile_preserves_tokens_and_is_idempotent(self):
         self.seed()
@@ -215,7 +278,15 @@ class OperatorTests(unittest.TestCase):
             )
         catalog = AppCatalog(self.runtime)
         rows = {m["slug"]: m for m in catalog.generate_catalog()["models"]}
-        self.assertEqual(len(rows), 21)
+        self.assertEqual(len(rows), 23)
+        self.assertEqual(
+            {slug for slug, row in rows.items() if row["visibility"] == "list"},
+            VISIBLE_SELECTORS,
+        )
+        self.assertEqual(len(VISIBLE_SELECTORS), 4)
+        for slug in VISIBLE_SELECTORS:
+            if slug.startswith("auto-with-ds/"):
+                self.assertEqual(rows[slug]["service_tiers"], [])
         for slug, row in rows.items():
             self.assertEqual(
                 row["default_service_tier"],
@@ -257,8 +328,11 @@ class OperatorTests(unittest.TestCase):
             "deepseek-v4-flash-ga-260731",
             "deepseek-v4-pro-ga-260813",
         }
-        observation["visible_models"] = sorted(native | ark)
-        observation["hidden_models"] = ["gpt-5.6-sol", "gpt-6-astra"]
+        observation["visible_models"] = sorted(VISIBLE_SELECTORS)
+        observation["hidden_models"] = sorted((native | ark) - VISIBLE_SELECTORS) + [
+            "gpt-5.6-sol",
+            "gpt-6-astra",
+        ]
         observation["fast_models"] = sorted(
             slug for slug in native if slug.startswith("fast/")
         )
@@ -274,7 +348,7 @@ class OperatorTests(unittest.TestCase):
         for slug, route in ROUTES.items():
             observation["route_traversal"][slug] = {
                 "entrypoint": "affinity_then_first"
-                if slug.removeprefix("fast/").startswith("auto/")
+                if slug.removeprefix("fast/").startswith(("auto/", "auto-with-ds/"))
                 or slug == "gpt-5.6-luna"
                 else f"codex-{route['order'][0]}",
                 "ordered_candidates": [f"codex-{slot}" for slot in route["order"]]
@@ -283,6 +357,9 @@ class OperatorTests(unittest.TestCase):
                 "max_cycles": 1,
             }
         self.assertTrue(qualify_snapshot(observation)["qualified"])
+        visible_regression = deepcopy(observation)
+        visible_regression["visible_models"].append("codex-b/gpt-6-astra")
+        self.assertFalse(qualify_snapshot(visible_regression)["qualified"])
         broken = deepcopy(observation)
         broken["route_traversal"]["fast/codex-c/gpt-6-astra"][
             "ordered_candidates"
@@ -329,11 +406,12 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(data["refresh_token"], "fixture-refresh")
         self.assertNotIn("c", self.runtime.load_slots())
 
-    def test_config_has_all_normal_fallbacks_but_no_fast_or_luna(self):
+    def test_config_fallback_requires_explicit_four_route_opt_in(self):
         config = self.runtime.runtime_config(
             "fixture-only", management_secret="fixture-management"
         )
-        self.assertIn('alias: "codex-c/gpt-6-astra"', config)
+        self.assertIn('alias: "auto-with-ds/gpt-6-astra"', config)
+        self.assertNotIn('alias: "codex-c/gpt-6-astra"', config)
         self.assertNotIn('alias: "fast/', config)
         self.assertNotIn('alias: "gpt-5.6-luna"', config)
         self.assertIn('host: "127.0.0.1"', config)
