@@ -503,3 +503,43 @@ for (const expiresAt of [
     assert.deepEqual(await persistedLease(root), existing);
   });
 }
+
+for (const { expiresAt, active } of [
+  { expiresAt: "2026-08-27T02:59:59.123456", active: false },
+  { expiresAt: "2026-08-27T02:59:59.123456+00:00", active: false },
+  { expiresAt: "2026-08-27T03:00:00.123456", active: true },
+  { expiresAt: "2026-08-27T03:00:00.123456Z", active: true },
+  { expiresAt: "2026-08-27T03:00:01", active: true },
+  { expiresAt: "2026-08-27T03:00:01.1Z", active: true },
+  { expiresAt: "2026-08-27T03:00:01.12+00:00", active: true },
+  { expiresAt: "2026-08-27T03:00:01.123", active: true },
+]) {
+  test(`valid ${active ? "active" : "expired"} lease timestamp '${expiresAt}' remains compatible`, async (t) => {
+    const root = await workspace(t);
+    await mkdir(join(root, "runtime", "goals", "goal-a", "task-leases"), { recursive: true });
+    const existing = {
+      schema_version: "task_lease_v0",
+      goal_id: "goal-a",
+      todo_id: "todo_target",
+      owner: "agent-b",
+      idempotency_key: "existing-owner",
+      write_scopes: ["loopx/**"],
+      acquire_ttl_seconds: 120,
+      version: 1,
+      lease_epoch: 1,
+      status: "active",
+      expires_at: expiresAt,
+    };
+    await writeFile(leasePath(root), JSON.stringify(existing), "utf8");
+
+    const result = await executeTaskLeaseAcquire(await request(root), { now: () => FIXED_NOW });
+
+    if (active) {
+      assert.equal(result.error_code, "todo_lease_conflict");
+      assert.deepEqual(await persistedLease(root), existing);
+    } else {
+      assert.equal(result.ok, true);
+      assert.equal((await persistedLease(root)).owner, "agent-a");
+    }
+  });
+}

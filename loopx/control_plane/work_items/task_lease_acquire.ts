@@ -573,7 +573,7 @@ export function leaseEpoch(lease: LeaseRecord | null): number {
 }
 
 export function parseLeaseTimestamp(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|z|[+-]\d{2}(?::?\d{2})?)?$/u.exec(
+  const match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?(Z|z|[+-]\d{2}(?::?\d{2})?)?$/u.exec(
     value.trim(),
   );
   if (match === null) return null;
@@ -585,7 +585,7 @@ export function parseLeaseTimestamp(value: string): Date | null {
     hourText,
     minuteText,
     secondText ?? "0",
-    (fraction ?? "").padEnd(3, "0") || "0",
+    (fraction ?? "").slice(0, 3).padEnd(3, "0") || "0",
   ].map(Number);
   const calendar = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
   if (
@@ -595,6 +595,7 @@ export function parseLeaseTimestamp(value: string): Date | null {
     calendar.getUTCMilliseconds() !== millisecond
   ) return null;
   let text = value.trim().replace(" ", "T").replace(/z$/u, "Z");
+  if (fraction !== undefined) text = text.replace(`.${fraction}`, `.${fraction.slice(0, 3)}`);
   if (timezone === undefined) text += "Z";
   else text = text.replace(/([+-]\d{2})$/u, "$1:00");
   const parsed = new Date(text);
