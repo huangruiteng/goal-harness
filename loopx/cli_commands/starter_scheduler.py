@@ -45,6 +45,20 @@ PrintPayload = Callable[
 ]
 
 
+def _capability_registry_or_none():
+    """Build the capability registry lazily; None keeps token-only matching.
+
+    Lives outside ``control_plane/`` so the ratchet's outward-dependency rule
+    stays satisfied (cli layer may import loopx.capabilities).
+    """
+    from loopx.capabilities.catalog import build_capability_registry
+
+    try:
+        return build_capability_registry()
+    except Exception:
+        return None
+
+
 def _add_scheduler_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--project", default=".", help="Project directory to start from.")
     parser.add_argument("--goal-id", help="Goal id. Defaults to <project-name>-goal.")
@@ -518,6 +532,7 @@ def handle_codex_cli_local_scheduler_dispatch_command(
         reconcile=not bool(getattr(args, "no_reconcile", False)),
         worker_capabilities=None,
         lease_seconds=getattr(args, "lease_seconds", None),
+        registry=_capability_registry_or_none(),
         acceptance_criteria=acceptance_criteria,
         evidence=evidence,
         acceptance_base_dir=Path(args.project).expanduser().resolve()

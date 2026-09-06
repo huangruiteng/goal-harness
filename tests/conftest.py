@@ -99,3 +99,15 @@ def pytest_addoption(parser) -> None:
         dest="loopx_smoke_timeout",
         help="Per-check timeout in seconds for each subprocess smoke.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Capability-registry factory wiring (mirrors loopx.cli startup registration).
+# Claim-time fail-closed semantics consult this registry; tests that exercise
+# claim paths run in a process that never imported loopx.cli, so register the
+# factory here to keep parity with production behavior.
+# ---------------------------------------------------------------------------
+from loopx.capabilities.catalog import build_capability_registry as _build_cap_registry
+from loopx.control_plane.capabilities_bridge import set_capability_registry_factory
+
+set_capability_registry_factory(_build_cap_registry)

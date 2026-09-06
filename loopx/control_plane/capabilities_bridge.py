@@ -209,6 +209,38 @@ def eligible_bridged(
 
 
 # ---------------------------------------------------------------------------
+# P1.5: process-level capability-registry factory hook
+# ---------------------------------------------------------------------------
+
+# The control-plane dependency ratchet forbids imports of ``loopx.capabilities``
+# from inside ``control_plane/``. Claim-time fail-closed semantics still need a
+# registry, so the outer layer (cli) registers a zero-arg factory here at
+# startup; ``capability_registry_or_none()`` is the sanctioned accessor.
+_capability_registry_factory: Callable[[], Any] | None = None
+
+
+def set_capability_registry_factory(factory: Callable[[], Any] | None) -> None:
+    """Register (or clear) the process-wide capability-registry factory."""
+    global _capability_registry_factory
+    _capability_registry_factory = factory
+
+
+def capability_registry_or_none() -> Any:
+    """Invoke the registered factory; None keeps token-only matching.
+
+    Any factory error degrades to None (token-only) rather than raising out of
+    claim paths — the same graceful-degradation contract as the rest of P1.
+    """
+    factory = _capability_registry_factory
+    if factory is None:
+        return None
+    try:
+        return factory()
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # P2: registry-driven command registration
 # ---------------------------------------------------------------------------
 
@@ -499,6 +531,8 @@ __all__ = [
     "eligible_bridged",
     "discover_cli_registrars",
     "register_all_capability_commands",
+    "set_capability_registry_factory",
+    "capability_registry_or_none",
     "CapabilityEventHub",
     "CapabilityHookRegistry",
 ]

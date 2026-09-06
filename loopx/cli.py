@@ -8,6 +8,9 @@ from pathlib import Path
 from . import __version__
 from .control_plane.capabilities_bridge import register_all_capability_commands
 from .capabilities.catalog import build_capability_registry
+from .control_plane.capabilities_bridge import set_capability_registry_factory
+
+set_capability_registry_factory(build_capability_registry)
 # Capability-pack command *registration* is registry-driven (see
 # ``register_all_capability_commands`` below), so only the pack-specific command
 # *dispatchers* are imported statically (their signatures cannot be generalized).

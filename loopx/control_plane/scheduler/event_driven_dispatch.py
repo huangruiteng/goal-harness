@@ -215,6 +215,7 @@ def claim_next_task(
     use_event_driven: bool | None = None,
     capabilities: Sequence[str] | None = None,
     lease_seconds: int | float | None = None,
+    registry: Any = None,
 ) -> dict[str, Any] | None:
     """Claim the oldest pending task for a worker (Worker Pool acquire).
 
@@ -236,15 +237,17 @@ def claim_next_task(
     if not path.exists():
         return None
     if capabilities is not None or lease_seconds is not None:
+        from ..capabilities_bridge import capability_registry_or_none
         from .task_lifecycle import claim_next_eligible_task
-        from ...capabilities.catalog import build_capability_registry
 
+        if registry is None:
+            registry = capability_registry_or_none()
         claimed = claim_next_eligible_task(
             path,
             worker_id=worker_id,
             capabilities=capabilities,
             lease_seconds=lease_seconds,
-            registry=build_capability_registry(),
+            registry=registry,
         )
         return claimed
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -366,6 +369,7 @@ def build_event_driven_dispatch(
     reconcile: bool = False,
     worker_capabilities: Sequence[str] | None = None,
     lease_seconds: int | float | None = None,
+    registry: Any = None,
     acceptance_criteria: Mapping[str, Any] | None = None,
     evidence: Mapping[str, Any] | None = None,
     acceptance_base_dir: Path | None = None,
@@ -506,6 +510,7 @@ def build_event_driven_dispatch(
             use_event_driven=use_event_driven,
             capabilities=worker_capabilities,
             lease_seconds=lease_seconds,
+            registry=registry,
         )
         if claimed is not None:
             if event_log_path is not None:
