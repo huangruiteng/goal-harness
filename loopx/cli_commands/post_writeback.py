@@ -223,6 +223,9 @@ def dispatch_committed_cli_post_writeback_hooks(
             committed_at=committed_at,
             error_code="dispatch_failed",
         )
+    # The composition receipt tracks projection composition only: it settles
+    # once the projection composed and the hook lifecycle returned, while any
+    # hook-level failure keeps its own per-hook failure trail in `result`.
     _settle_composition_retry_quietly(
         journal_path,
         goal_id=goal_id,

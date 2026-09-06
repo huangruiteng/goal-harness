@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from loopx.cli_commands.post_writeback import (
     dispatch_committed_cli_post_writeback_hooks,
 )
@@ -402,3 +404,87 @@ def test_pending_receipts_skip_foreign_and_malformed_rows(
     assert [receipt["receipt_id"] for receipt in pending] == [
         pending_receipt["receipt_id"]
     ]
+
+
+def test_journal_unavailable_degrades_to_identity_without_receipt_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken journal must not erase the concrete failure identity either."""
+
+    import loopx.cli_commands.post_writeback as post_writeback_module
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+
+    def failing_builder(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("transient projection failure")
+
+    def broken_append(*_args: object, **_kwargs: object) -> None:
+        raise OSError("journal unavailable")
+
+    monkeypatch.setattr(
+        post_writeback_module, "append_composition_retry_receipt", broken_append
+    )
+    result = _dispatch(
+        registry_path,
+        hooks=(_hook(),),
+        projection_builder=failing_builder,
+    )
+    assert result["registered_count"] == 1
+    assert result["intent_count"] == 0
+    assert result["primary_writeback_preserved"] is True
+    failure = result["failures"][0]
+    assert failure["hook_id"] == "periodic_report.stage_completion"
+    assert failure["capability_id"] == "periodic-report"
+    assert failure["error_code"] == "source_projection_failed"
+    assert "durable_receipt_ref" not in failure
+    assert not composition_retry_receipt_log_path(
+        runtime_root, "goal-1"
+    ).exists()
+
+
+def test_producer_failure_settles_composition_receipt_with_hook_level_trail(
+    tmp_path: Path,
+) -> None:
+    """Composition settles on a composed projection; hook failures keep their own trail."""
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+
+    def failing_builder(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("transient projection failure")
+
+    first = _dispatch(
+        registry_path,
+        hooks=(_hook(),),
+        projection_builder=failing_builder,
+    )
+    assert first["intent_count"] == 0
+    pending = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert len(pending) == 1
+
+    def broken_producer(_value: object) -> dict[str, object]:
+        raise RuntimeError("hook producer collapsed")
+
+    def hook_with_broken_producer() -> PostWritebackHookRegistration:
+        registration = _hook()
+        object.__setattr__(registration, "producer", broken_producer)
+        return registration
+
+    second = _dispatch(
+        registry_path,
+        hooks=(hook_with_broken_producer(),),
+        projection_builder=lambda **_kwargs: _stage_projection(),
+    )
+    hook_failure = next(
+        (
+            item
+            for item in second.get("failures", [])
+            if item.get("hook_id") == "periodic_report.stage_completion"
+        ),
+        None,
+    )
+    assert hook_failure is not None
+    rows = _journal_rows(runtime_root)
+    assert any(row.get("status") == "settled" for row in rows), (
+        "a composed projection must settle the composition receipt even when a "
+        "hook-level producer fails: hook failures carry their own durable trail"
+    )
