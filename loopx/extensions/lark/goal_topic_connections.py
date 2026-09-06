@@ -43,6 +43,7 @@ from .goal_channel_contracts import (
     operation_packet,
     provider_idempotency_key,
     read_goal_channel_binding,
+    reusable_goal_topic_root,
     save_goal_connection,
     serialize_goal_binding_mutation,
     semantic_key,
@@ -558,38 +559,13 @@ def connect_lark_goal_topic(
 
     objective = goal_objective(goal)
     topic_text = f"LoopX Goal Topic: {objective}\nGoal ID: {goal_id}"
-    existing_connection = None
-    try:
-        existing_connection = binding_for_goal(
-            read_goal_channel_binding(binding_path),
-            goal_id,
-            provider_target=matched[1] if matched is not None else None,
-            connection_id=connection_id,
-        )
-    except ValueError:
-        existing_connection = None
-    reusable_root = ""
-    if existing_connection and existing_connection.get("enabled") is True:
-        prior_topic = (
-            existing_connection.get("topic")
-            if isinstance(existing_connection.get("topic"), Mapping)
-            else {}
-        )
-        prior_channel = (
-            existing_connection.get("channel")
-            if isinstance(existing_connection.get("channel"), Mapping)
-            else {}
-        )
-        candidate_root = str(
-            prior_topic.get("root_message_id")
-            or prior_channel.get("pinned_message_id")
-            or ""
-        )
-        if (
-            MESSAGE_ID_PATTERN.fullmatch(candidate_root)
-            and str(prior_channel.get("chat_id") or "") == safe_chat_id
-        ):
-            reusable_root = candidate_root
+    reusable_root = reusable_goal_topic_root(
+        read_goal_channel_binding(binding_path),
+        goal_id,
+        connection_id=connection_id,
+        provider_target=matched[1] if matched is not None else None,
+        chat_id=safe_chat_id,
+    )
     key = provider_idempotency_key(
         semantic_key(
             goal_id,

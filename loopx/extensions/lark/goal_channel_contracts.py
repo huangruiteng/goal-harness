@@ -718,3 +718,52 @@ def gate_message(
     if kanban_url:
         lines.extend(["", f"Kanban: {kanban_url}"])
     return "\n".join(lines), question
+
+
+def reusable_goal_topic_root(
+    payload: Mapping[str, Any],
+    goal_id: str,
+    *,
+    connection_id: str,
+    provider_target: Mapping[str, Any] | None,
+    chat_id: str,
+) -> str:
+    """Return the established topic root when reconnect may adopt it.
+
+    A reconnect may skip sending a fresh Goal Topic only when the stored
+    connection for this ``connection_id`` is enabled, still resolves through
+    ``provider_target`` (target_ref/provider/chat all validated by the typed
+    reader), and its stored root is a well-formed message id for this chat.
+    Anything else returns "" so the caller sends a new topic.
+    """
+
+    from .goal_channel_transport import MESSAGE_ID_PATTERN
+
+    try:
+        existing = binding_for_goal(
+            payload,
+            goal_id,
+            provider_target=provider_target,
+            connection_id=connection_id,
+        )
+    except ValueError:
+        return ""
+    if not existing or existing.get("enabled") is not True:
+        return ""
+    prior_topic = (
+        existing.get("topic") if isinstance(existing.get("topic"), Mapping) else {}
+    )
+    prior_channel = (
+        existing.get("channel") if isinstance(existing.get("channel"), Mapping) else {}
+    )
+    candidate_root = str(
+        prior_topic.get("root_message_id")
+        or prior_channel.get("pinned_message_id")
+        or ""
+    )
+    if (
+        MESSAGE_ID_PATTERN.fullmatch(candidate_root)
+        and str(prior_channel.get("chat_id") or "") == chat_id
+    ):
+        return candidate_root
+    return ""
