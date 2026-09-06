@@ -293,9 +293,14 @@ loopx periodic-report request \
 One complete active source adapter is selected automatically. If several
 provider adapters are active, a new request must include
 `--source-adapter-id <adapter-id>`. Replay of an already journaled request does
-not require the selector. Settlement reads the owner `adapter_id` from that
-journal and resolves only the matching discovered settler; discovery order
-cannot change ownership, and another provider is never used as a fallback.
+not require the selector when exactly one journal entry matches the source
+reference; a source reference already owned by multiple providers requires an
+explicit selector. The adapter id participates in request identity together
+with Goal, Agent, and the provider-local source reference, so equal opaque ids
+from different providers remain independent. Settlement reads the owner
+`adapter_id` from that journal and resolves only the matching discovered
+settler; discovery order cannot change ownership, and another provider is
+never used as a fallback.
 
 This action is the report-intent decision. Neither LoopX Core nor the provider
 adapter classifies message strings, searches for report keywords, or scans the
@@ -312,8 +317,8 @@ that typed journal and existing post-writeback intents only; it never calls a
 provider reader. The request becomes an authorized `manual` trigger and then
 reuses the existing editorial, generation bundle, Workspace projection,
 publication candidate, and delivery-Todo pipeline. Repeating the same
-Goal/Agent/source action returns the existing request and cannot create another
-journal entry.
+Goal/Agent/adapter/source action returns the existing request and cannot create
+another journal entry.
 
 Source binding and settlement ports are dynamically discovered from enabled,
 doctor-ready extension manifests through a `capability_action`

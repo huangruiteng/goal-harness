@@ -76,6 +76,13 @@ adapter identity, and later settlement resolves only that owner regardless of
 extension discovery order. A temporarily unavailable owner leaves the request
 pending; LoopX never falls through to another provider.
 
+The adapter id is part of the request idempotency namespace together with the
+Goal, Agent, and provider-local source reference. Two providers may therefore
+use the same opaque source reference without collapsing distinct requests.
+Replay without a selector remains valid when exactly one matching journal entry
+exists; if the same source reference is already owned by multiple providers,
+the Agent must select the intended adapter explicitly.
+
 There is no keyword or regular-expression classifier. The provider adapter
 binds only the exact source selected by the Agent and checks authorship,
 addressing, Goal/Agent connection, target, and inbox identity. A manifest-

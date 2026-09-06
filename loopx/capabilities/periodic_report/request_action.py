@@ -107,9 +107,11 @@ def _source_ref(value: object) -> str:
     return ref
 
 
-def _request_id(*, goal_id: str, agent_id: str, source_ref: str) -> str:
+def _request_id(
+    *, goal_id: str, agent_id: str, source_adapter_id: str, source_ref: str
+) -> str:
     digest = hashlib.sha256(
-        f"{goal_id}\0{agent_id}\0{source_ref}".encode("utf-8")
+        f"{goal_id}\0{agent_id}\0{source_adapter_id}\0{source_ref}".encode("utf-8")
     ).hexdigest()
     return f"prq_{digest}"
 
@@ -278,6 +280,50 @@ def _load_request_entry(path: Path) -> dict[str, Any] | None:
     return value
 
 
+def _matching_request_entries(
+    *, runtime_root: Path, goal_id: str, agent_id: str, source_ref: str
+) -> list[dict[str, Any]]:
+    directory = _request_dir(runtime_root, goal_id)
+    if not directory.is_dir():
+        return []
+    matches: list[dict[str, Any]] = []
+    for path in sorted(directory.iterdir()):
+        if not path.is_file() or not _REQUEST_FILE_RE.fullmatch(path.name):
+            continue
+        entry = _load_request_entry(path)
+        source_receipt = entry.get("source_receipt") if entry is not None else None
+        if (
+            entry is not None
+            and entry.get("goal_id") == goal_id
+            and entry.get("agent_id") == agent_id
+            and isinstance(source_receipt, Mapping)
+            and source_receipt.get("source_ref") == source_ref
+        ):
+            matches.append(entry)
+    return matches
+
+
+def _validate_request_replay(
+    entry: Mapping[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str,
+    source_adapter_id: str,
+    source_ref: str,
+    request_id: str,
+) -> None:
+    source_receipt = entry.get("source_receipt")
+    if (
+        entry.get("request_id") != request_id
+        or entry.get("goal_id") != goal_id
+        or entry.get("agent_id") != agent_id
+        or entry.get("adapter_id") != source_adapter_id
+        or not isinstance(source_receipt, Mapping)
+        or source_receipt.get("source_ref") != source_ref
+    ):
+        raise ValueError("periodic-report request journal identity drifted")
+
+
 def record_periodic_report_request(
     *,
     registry_path: Path,
@@ -292,18 +338,46 @@ def record_periodic_report_request(
     if not _IDENTITY_RE.fullmatch(goal_id) or not _IDENTITY_RE.fullmatch(agent_id):
         raise ValueError("periodic-report request Goal/Agent identity is invalid")
     opaque_ref = _source_ref(source_ref)
+    selected_adapter_id = str(source_adapter_id or "").strip()
+    existing: dict[str, Any] | None = None
+    if not selected_adapter_id:
+        replay_candidates = _matching_request_entries(
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            source_ref=opaque_ref,
+        )
+        if len(replay_candidates) > 1:
+            raise ValueError(
+                "periodic-report request source adapter is ambiguous; "
+                "select one with --source-adapter-id"
+            )
+        if replay_candidates:
+            existing = replay_candidates[0]
+            selected_adapter_id = str(existing.get("adapter_id") or "").strip()
+        elif request_ports is not None:
+            selected_adapter_id = request_ports.select_source_adapter(None).adapter_id
+    if not selected_adapter_id:
+        raise ValueError("periodic-report request source adapter is unavailable")
     request_id = _request_id(
         goal_id=goal_id,
         agent_id=agent_id,
+        source_adapter_id=selected_adapter_id,
         source_ref=opaque_ref,
     )
     path = _request_path(runtime_root, goal_id, request_id)
-    existing = _load_request_entry(path) if path.is_file() else None
+    existing = existing or (_load_request_entry(path) if path.is_file() else None)
     if path.is_file() and existing is None:
         raise ValueError("periodic-report request journal entry is invalid")
     if existing is not None:
-        if existing.get("goal_id") != goal_id or existing.get("agent_id") != agent_id:
-            raise ValueError("periodic-report request journal identity drifted")
+        _validate_request_replay(
+            existing,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            source_adapter_id=selected_adapter_id,
+            source_ref=opaque_ref,
+            request_id=request_id,
+        )
         return {
             "ok": True,
             "schema_version": REQUEST_RECEIPT_SCHEMA,
@@ -318,7 +392,7 @@ def record_periodic_report_request(
         }
     if request_ports is None:
         raise ValueError("periodic-report request source adapter is unavailable")
-    source_adapter = request_ports.select_source_adapter(source_adapter_id)
+    source_adapter = request_ports.select_source_adapter(selected_adapter_id)
     profile_ref, trigger_policy = _request_profile(
         registry_path=registry_path,
         runtime_root=runtime_root,
@@ -350,6 +424,7 @@ def record_periodic_report_request(
         "trigger_policy": trigger_policy,
     }
     write_performed = False
+    journal_status = "pending"
     if execute:
         with exclusive_file_lock(path, operation="periodic_report_request"):
             concurrent = _load_request_entry(path) if path.is_file() else None
@@ -358,14 +433,28 @@ def record_periodic_report_request(
             if concurrent is None:
                 atomic_write_json(path, entry)
                 write_performed = True
+            else:
+                _validate_request_replay(
+                    concurrent,
+                    goal_id=goal_id,
+                    agent_id=agent_id,
+                    source_adapter_id=selected_adapter_id,
+                    source_ref=opaque_ref,
+                    request_id=request_id,
+                )
+                journal_status = str(concurrent["status"])
     return {
         "ok": True,
         "schema_version": REQUEST_RECEIPT_SCHEMA,
-        "status": "accepted" if execute else "preview",
+        "status": (
+            "preview"
+            if not execute
+            else ("accepted" if write_performed else "already_requested")
+        ),
         "request_id": request_id,
         "goal_id": goal_id,
         "agent_id": agent_id,
-        "journal_status": "pending",
+        "journal_status": journal_status,
         "write_performed": write_performed,
         "raw_content_returned": False,
         "external_writes_performed": False,

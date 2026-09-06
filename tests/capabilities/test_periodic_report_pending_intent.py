@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -664,6 +665,164 @@ def test_agent_typed_request_is_replay_safe_and_settlement_only_retry_deduplicat
         )
         == []
     )
+
+
+def test_typed_request_namespaces_equal_source_refs_by_adapter_under_concurrency(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    source_ref = "provider-local-message-id"
+    bind_calls: list[str] = []
+    settlement_calls: list[str] = []
+
+    def build_adapter(adapter_id: str) -> PeriodicReportRequestAdapter:
+        source_identity = {
+            "provider": adapter_id,
+            "goal_id": GOAL_ID,
+            "agent_id": AGENT_ID,
+            "source_ref": source_ref,
+            "observed_at": "2026-08-30T09:00:00Z",
+            "requester_kind": "user",
+            "addressing_source": "provider_mention",
+            "binding_revision": "sha256:" + adapter_id[-1] * 64,
+        }
+        source_digest = "sha256:" + hashlib.sha256(
+            json.dumps(
+                source_identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        def bind_source(**_kwargs: object) -> dict[str, object]:
+            bind_calls.append(adapter_id)
+            return {
+                "schema_version": SOURCE_BINDING_RECEIPT_SCHEMA,
+                **source_identity,
+                "source_digest": source_digest,
+                "raw_content_returned": False,
+                "external_writes_performed": False,
+            }
+
+        def settle_source(**kwargs: object) -> dict[str, object]:
+            source_receipt = kwargs["source_receipt"]
+            assert isinstance(source_receipt, dict)
+            assert source_receipt["provider"] == adapter_id
+            settlement_calls.append(adapter_id)
+            return {
+                "ok": True,
+                "schema_version": SOURCE_SETTLEMENT_RECEIPT_SCHEMA,
+                "status": "settled",
+                "write_performed": False,
+                "raw_content_returned": False,
+                "external_writes_performed": False,
+            }
+
+        return PeriodicReportRequestAdapter(
+            adapter_id=adapter_id,
+            bind_source=bind_source,
+            settle_source=settle_source,
+        )
+
+    adapter_a = build_adapter("provider-adapter-a")
+    adapter_b = build_adapter("provider-adapter-b")
+    ports_forward = PeriodicReportRequestPorts(
+        adapters={adapter_a.adapter_id: adapter_a, adapter_b.adapter_id: adapter_b}
+    )
+    ports_reverse = PeriodicReportRequestPorts(
+        adapters={adapter_b.adapter_id: adapter_b, adapter_a.adapter_id: adapter_a}
+    )
+
+    def record(
+        adapter: PeriodicReportRequestAdapter,
+        ports: PeriodicReportRequestPorts,
+    ) -> dict[str, object]:
+        return record_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            source_ref=source_ref,
+            request_ports=ports,
+            source_adapter_id=adapter.adapter_id,
+            execute=True,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_a = executor.submit(record, adapter_a, ports_forward)
+        future_b = executor.submit(record, adapter_b, ports_reverse)
+        accepted_a = future_a.result()
+        accepted_b = future_b.result()
+
+    assert accepted_a["status"] == accepted_b["status"] == "accepted"
+    assert accepted_a["request_id"] != accepted_b["request_id"]
+    assert sorted(bind_calls) == [adapter_a.adapter_id, adapter_b.adapter_id]
+    assert record(adapter_a, ports_reverse)["status"] == "already_requested"
+    assert (
+        record_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            source_ref=source_ref,
+            request_ports=None,
+            source_adapter_id=adapter_b.adapter_id,
+            execute=True,
+        )["status"]
+        == "already_requested"
+    )
+    with pytest.raises(ValueError, match="source adapter is ambiguous"):
+        record_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            source_ref=source_ref,
+            request_ports=ports_forward,
+            source_adapter_id=None,
+            execute=True,
+        )
+
+    intents = periodic_report_request_intents(
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    assert {intent["source_receipt_id"] for intent in intents} == {
+        accepted_a["request_id"],
+        accepted_b["request_id"],
+    }
+    for intent in reversed(intents):
+        settlement = settle_periodic_report_request(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            intent=intent,
+            request_ports=ports_reverse,
+            execute=True,
+        )
+        assert settlement["status"] == "settled"
+    assert sorted(settlement_calls) == [adapter_a.adapter_id, adapter_b.adapter_id]
+
+    journal_path = (
+        runtime
+        / "goals"
+        / GOAL_ID
+        / "periodic_report_requests"
+        / f"{accepted_a['request_id']}.json"
+    )
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["adapter_id"] = adapter_b.adapter_id
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    with pytest.raises(ValueError, match="journal identity drifted"):
+        record(adapter_a, ports_forward)
+    journal["adapter_id"] = adapter_a.adapter_id
+    journal["source_receipt"]["source_ref"] = "different-source"
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    with pytest.raises(ValueError, match="journal identity drifted"):
+        record(adapter_a, ports_forward)
 
 
 def test_terminal_source_settlement_is_durable_and_not_retried(
