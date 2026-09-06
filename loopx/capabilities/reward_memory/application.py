@@ -588,7 +588,9 @@ def execute_reward_memory_recall(
                 scope_ref=binding["scope_ref"],
                 query=query["query"],
                 query_summary=query["query_summary"],
-                max_results=request["limit"],
+                # Leave room for scope/lifecycle rejection and duplicate
+                # candidates before applying the caller's final record limit.
+                max_results=min(24, request["limit"] * 3),
                 timeout_seconds=float(binding["timeout_seconds"]),
                 observed_at=request["observed_at"],
             )
@@ -605,8 +607,6 @@ def execute_reward_memory_recall(
             reason_code = "provider_result_readback_unverified"
             break
         for provider_item in retrieval.items:
-            if provider_item.resource_ref in seen:
-                continue
             active = _active_item(
                 provider_item,
                 corpus,
@@ -615,7 +615,9 @@ def execute_reward_memory_recall(
             )
             if active is None:
                 continue
-            seen.add(provider_item.resource_ref)
+            if active.candidate_ref in seen:
+                continue
+            seen.add(active.candidate_ref)
             results.append(active)
             if len(results) >= request["limit"]:
                 break

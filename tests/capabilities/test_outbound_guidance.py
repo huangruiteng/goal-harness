@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime
 
@@ -79,7 +80,9 @@ def test_disabled_urgent_failure_and_wrong_peer(tmp_path, monkeypatch):
     assert outbound.outbound_guidance_hook(**kwargs, purpose="urgent")("intent")[
         "continue_delivery"
     ]
-    assert outbound.outbound_guidance_hook(**(kwargs | {"agent_id": "other"})) is None
+    wrong_peer = outbound.outbound_guidance_hook(**(kwargs | {"agent_id": "other"}))
+    assert wrong_peer("intent")["status"] == "configuration_error"
+    assert not wrong_peer("intent")["continue_delivery"]
     config["automation"]["automatic_recall"] = False
     assert outbound.outbound_guidance_hook(**kwargs) is None
     configure(tmp_path, monkeypatch, unavailable=True)
@@ -287,8 +290,8 @@ def test_cli_installs_hook_at_real_sender(tmp_path, monkeypatch, command):
     assert "not a request for user approval" in cli._render(results[0])
 
 
-def test_unnormalized_agent_id_and_scope_drift_fail_open(tmp_path, monkeypatch):
-    """Build-stage scope problems must never crash the send path."""
+def test_agent_id_normalization_preserves_valid_scope(tmp_path, monkeypatch):
+    """Equivalent agent identifiers retain the valid scoped hook."""
 
     configure(tmp_path, monkeypatch)
     kwargs = dict(registry_path=tmp_path / "registry.json", goal_id="goal")
@@ -300,3 +303,230 @@ def test_unnormalized_agent_id_and_scope_drift_fail_open(tmp_path, monkeypatch):
             f"agent_id={raw_agent_id!r} must normalize to the configured scope"
         )
         assert hook("sha256:intent")["status"] == "applied"
+
+
+def test_destination_and_purpose_queries_merge_without_private_id(
+    tmp_path, monkeypatch
+):
+    config, provider = configure(tmp_path, monkeypatch)
+    chat = "oc_example_group"
+    digest = hashlib.sha256(chat.encode()).hexdigest()
+    config["surfaces"][outbound.SURFACE]["destinations"] = {
+        digest: {"query_label": "Example Team", "required_candidate_refs": []}
+    }
+    hook = outbound.outbound_guidance_hook(
+        registry_path=tmp_path / "registry.json", goal_id="goal", agent_id="pilot"
+    )
+    result = hook.for_destination(chat)("intent")
+    assert provider.calls == 2
+    assert "Example Team" in provider.queries[0]
+    assert digest in provider.queries[0]
+    assert all(chat not in q for q in provider.queries)
+    assert len(result["guidance"]) == 1
+    assert result["telemetry"]["provider_call_count"] == 2
+    other = hook.for_destination("oc_other_group")("intent")
+    assert "Example Team" not in provider.queries[2]
+    assert other["review_digest"] != result["review_digest"]
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_required_guidance_missing_blocks_urgent_and_review_override(
+    tmp_path, monkeypatch, unavailable
+):
+    config, _ = configure(tmp_path, monkeypatch, unavailable=unavailable)
+    chat = "oc_example_group"
+    config["surfaces"][outbound.SURFACE]["destinations"] = {
+        hashlib.sha256(chat.encode()).hexdigest(): {
+            "query_label": "Example Team",
+            "required_candidate_refs": ["candidate:missing"],
+        }
+    }
+    kwargs = dict(
+        registry_path=tmp_path / "registry.json",
+        goal_id="goal",
+        agent_id="pilot",
+        purpose="urgent",
+    )
+    first = outbound.outbound_guidance_hook(**kwargs).for_destination(chat)("intent")
+    assert first["status"] == "required_guidance_missing"
+    assert not first["continue_delivery"]
+    again = outbound.outbound_guidance_hook(
+        **kwargs, reviewed_digest=first["review_digest"]
+    ).for_destination(chat)("intent")
+    assert not again["continue_delivery"]
+    # A restriction on one destination cannot silently constrain another.
+    assert outbound.outbound_guidance_hook(**kwargs).for_destination("oc_other")(
+        "intent"
+    )["continue_delivery"]
+
+
+def test_required_guidance_has_separate_lookup_and_review(tmp_path, monkeypatch):
+    config, provider = configure(tmp_path, monkeypatch)
+    chat = "oc_example_group"
+    config["surfaces"][outbound.SURFACE]["destinations"] = {
+        hashlib.sha256(chat.encode()).hexdigest(): {
+            "query_label": "Example Team",
+            "required_candidate_refs": ["candidate:guidance"],
+        }
+    }
+    hook = outbound.outbound_guidance_hook(
+        registry_path=tmp_path / "registry.json",
+        goal_id="goal",
+        agent_id="pilot",
+        purpose="urgent",
+    )
+    result = hook.for_destination(chat)("intent")
+    assert provider.queries[0] == "candidate:guidance"
+    assert result["required_guidance_complete"]
+    assert result["agent_review_required"]
+    assert len(result["guidance"]) == 1
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"destination_digest": "group-name"},
+        {
+            "destination_digest": "a" * 64,
+            "required_candidate_refs": ["not-a-candidate"],
+        },
+        {
+            "destination_digest": "a" * 64,
+            "required_candidate_refs": ["candidate:x"] * 2,
+        },
+    ],
+)
+def test_destination_config_rejects_ambiguous_identity(tmp_path, invalid):
+    raw = turn.raw_config()
+    raw["corpora"][0]["corpus"]["scope"]["surface_ids"] = [outbound.SURFACE]
+    raw["surfaces"][0]["surface_id"] = outbound.SURFACE
+    raw["surfaces"][0]["destinations"] = [invalid]
+    (tmp_path / "memory.json").write_text(json.dumps(raw))
+    with pytest.raises(ValueError):
+        load_reward_memory_experiment_config(
+            project=tmp_path, config_path="memory.json"
+        )
+
+
+def test_destination_config_roundtrip(tmp_path):
+    raw = turn.raw_config()
+    raw["corpora"][0]["corpus"]["scope"]["surface_ids"] = [outbound.SURFACE]
+    raw["surfaces"][0]["surface_id"] = outbound.SURFACE
+    raw["surfaces"][0]["destinations"] = [
+        {
+            "destination_digest": "a" * 64,
+            "query_label": "Example Team",
+            "required_candidate_refs": ["candidate:rule"],
+        }
+    ]
+    (tmp_path / "memory.json").write_text(json.dumps(raw))
+    config = load_reward_memory_experiment_config(
+        project=tmp_path, config_path="memory.json"
+    )
+    assert config["surfaces"][outbound.SURFACE]["destinations"]["a" * 64] == {
+        "query_label": "Example Team",
+        "required_candidate_refs": ["candidate:rule"],
+    }
+
+
+@pytest.mark.parametrize("reply", [False, True])
+@pytest.mark.parametrize("purpose", ["help", "urgent"])
+@pytest.mark.parametrize(
+    "state",
+    [
+        "valid",
+        "invalid",
+        "missing",
+        "disabled",
+        "agent_off",
+        "recall_off",
+        "surface_off",
+        "scope_mismatch",
+    ],
+)
+def test_real_resolver_sender_configuration_boundary(
+    tmp_path, monkeypatch, reply, purpose, state
+):
+    from loopx.capabilities.reward_memory import application
+
+    raw = turn.raw_config()
+    raw["corpora"][0]["corpus"]["scope"]["surface_ids"] = [outbound.SURFACE]
+    raw["surfaces"][0]["surface_id"] = outbound.SURFACE
+    raw["surfaces"][0]["destinations"] = [
+        {
+            "destination_digest": hashlib.sha256(b"oc_project_review").hexdigest(),
+            "query_label": "x" * 121 if state == "invalid" else "Example Team",
+            "required_candidate_refs": ["candidate:missing"],
+        }
+    ]
+    if state == "recall_off":
+        raw["automation"]["automatic_recall"] = False
+    if state == "surface_off":
+        raw = turn.raw_config()
+    if state == "scope_mismatch":
+        raw["corpora"][0]["corpus"]["scope"]["peer_ref"] = "agent:other"
+    (tmp_path / "memory.json").write_text(json.dumps(raw))
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "goal",
+                        "repo": str(tmp_path),
+                        "coordination": {"registered_agents": ["pilot"]},
+                        "control_plane": {
+                            "reward_memory": {
+                                "enabled": state != "disabled",
+                                "experimental": True,
+                                "enabled_agents": []
+                                if state == "agent_off"
+                                else ["pilot"],
+                                "config_path": None
+                                if state == "missing"
+                                else "memory.json",
+                            }
+                        },
+                    }
+                ]
+            }
+        )
+    )
+    provider = turn.RecallProvider("{}")
+    monkeypatch.setattr(application, "build_context_provider", lambda value: provider)
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    sender = reply_lark_event_inbox if reply else send_lark_inbox_message
+    runner = ReplyRunner(readback_text="done")
+    hook = outbound.outbound_guidance_hook(
+        registry_path=registry,
+        goal_id="goal",
+        agent_id="pilot",
+        purpose=purpose,
+        reviewed_digest="sha256:previously-reviewed",
+    )
+    result = sender(
+        project=project,
+        config_path=config,
+        text="done",
+        execute=True,
+        runner=runner,
+        before_send=hook,
+        **({"message_id": "om_reaction_fixture"} if reply else {}),
+    )
+    disabled = state in {"disabled", "agent_off", "recall_off", "surface_off"}
+    assert result["external_write_performed"] is disabled
+    if disabled:
+        assert result["reply_verified"] and "outbound_guidance" not in result
+        assert provider.calls == 0
+    else:
+        guidance = result["outbound_guidance"]
+        assert guidance["status"] == (
+            "required_guidance_missing" if state == "valid" else "configuration_error"
+        )
+        assert not guidance["continue_delivery"]
+        assert not any(
+            ("+messages-send" in c or "+messages-reply" in c) and "--dry-run" not in c
+            for c in runner.calls
+        )
+        if state != "valid":
+            assert provider.calls == 0
