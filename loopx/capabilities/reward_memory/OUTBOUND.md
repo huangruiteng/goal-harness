@@ -78,6 +78,14 @@ an explicit **required-read contract**, not a text-based permission classifier:
 the agent must still obey prohibitions, and acknowledging a digest does not
 grant permission. It does not enforce bans through unrelated senders.
 
+Enabled agents with missing/invalid configuration or inconsistent corpus scope
+now receive `configuration_error` and zero sends, before any memory-provider call.
+Previously these failures silently removed the hook. Neither urgency nor an old
+review digest waives the error. Repair and check `reward-memory experiment-status`;
+do not discard invalid required fields or automatically disable the capability.
+Explicitly disabled agents, valid `automatic_recall: false` configurations and
+valid configurations without this surface still preserve the original sender.
+
 OpenViking reward retrieval requests L2 bodies and overfetches at most 32 hits,
 canonicalizes chunk URIs, and skips summaries, unreadable and malformed records
 before filling the bounded result budget. Other provider namespaces retain their

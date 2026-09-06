@@ -2,6 +2,13 @@
 
 [English](OUTBOUND.md)
 
+已启用 Agent 的配置缺失、无效或 corpus 作用域不一致时，现在返回
+`configuration_error`，在调用记忆 provider 前停止发送。此前这些错误会静默移除
+hook。urgent 和旧确认摘要都不能豁免；需修正配置并通过
+`reward-memory experiment-status` 核验，不能通过丢弃无效必读字段或自动关闭能力来修复。
+明确关闭的 Agent、有效的 `automatic_recall: false` 配置、有效但未包含此 surface
+的配置仍保留原发送行为。
+
 这个可选的 Reward Memory surface 会在 Agent 发送消息前召回已经审阅过的
 操作偏好。它不是消息传输、文本分类器或发送权限。首个正式调用方是绑定
 Goal/Agent 的 `loopx lark-inbox send` 和 `reply`；本次集成不拦截其他工具，

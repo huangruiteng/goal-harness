@@ -36,9 +36,13 @@ def outbound_guidance_hook(
     if not goal_id or not agent_id:
         return None
     normalized_agent_id = normalize_todo_claimed_by(agent_id) or ""
-    _, config = resolve_reward_memory_experiment(
+    resolution, config = resolve_reward_memory_experiment(
         registry_path=registry_path, goal_id=goal_id, agent_id=agent_id
     )
+    # An enabled but unreadable contract is not evidence that recall is off.
+    # Do not inspect invalid config fragments to guess whether reads are required.
+    if resolution.get("status") in {"config_invalid", "config_missing"}:
+        return _configuration_failure_hook(resolution["status"])
     if config is None or not config["automation"]["automatic_recall"]:
         return None
     if SURFACE not in config["surfaces"]:
@@ -60,9 +64,9 @@ def outbound_guidance_hook(
             )
         }
         if current["peer_ref"] != f"agent:{normalized_agent_id}":
-            return None
+            return _configuration_failure_hook("scope_mismatch")
         if identity is not None and identity != current:
-            return None
+            return _configuration_failure_hook("scope_mismatch")
         identity = current
         checkpoints[corpus["corpus_id"]] = {
             **{k: v for k, v in current.items() if v is not None},
@@ -213,3 +217,25 @@ def outbound_guidance_hook(
         lambda chat_id: lambda digest: recall(digest, chat_id),
     )
     return recall
+
+
+def _configuration_failure_hook(reason: str):
+    def blocked(intent_digest: str) -> dict[str, Any]:
+        return {
+            "schema_version": "outbound_guidance_review_v0",
+            "status": "configuration_error",
+            "reason_code": reason,
+            "guidance": [],
+            "agent_review_required": True,
+            "continue_delivery": False,
+            "provider_failure_is_user_gate": False,
+            "grants_new_action_authority": False,
+            "required_guidance_complete": False,
+            "recommended_action": (
+                "Repair the enabled Reward Memory configuration and verify it with "
+                "reward-memory experiment-status before retrying. Review acknowledgement "
+                "cannot waive this error; explicit disable remains an owner decision."
+            ),
+        }
+
+    return blocked
