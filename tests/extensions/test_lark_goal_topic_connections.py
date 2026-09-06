@@ -33,6 +33,7 @@ from loopx.extensions.lark.goal_topic_connections import (
     reply_lark_goal_topic,
     route_lark_topic_event,
 )
+from loopx.file_lock import LockAcquireTimeoutError
 from loopx.registry import atomic_write_json
 
 APP_ID = "cli_public_fixture"
@@ -1475,6 +1476,126 @@ def test_disconnect_reports_agent_inbox_cleanup_failure(
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    "failure_factory",
+    [
+        lambda: LockAcquireTimeoutError(
+            incident={"holder": {"pid": 4242}},
+            incident_recorded=False,
+            incident_channel="test",
+        ),
+        lambda: ValueError("goal registry fixture is unreadable"),
+    ],
+    ids=["lock-timeout", "registry-error"],
+)
+def test_disconnect_reports_agent_inbox_cleanup_raise_as_packet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_factory: Any,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    registry = _registry(tmp_path)
+    registry["common_runtime_root"] = str(tmp_path / "runtime")
+    registry["goals"][0]["coordination"] = {"registered_agents": ["agent-alpha"]}
+    atomic_write_json(registry_path, registry)
+    binding_path = tmp_path / "binding.json"
+    assert connect_lark_goal_topic(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id="goal-alpha",
+        target_path=tmp_path / "targets.json",
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        agent_id="agent-alpha",
+        ingress_mode="async_inbox",
+        runner=_runner({}),
+        cli_bin="fake-lark",
+    )["ok"]
+    connection = binding_for_goal(
+        read_goal_channel_binding(binding_path),
+        "goal-alpha",
+    )
+    assert connection is not None
+
+    def _raise(**_kwargs: Any) -> dict[str, Any]:
+        raise failure_factory()
+
+    monkeypatch.setattr(
+        "loopx.extensions.lark.goal_topic_connections.configure_goal_with_global_sync",
+        _raise,
+    )
+
+    result = disconnect_lark_goal_topic(
+        binding_path=binding_path,
+        registry_path=registry_path,
+        goal_id="goal-alpha",
+        connection_id=str(connection["connection_id"]),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "disconnected_inbox_cleanup_failed"
+    assert result["blocker"] == "agent_inbox_unregistration_failed"
+    assert result["readback_verified"] is False
+    assert result["details"] == {
+        "connection_id": connection["connection_id"],
+        "agent_inbox_unregistered": False,
+        "agent_id": "agent-alpha",
+    }
+    assert (
+        binding_for_goal(
+            read_goal_channel_binding(binding_path),
+            "goal-alpha",
+            connection_id=str(connection["connection_id"]),
+        )
+        is None
+    )
+
+
+def test_invalid_default_fallback_selects_same_connection_as_disconnect(
+    tmp_path: Path,
+) -> None:
+    beta_id = goal_channel_connection_id("goal-alpha", "agent-beta")
+    zeta_id = goal_channel_connection_id("goal-alpha", "agent-zeta")
+    omega_id = goal_channel_connection_id("goal-alpha", "agent-omega")
+    assert min(beta_id, zeta_id, omega_id) == omega_id
+    binding_path = tmp_path / "binding.json"
+    write_goal_channel_binding(
+        binding_path,
+        {
+            "schema_version": GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+            "bindings": {
+                "goal-alpha": {
+                    "schema_version": GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION,
+                    "default_connection_id": "lark_missing0000000000000000",
+                    "connections": {
+                        beta_id: {"agent_id": "agent-beta", "enabled": True},
+                        zeta_id: {"agent_id": "agent-zeta", "enabled": True},
+                        omega_id: {"agent_id": "agent-omega", "enabled": True},
+                    },
+                }
+            },
+        },
+    )
+    payload = read_goal_channel_binding(binding_path)
+
+    selected = binding_for_goal(payload, "goal-alpha")
+
+    assert selected is not None
+    assert str(selected["connection_id"]) == omega_id
+
+    result = disconnect_lark_goal_topic(
+        binding_path=binding_path,
+        goal_id="goal-alpha",
+        connection_id=beta_id,
+    )
+
+    assert result["ok"] is True
+    stored = read_goal_channel_binding(binding_path)["bindings"]["goal-alpha"]
+    assert stored["default_connection_id"] == omega_id
 
 
 def _legacy_v0_binding_payload(
