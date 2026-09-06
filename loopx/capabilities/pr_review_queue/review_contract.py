@@ -76,7 +76,7 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
             _section(
                 "改动思路",
                 "300-500字",
-                "Use `architecture_flow` and `walkthroughs`: entry point, authoritative state, decision boundary, positive path, alternative, and ownership trade-off.",
+                "Use `architecture_flow`, `repository_reuse`, and `walkthroughs`: entry point, authoritative state, decision boundary, positive path, existing implementation comparison, and ownership trade-off.",
             ),
             _section(
                 "具体改动",
@@ -136,6 +136,48 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "receipt_or_consumer",
                     "failure_or_retry_owner",
                 ],
+            },
+            {
+                "evidence_id": "repository_reuse",
+                "required_when": "behavior_bearing_change",
+                "verdict_values": [
+                    "reused", "separation_justified", "no_existing_candidate",
+                    "unjustified_duplication", "not_yet_proven",
+                ],
+                "fields": [
+                    "searched_revisions", "queries_and_paths", "existing_candidates",
+                    "semantic_comparison", "reuse_or_separation_reason",
+                    "validation_evidence", "verdict",
+                ],
+                "comparison_dimensions": [
+                    "resource_and_caller", "data_scope_and_filters",
+                    "ordering_and_pagination", "authority_and_sanitization",
+                    "state_retry_and_failure_owner",
+                ],
+                "rule": (
+                    "Before judging the proposed architecture, search the base and "
+                    "exact-head repository by caller outcome, resource, routes and "
+                    "symbols, not only new filenames. Record immutable searched "
+                    "revisions, queries, paths and candidate definitions/callers, "
+                    "including unchanged siblings outside the diff. Compare the "
+                    "applicable dimensions for each candidate and explain why the "
+                    "nearest existing owner can be reused or extended, or why an "
+                    "independent boundary is necessary. Same-resource views must "
+                    "retain the same semantics unless a deliberate difference is "
+                    "disclosed and validated; exercise switching consumers and "
+                    "concurrent updates when state or paging is involved. Green CI, "
+                    "shared low-level readers, different names, and conflict-free "
+                    "coexistence do not justify a second contract or state owner. "
+                    "A no_existing_candidate verdict requires a bounded negative "
+                    "search with its scope and limitations, not an empty candidate "
+                    "list. Similar code alone is not duplication: preserve distinct "
+                    "invariants or compatibility boundaries when evidence justifies "
+                    "separation. After base integration or head changes, repeat the "
+                    "comparison rather than inheriting an earlier approval. Missing "
+                    "or unverified evidence is not_yet_proven and cannot approve. "
+                    "This is a reviewer-executed evidence requirement, not an "
+                    "automatic similarity detector or proof that a search ran."
+                ),
             },
             {
                 "evidence_id": "changed_line_classification",
@@ -507,6 +549,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             "exact_head_recheck_required": True,
             "stale_head_verdict_allowed": False,
             "blocking_evidence_verdicts": {
+                "repository_reuse": ["unjustified_duplication", "not_yet_proven"],
                 "change_proportionality": [
                     "disproportionate",
                     "not_yet_proven",
@@ -524,6 +567,11 @@ def build_review_execution_contract() -> dict[str, Any]:
         },
         "verdict_policy": {
             "open_pr_blocking_finding": "REQUEST_CHANGES",
+            "open_pr_unresolved_reuse": (
+                "REQUEST_CHANGES when repository_reuse is unjustified_duplication "
+                "or not_yet_proven, including missing/unverified search evidence; "
+                "request reuse, an evidence-backed separation, or further investigation"
+            ),
             "open_pr_unresolved_proportionality": (
                 "REQUEST_CHANGES when change_proportionality is disproportionate "
                 "or not_yet_proven; correctness, green CI, and resolved earlier "
@@ -580,6 +628,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         required_evidence.append("authority_semantics")
         required_evidence.append("typed_state_rule")
     if behavior_bearing_change:
+        required_evidence.insert(3, "repository_reuse")
         if "scope_fit" not in required_evidence:
             required_evidence.append("scope_fit")
         required_evidence.append("default_off_isolation")
@@ -609,6 +658,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "docs_only": docs_only,
             "symbol_map_required": code_change,
             "scope_fit_required": behavior_bearing_change,
+            "repository_reuse_required": behavior_bearing_change,
             "change_proportionality_required": code_change,
             "default_off_isolation_required": behavior_bearing_change,
             "authority_semantics_required": code_change,
