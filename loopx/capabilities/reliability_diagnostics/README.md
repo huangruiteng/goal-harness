@@ -159,9 +159,13 @@ export LOOPX_DSH_SHADOW_OBSERVER_RUN_IDENTITY_JSON='{"worker_id":"<worker>","mod
 
 loopx reliability-diagnostics receipt --goal-id <goal-id> --format json
 loopx reliability-diagnostics status  --goal-id <goal-id> --format json
-loopx reliability-diagnostics status  --goal-id <goal-id> --with-receipt --format json
+loopx reliability-diagnostics status  --goal-id <goal-id> --with-receipt --format json --as-of "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 loopx reliability-diagnostics ingest  --goal-id <goal-id> --input observer.ndjson --format json
 ```
+
+For live age/stall evaluation, pass the current timezone-aware `--as-of` as in
+the POSIX-shell example. Without it, historical replay uses the last event time
+and reports zero last-event age. This does not establish current liveness.
 
 `status --with-receipt` returns both existing contracts from one ledger read.
 Omit the option to retain projection-only output. It grants no control authority

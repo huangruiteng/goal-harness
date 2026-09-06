@@ -76,8 +76,12 @@ canonical eligibility -> Desktop supervisor -> bounded Turn -> validation/writeb
 ## 本次落地的读取增量
 
 ```bash
-loopx reliability-diagnostics status --goal-id <goal-id> --with-receipt --format json
+loopx reliability-diagnostics status --goal-id <goal-id> --with-receipt --format json --as-of "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
+
+上述 POSIX shell 示例使用当前 UTC 时间评估年龄；其它客户端应传入带时区的当前时间。
+仅在历史重放时省略 `--as-of`：默认使用最后事件时间，因此最后事件年龄为零，不能
+作为实时存活检查。分别显示观察时间和评估时间；推进评估时钟不改变 integrity。
 
 显式选项让 receipt 与 projection 来自同一次 ledger 读取的内存结果，避免分别执行
 两次 CLI 时观察到不同追加状态。不加选项保持原输出。这不提供文件并发追加的原子

@@ -84,8 +84,14 @@ permission to retry. Observer errors must not become worker failures.
 The existing CLI now supports an explicit combined read:
 
 ```bash
-loopx reliability-diagnostics status --goal-id <goal-id> --with-receipt --format json
+loopx reliability-diagnostics status --goal-id <goal-id> --with-receipt --format json --as-of "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
+
+The POSIX-shell example evaluates age against the current UTC time. Other
+clients must supply a timezone-aware current timestamp. Omit `--as-of` only
+for historical replay: it defaults to the last event time, producing zero
+last-event age, not a live liveness check. Display the observation and evaluation
+times separately; advancing the evaluation clock does not change integrity.
 
 The receipt and projection derive from the same in-memory ledger reading,
 avoiding two CLI calls observing different append states. Omitting the flag

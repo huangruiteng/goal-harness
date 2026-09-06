@@ -136,9 +136,12 @@ export LOOPX_DSH_SHADOW_OBSERVER_RUN_IDENTITY_JSON='{"worker_id":"<worker>","mod
 
 loopx reliability-diagnostics receipt --goal-id <goal-id> --format json
 loopx reliability-diagnostics status  --goal-id <goal-id> --format json
-loopx reliability-diagnostics status  --goal-id <goal-id> --with-receipt --format json
+loopx reliability-diagnostics status  --goal-id <goal-id> --with-receipt --format json --as-of "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 loopx reliability-diagnostics ingest  --goal-id <goal-id> --input observer.ndjson --format json
 ```
+
+实时年龄／stall 评估应像上述 POSIX shell 示例一样，向 `--as-of` 传入带时区的当前时间。
+省略时按最后事件时间进行历史重放，最后事件年龄为零，不能证明当前仍存活。
 
 `status --with-receipt` 从同一次 ledger 读取返回两个现有合同；省略该选项保留原来的
 projection-only 输出，不授予控制权限，也不激活 observer。并发追加不是原子快照，
