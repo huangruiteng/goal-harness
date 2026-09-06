@@ -558,6 +558,38 @@ def connect_lark_goal_topic(
 
     objective = goal_objective(goal)
     topic_text = f"LoopX Goal Topic: {objective}\nGoal ID: {goal_id}"
+    existing_connection = None
+    try:
+        existing_connection = binding_for_goal(
+            read_goal_channel_binding(binding_path),
+            goal_id,
+            provider_target=matched[1] if matched is not None else None,
+            connection_id=connection_id,
+        )
+    except ValueError:
+        existing_connection = None
+    reusable_root = ""
+    if existing_connection and existing_connection.get("enabled") is True:
+        prior_topic = (
+            existing_connection.get("topic")
+            if isinstance(existing_connection.get("topic"), Mapping)
+            else {}
+        )
+        prior_channel = (
+            existing_connection.get("channel")
+            if isinstance(existing_connection.get("channel"), Mapping)
+            else {}
+        )
+        candidate_root = str(
+            prior_topic.get("root_message_id")
+            or prior_channel.get("pinned_message_id")
+            or ""
+        )
+        if (
+            MESSAGE_ID_PATTERN.fullmatch(candidate_root)
+            and str(prior_channel.get("chat_id") or "") == safe_chat_id
+        ):
+            reusable_root = candidate_root
     key = provider_idempotency_key(
         semantic_key(
             goal_id,
@@ -569,61 +601,64 @@ def connect_lark_goal_topic(
             topic_text,
         )
     )
-    sent = call(
-        runner,
-        lark_args(
+    if reusable_root:
+        root_message_id = reusable_root
+    else:
+        sent = call(
+            runner,
+            lark_args(
+                cli_bin=effective_cli_bin,
+                profile=profile,
+                tail=[
+                    "im",
+                    "+messages-send",
+                    "--chat-id",
+                    safe_chat_id,
+                    "--text",
+                    topic_text,
+                    "--idempotency-key",
+                    key,
+                    "--as",
+                    "bot",
+                    "--format",
+                    "json",
+                ],
+            ),
+        )
+        root_message_id = find_first_string(
+            json_payload(sent),
+            {"message_id"},
+            MESSAGE_ID_PATTERN,
+        )
+        if sent.get("returncode") != 0 or not root_message_id:
+            return operation_packet(
+                ok=False,
+                goal_id=goal_id,
+                operation="connect_topic",
+                execute=True,
+                status="failed",
+                blocker="provider_api_failed",
+                public_summary="the Goal Topic root message could not be sent",
+            )
+        verified = message_readback_verified(
+            runner=runner,
             cli_bin=effective_cli_bin,
             profile=profile,
-            tail=[
-                "im",
-                "+messages-send",
-                "--chat-id",
-                safe_chat_id,
-                "--text",
-                topic_text,
-                "--idempotency-key",
-                key,
-                "--as",
-                "bot",
-                "--format",
-                "json",
-            ],
-        ),
-    )
-    root_message_id = find_first_string(
-        json_payload(sent),
-        {"message_id"},
-        MESSAGE_ID_PATTERN,
-    )
-    if sent.get("returncode") != 0 or not root_message_id:
-        return operation_packet(
-            ok=False,
-            goal_id=goal_id,
-            operation="connect_topic",
-            execute=True,
-            status="failed",
-            blocker="provider_api_failed",
-            public_summary="the Goal Topic root message could not be sent",
+            identity="bot",
+            message_id=root_message_id,
+            expected_text=topic_text,
         )
-    verified = message_readback_verified(
-        runner=runner,
-        cli_bin=effective_cli_bin,
-        profile=profile,
-        identity="bot",
-        message_id=root_message_id,
-        expected_text=topic_text,
-    )
-    if not verified:
-        return operation_packet(
-            ok=False,
-            goal_id=goal_id,
-            operation="connect_topic",
-            execute=True,
-            status="sent_unverified",
-            blocker="readback_mismatch",
-            public_summary="the Goal Topic was sent but could not be verified",
-            external_write_performed=True,
-        )
+        if not verified:
+            return operation_packet(
+                ok=False,
+                goal_id=goal_id,
+                operation="connect_topic",
+                execute=True,
+                status="sent_unverified",
+                blocker="readback_mismatch",
+                public_summary="the Goal Topic was sent but could not be verified",
+                external_write_performed=True,
+            )
 
     connector_binding: dict[str, Any] | None = None
     if normalized_agent_id and ingress_mode != IngressMode.DIRECT_SESSION.value:
