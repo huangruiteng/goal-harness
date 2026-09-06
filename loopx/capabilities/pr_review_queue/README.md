@@ -178,6 +178,14 @@ typed evidence groups before a verdict:
 
 - problem context and active caller;
 - architecture and ownership flow;
+- repository reuse for behavior-bearing changes: search base and exact-head
+  code, including unchanged siblings, by caller outcome/resource rather than
+  only new filenames. Record revisions, queries, paths and candidate callers;
+  compare scope/filters, ordering/paging, authority/sanitization and state/retry
+  ownership. Prefer the nearest existing owner; justify independent boundaries
+  with evidence, not green CI or conflict-free coexistence. For alternative
+  views of one resource, validate consumer switching and concurrent updates
+  where relevant. Repeat the comparison after base integration or head changes;
 - exact changed-line classification across production, tests/fixtures, docs,
   generated output, and mechanical moves;
 - a 2-5 item exact-head symbol map for code-changing PRs, including caller,
@@ -220,6 +228,18 @@ required evidence ids, and an initially `unverified`
 hints, and green CI cannot upgrade evidence to `verified`. A stale-head verdict
 is prohibited. Missing evidence remains `unverified` with a reason instead of
 being replaced by confident prose.
+
+`repository_reuse` starts unverified in every applicable plan. Its conclusions
+are `reused`, `separation_justified`, `no_existing_candidate`,
+`unjustified_duplication`, or `not_yet_proven`. A negative search must name its
+scope and limitations; an empty candidate list is not proof of absence.
+Unjustified duplication or missing evidence requires a request-changes
+conclusion. Similar-looking code with distinct invariants or compatibility
+needs may legitimately remain separate. Ordinary docs retain their existing
+review path; smoke-only changes retain `durable_smoke_value` coverage review.
+This is a reviewer-executed contract projected by the packet, not an automatic
+repository search or a semantic validator of published prose. Tests establish
+packet applicability and verdict policy, not guaranteed model compliance.
 
 When `--state all` is used, the command must preserve both lifecycle groups.
 The `--limit` value is applied per group so a busy open queue cannot consume the

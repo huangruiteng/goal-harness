@@ -267,7 +267,7 @@ def main() -> int:
         if req.get("evidence_id") == "scope_fit"
     ]
     assert scope_fit_reqs, "scope_fit evidence requirement missing from contract"
-    assert scope_fit_reqs[0]["required_when"] == "code_change", scope_fit_reqs
+    assert scope_fit_reqs[0]["required_when"] == "behavior_bearing_change", scope_fit_reqs
     proportionality_reqs = [
         req
         for req in contract.get("evidence_requirements", [])
@@ -288,7 +288,7 @@ def main() -> int:
         if req.get("evidence_id") == "default_off_isolation"
     ]
     assert isolation_reqs, "default_off_isolation evidence requirement missing"
-    assert isolation_reqs[0]["required_when"] == "code_change"
+    assert isolation_reqs[0]["required_when"] == "behavior_bearing_change"
     assert "paired_counterfactual_validation" in isolation_reqs[0]["fields"]
     authority_reqs = [
         req
@@ -321,6 +321,9 @@ def main() -> int:
     assert code_pr["review_plan"]["applicability"]["scope_fit_required"] is True, (
         code_pr["review_plan"]
     )
+    reuse = code_pr["review_plan"]["result_template"]["evidence"]["repository_reuse"]
+    assert reuse == {"status": "unverified"}, reuse
+    assert code_pr["review_plan"]["applicability"]["repository_reuse_required"] is True
     assert (
         code_pr["review_plan"]["applicability"]["change_proportionality_required"]
         is True
@@ -343,6 +346,7 @@ def main() -> int:
     )
     assert docs_pr is not None, "fixture must include a docs-only PR"
     assert docs_pr["review_plan"]["applicability"]["scope_fit_required"] is False
+    assert "repository_reuse" not in docs_pr["review_plan"]["required_evidence_ids"]
     assert (
         docs_pr["review_plan"]["applicability"]["change_proportionality_required"]
         is False
@@ -686,6 +690,7 @@ def main() -> int:
     assert set(requirements) == {
         "problem_context",
         "architecture_flow",
+        "repository_reuse",
         "changed_line_classification",
         "scope_fit",
         "symbol_map",
@@ -752,6 +757,7 @@ def main() -> int:
     assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
     assert execution["completion_gate"]["blocking_evidence_verdicts"] == {
+        "repository_reuse": ["unjustified_duplication", "not_yet_proven"],
         "change_proportionality": ["disproportionate", "not_yet_proven"],
         "default_off_isolation": ["not_isolated", "not_yet_proven"],
         "authority_semantics": ["misleading", "not_yet_proven"],
