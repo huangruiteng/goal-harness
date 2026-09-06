@@ -82,7 +82,11 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         .map_err(|_| "runtime_bundle_missing")?
         .join("runtime/runtime-source.tar.gz");
     let bytes = fs::read(archive).map_err(|_| "runtime_bundle_missing")?;
-    let digest: String = Sha256::digest(&bytes)
+    install_snapshot(&bytes, &metadata)
+}
+
+fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
+    let digest: String = Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
@@ -90,7 +94,7 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         return Err("runtime_bundle_invalid".into());
     }
     let source = tempfile::tempdir().map_err(|_| "runtime_staging_failed")?;
-    extract(&bytes, source.path())?;
+    extract(bytes, source.path())?;
     #[cfg(not(windows))]
     let mut command = {
         let mut c = Command::new("bash");
@@ -112,9 +116,11 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
             }
         }
     }
-    let mut child = command
+    command
         .current_dir(source.path())
         .env("LOOPX_PROMOTE_DEFAULT", "1")
+        // The archive staging directory is temporary, never a canary checkout.
+        .env("LOOPX_INSTALL_CANARY", "0")
         .env_remove("LOOPX_ARCHIVE_URL")
         .env_remove("LOOPX_ARCHIVE_SHA256")
         .env("LOOPX_REPO", "huangruiteng/loopx")
@@ -125,7 +131,10 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         )
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(test)]
+    command.stderr(Stdio::inherit());
+    let mut child = command
         .group_spawn()
         .map_err(|_| "runtime_installer_unavailable")?;
     let started = Instant::now();
@@ -163,6 +172,11 @@ fn extract(bytes: &[u8], destination: &Path) -> Result<(), String> {
     let mut archive = tar::Archive::new(GzDecoder::new(bytes));
     for item in archive.entries().map_err(|_| "runtime_bundle_invalid")? {
         let mut entry = item.map_err(|_| "runtime_bundle_invalid")?;
+        // Git archive includes a global PAX header with the commit comment.
+        // It carries metadata only; never unpack it as a filesystem entry.
+        if entry.header().entry_type().is_pax_global_extensions() {
+            continue;
+        }
         // Git snapshots need files and directories only. Never materialize links,
         // devices or a path escaping the dedicated staging directory.
         if !entry.header().entry_type().is_file() && !entry.header().entry_type().is_dir() {
@@ -181,6 +195,30 @@ fn extract(bytes: &[u8], destination: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires isolated installer paths and a built App runtime bundle"]
+    fn real_bundled_installer_qualifies_selected_cli() {
+        let root = std::env::var("LOOPX_TEST_BUNDLE").expect("isolated bundle path");
+        for key in [
+            "LOOPX_BIN",
+            "LOOPX_BIN_DIR",
+            "LOOPX_RELEASES_DIR",
+            "LOOPX_REGISTRY",
+            "LOOPX_RUNTIME_ROOT",
+            "LOOPX_MAN_DIR",
+            "LOOPX_SKILLS_DIR",
+        ] {
+            assert!(
+                std::env::var(key).is_ok(),
+                "explicit isolated {key} required"
+            );
+        }
+        let root = Path::new(&root);
+        let metadata: Value =
+            serde_json::from_slice(&fs::read(root.join("identity.json")).unwrap()).unwrap();
+        let bytes = fs::read(root.join("runtime-source.tar.gz")).unwrap();
+        install_snapshot(&bytes, &metadata).unwrap();
+    }
     #[test]
     fn corrupt_archive_cannot_reach_installer() {
         let dir = tempfile::tempdir().unwrap();
