@@ -44,13 +44,6 @@ class ExtensionHookAdapterDiscovery:
     ports: tuple[ExtensionHookAdapterPortBinding, ...]
     failures: tuple[ExtensionHookAdapterFailure, ...]
 
-    def handlers(self, port_name: str) -> tuple[Callable[..., Any], ...]:
-        return tuple(
-            binding.handler
-            for binding in self.ports
-            if binding.port_name == port_name
-        )
-
 
 def _load_factory(reference: str) -> Callable[..., Mapping[str, Callable[..., Any]]]:
     module_name, separator, callable_name = reference.partition(":")

@@ -40,7 +40,6 @@ class PeriodicReportRequestPorts:
     adapter_id: str | None
     bind_source: SourceBinder | None
     settle_source: SourceSettler | None
-    failure_count: int = 0
 
 
 def _digest(value: object) -> str:
@@ -121,14 +120,12 @@ def discover_periodic_report_request_ports(
             adapter_id=None,
             bind_source=None,
             settle_source=None,
-            failure_count=len(discovery.failures),
         )
     adapter_id, ports = complete[0]
     return PeriodicReportRequestPorts(
         adapter_id=adapter_id,
         bind_source=ports[REQUEST_BIND_PORT],
         settle_source=ports[REQUEST_SETTLE_PORT],
-        failure_count=len(discovery.failures),
     )
 
 
