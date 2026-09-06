@@ -90,6 +90,21 @@ fn endpoint(channel: &str) -> Result<tauri::Url, String> {
         _ => return Err("invalid_update_channel".into()),
     }.parse().unwrap())
 }
+
+fn check_error(error: tauri_plugin_updater::Error) -> &'static str {
+    use tauri_plugin_updater::Error;
+    match error {
+        // The plugin discards non-success HTTP status codes, so this cannot
+        // distinguish an unpublished feed (404) from an unavailable server.
+        Error::ReleaseNotFound => "update_feed_unavailable",
+        Error::Serialization(_) => "update_feed_invalid",
+        Error::TargetNotFound(_) | Error::TargetsNotFound(_) => "update_platform_unavailable",
+        Error::Reqwest(error) if error.is_timeout() => "update_check_timeout",
+        Error::Reqwest(error) if error.is_decode() => "update_feed_invalid",
+        Error::Reqwest(_) => "update_network_failed",
+        _ => "update_check_failed",
+    }
+}
 #[tauri::command]
 pub fn desktop_update_status(app: AppHandle, state: State<'_, Maintenance>) -> Value {
     json!({"state": state.snapshot.lock().unwrap().clone(), "app_version": app.package_info().version.to_string(), "runtime": bundled_runtime::identity(&app).ok(), "rollback_available": crate::update_backup::available(&app)})
@@ -160,7 +175,7 @@ async fn perform(
             .map_err(|_| "update_unavailable")?
             .check()
             .await
-            .map_err(|_| "update_check_failed")?;
+            .map_err(check_error)?;
         let details = json!({"channel":channel,"version":update.as_ref().map(|v| &v.version),"current_version":app.package_info().version.to_string()});
         let phase = if update.is_some() {
             "available"
@@ -276,6 +291,27 @@ pub fn start_services(app: &AppHandle) -> Result<Option<crate::services::Service
 mod tests {
     use super::*;
     #[test]
+    fn check_failures_preserve_actionable_categories_without_diagnostics() {
+        use tauri_plugin_updater::Error;
+        assert_eq!(
+            check_error(Error::ReleaseNotFound),
+            "update_feed_unavailable"
+        );
+        assert_eq!(
+            check_error(Error::TargetNotFound("private-target".into())),
+            "update_platform_unavailable"
+        );
+        assert_eq!(
+            check_error(Error::Network("private-diagnostic".into())),
+            "update_check_failed"
+        );
+        let invalid = serde_json::from_str::<Value>("invalid").unwrap_err();
+        assert_eq!(
+            check_error(Error::Serialization(invalid)),
+            "update_feed_invalid"
+        );
+    }
+    #[test]
     fn transaction_is_singleflight_and_released_on_unwind() {
         let state = Maintenance::default();
         let guard = state.acquire().unwrap();
@@ -312,9 +348,14 @@ mod tests {
     fn service_failure_releases_recovery_and_later_success_is_ready() {
         let state = Maintenance::default();
         state.publish("connecting", json!({}));
-        assert!(state.reconcile_services::<()>(|| Err("occupied port".into())).is_err());
+        assert!(state
+            .reconcile_services::<()>(|| Err("occupied port".into()))
+            .is_err());
         assert_eq!(state.snapshot.lock().unwrap()["phase"], "service_error");
-        assert!(state.acquire().is_ok(), "recovery transaction must be available");
+        assert!(
+            state.acquire().is_ok(),
+            "recovery transaction must be available"
+        );
         assert_eq!(state.reconcile_services(|| Ok(())).unwrap(), Some(()));
         assert_eq!(state.snapshot.lock().unwrap()["phase"], "ready");
     }
@@ -323,9 +364,19 @@ mod tests {
     fn service_retry_cannot_race_maintenance_or_restart() {
         let state = Maintenance::default();
         let guard = state.acquire().unwrap();
-        assert_eq!(state.reconcile_services::<()>(|| panic!("must not start")).unwrap(), None);
+        assert_eq!(
+            state
+                .reconcile_services::<()>(|| panic!("must not start"))
+                .unwrap(),
+            None
+        );
         drop(guard);
         state.publish("restart_required", json!({}));
-        assert_eq!(state.reconcile_services::<()>(|| panic!("must not start")).unwrap(), None);
+        assert_eq!(
+            state
+                .reconcile_services::<()>(|| panic!("must not start"))
+                .unwrap(),
+            None
+        );
     }
 }
