@@ -75,7 +75,7 @@ jobs:
       - name: Run fast tests with coverage XML
         if: steps.sonar-token.outputs.available == 'true'
         run: >-
-          python -m pytest -q -n auto --maxprocesses=4 --dist=worksteal
+          python -m pytest -q -n 2
           --durations=25 --durations-min=1
           --cov=loopx
           --cov-report=term
