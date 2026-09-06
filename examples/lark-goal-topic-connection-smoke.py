@@ -17,9 +17,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
-from loopx.extensions.lark.goal_channel_contracts import read_goal_channel_binding
-from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets
+# Standalone smoke imports follow the repository-path bootstrap above.
+from loopx.chat_server import ChatHTTPServer, ChatRequestHandler  # noqa: E402
+from loopx.extensions.lark.goal_channel_contracts import binding_for_goal, read_goal_channel_binding  # noqa: E402
+from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets  # noqa: E402
 
 
 APP_ID = "cli_public_fixture"
@@ -136,6 +137,7 @@ def fake_lark_runner(state: dict[str, Any]):
                     "chats": [
                         {
                             "message_id": message_id,
+                            "chat_id": CHAT_ID,
                             "body": {"content": state.get("messages", {}).get(message_id, "")},
                         }
                     ]
@@ -232,6 +234,9 @@ def main() -> None:
                 assert preview["status"] == "preview_ready", preview
                 connected = request(base, "/api/chat/lark/connections", method="POST", body={**body, "execute": True})
                 assert connected["status"] == "connected" and connected["readback_verified"] is True, connected
+                reconnected = request(base, "/api/chat/lark/connections", method="POST", body={**body, "execute": True})
+                assert reconnected["status"] == "connected" and reconnected["readback_verified"] is True, reconnected
+                assert reconnected["external_write_performed"] is False, reconnected
 
             connections = request(base, "/api/chat/lark/connections")
             assert len(connections["connections"]) == 2, connections
@@ -243,12 +248,13 @@ def main() -> None:
             target_path = runtime / "goal-channel-targets.json"
             binding_path = registry_path.parent / "goal-channel.json"
             assert len(read_goal_channel_targets(target_path)["targets"]) == 1
-            bindings = read_goal_channel_binding(binding_path)["bindings"]
+            payload = read_goal_channel_binding(binding_path)
+            bindings = {goal_id: binding_for_goal(payload, goal_id, agent_id="agent-alpha") for goal_id in ("goal-alpha", "goal-beta")}
             assert bindings["goal-alpha"]["topic"]["root_message_id"] != bindings["goal-beta"]["topic"]["root_message_id"]
 
             disconnected = request(
                 base,
-                "/api/chat/lark/connections?goal_id=goal-alpha",
+                "/api/chat/lark/connections?goal_id=goal-alpha&connection_id=" + bindings["goal-alpha"]["connection_id"],
                 method="DELETE",
             )
             assert disconnected["status"] == "disconnected", disconnected
