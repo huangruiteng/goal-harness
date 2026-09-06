@@ -17,9 +17,11 @@ same selector definitions.
 | `auto-with-ds/MODEL` | A → B → C → DeepSeek | Explicit Standard text fallback |
 
 Sol and Astra each have these two visible options: four picker rows total.
-The catalog retains 19 hidden compatibility rows (Prefer A/B/C, Fast, Luna and
+The catalog retains 21 hidden compatibility rows (bare model ids, Prefer A/B/C, Fast, Luna and
 manual Ark identifiers), so existing tasks keep their metadata and route ids.
-Legacy Standard, bare Sol/Astra and Prefer aliases now stay within A/B/C. Only
+Legacy Standard, bare Sol/Astra and Prefer aliases now stay within A/B/C.
+Auto OAuth aliases use `fork: true` to retain the original model ids in CPA;
+a self-alias alone does not retain them. Only
 `auto-with-ds/` aliases admit Ark. Existing tasks are not silently opted into it.
 The four-route picker does not advertise Fast; the three-account picker retains
 native speed tiers. Image-bearing history excludes the text-only fallback.
@@ -131,7 +133,7 @@ refuses to signal a launchd-managed or unrelated process. For launchd, unload th
 specific configured service before changing its program, then load it again.
 The operator does not modify LaunchAgents, App bundles or App processes itself.
 Restart only the affected App after changing its model catalog, and verify the
-four-visible/19-hidden row readback. Model registration is not proof of account entitlement or a
+four-visible/21-hidden row readback. Model registration is not proof of account entitlement or a
 successful model call; perform a bounded live request separately.
 
 ## Early quota recovery

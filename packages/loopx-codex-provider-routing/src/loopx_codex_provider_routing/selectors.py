@@ -62,6 +62,7 @@ def aliases_for_slot(slot):
                 "alias": slug,
                 "display-name": route["display_name"],
                 "force-mapping": True,
+                "fork": slug.startswith("auto/"),
                 "routing-priority": 400 - 100 * route["order"].index(slot),
             }
         )

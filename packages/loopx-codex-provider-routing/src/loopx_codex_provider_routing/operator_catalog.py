@@ -18,6 +18,9 @@ from .selectors import FAST_MODELS, MODEL_FAMILIES, ROUTES, SLOTS, VISIBLE_SELEC
 
 SELECTORS = {slug: route["display_name"] for (slug, route) in ROUTES.items()}
 SELECTORS.update(
+    {model: f"{label} · Auto (legacy id)" for model, label in MODEL_FAMILIES.items()}
+)
+SELECTORS.update(
     {
         "ark/deepseek-v4-flash": "Ark · DeepSeek V4 Flash",
         "deepseek-v4-flash": "Ark · DeepSeek V4 Flash (legacy id)",
@@ -138,7 +141,7 @@ class AppCatalog:
         }
         entries = []
         for slug, label in SELECTORS.items():
-            route = ROUTES.get(slug)
+            route = ROUTES.get(slug, ROUTES.get(f"auto/{slug}"))
             if route:
                 source = deepcopy(sources[route["model"]])
                 if slug.removeprefix("fast/").startswith(("auto/", "auto-with-ds/")):

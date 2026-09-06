@@ -138,6 +138,8 @@ class OperatorTests(unittest.TestCase):
                     self.assertEqual(actual, order)
                     self.assertTrue(all(e["name"] == model for e in entries.values()))
                     self.assertEqual(ROUTES[slug]["tail"], [])
+                    if prefix == "auto" and not fast:
+                        self.assertTrue(all(e["fork"] for e in entries.values()))
         self.assertEqual(ROUTES["gpt-5.6-luna"]["tail"], [])
         compiled = compiled_routes()
         for row in compiled["selector_rows"]:
@@ -267,6 +269,9 @@ class OperatorTests(unittest.TestCase):
                             {
                                 **base,
                                 "slug": model,
+                                "input_modalities": ["text"]
+                                if key == "ark_catalog"
+                                else ["text", "image"],
                                 "context_window": 100000
                                 if model == "gpt-6-astra"
                                 else 50000,
@@ -278,12 +283,16 @@ class OperatorTests(unittest.TestCase):
             )
         catalog = AppCatalog(self.runtime)
         rows = {m["slug"]: m for m in catalog.generate_catalog()["models"]}
-        self.assertEqual(len(rows), 23)
+        self.assertEqual(len(rows), 25)
         self.assertEqual(
             {slug for slug, row in rows.items() if row["visibility"] == "list"},
             VISIBLE_SELECTORS,
         )
         self.assertEqual(len(VISIBLE_SELECTORS), 4)
+        self.assertEqual(
+            rows["gpt-6-astra"]["context_window"],
+            rows["auto/gpt-6-astra"]["context_window"],
+        )
         for slug in VISIBLE_SELECTORS:
             if slug.startswith("auto-with-ds/"):
                 self.assertEqual(rows[slug]["service_tiers"], [])
@@ -309,6 +318,21 @@ class OperatorTests(unittest.TestCase):
         first = sha256(self.runtime.MODEL_CATALOG)
         catalog.write_catalog()
         self.assertEqual(first, sha256(self.runtime.MODEL_CATALOG))
+        with (
+            patch.object(self.runtime, "check_artifacts"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.runtime.validate()
+            broken = json.loads(self.runtime.MODEL_CATALOG.read_text())
+            row = next(
+                row
+                for row in broken["models"]
+                if row["slug"] == "auto-with-ds/gpt-6-astra"
+            )
+            row["additional_speed_tiers"] = ["fast"]
+            write_private(self.runtime.MODEL_CATALOG, json.dumps(broken))
+            with self.assertRaisesRegex(RuntimeError, "standard-only"):
+                self.runtime.validate()
 
     def test_new_preset_qualification_and_negative_fast_admission(self):
         from copy import deepcopy

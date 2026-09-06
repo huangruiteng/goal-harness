@@ -628,7 +628,10 @@ class CPAOperator(ObservationMixin):
                     for tier in item.get("service_tiers", [])
                     if isinstance(tier, dict)
                 }
-                if "fast" not in speed_tiers or "priority" not in service_tiers:
+                if ROUTES[model]["tail"]:
+                    if speed_tiers or service_tiers:
+                        errors.append(f"model-catalog-standard-only:{model}")
+                elif "fast" not in speed_tiers or "priority" not in service_tiers:
                     errors.append(f"model-catalog-fast-tier:{model}")
                 expected_default = "fast" if model in FAST_MODELS else None
                 if item.get("default_service_tier") != expected_default:
@@ -689,5 +692,5 @@ class CPAOperator(ObservationMixin):
                     "runtime model catalog missing: " + ",".join(missing)
                 )
         print(
-            "validate-ok slots=A,B,C models=Sol,Astra auto=A-B-C-Ark prefer-b=B-C-A-Ark prefer-c=C-A-B-Ark luna=A-B-C fast-routes=A-B-C"
+            "validate-ok slots=A,B,C models=Sol,Astra auto=A-B-C auto-with-ds=A-B-C-Ark"
         )
