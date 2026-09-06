@@ -245,7 +245,11 @@ def binding_for_goal(
         )
         if selected is not None:
             return selected
-    return candidates[0] if candidates else None
+    # Keep the invalid-default fallback aligned with the writer in
+    # _without_goal_topic_connection, which promotes min(connection_id).
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: str(item.get("connection_id") or ""))
 
 
 def human_gate_auto_notify_enabled(binding: Mapping[str, Any] | None) -> bool:

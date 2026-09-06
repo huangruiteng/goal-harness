@@ -1406,10 +1406,7 @@ def _without_goal_topic_connection(
 
 
 def _unregister_async_inbox(
-    *,
-    removed: Mapping[str, Any] | None,
-    registry_path: Path | None,
-    goal_id: str,
+    *, removed: Mapping[str, Any] | None, registry_path: Path | None, goal_id: str
 ) -> tuple[dict[str, Any] | None, str]:
     routing = removed.get("routing") if isinstance(removed, Mapping) else None
     routing = routing if isinstance(routing, Mapping) else {}
@@ -1417,18 +1414,21 @@ def _unregister_async_inbox(
     if routing.get("ingress_mode") != IngressMode.ASYNC_INBOX.value or not agent_id:
         return None, agent_id
     if registry_path is None:
-        return {
-            "ok": False,
-            "error": "source registry path is required to unregister the Agent inbox",
-        }, agent_id
-    return configure_goal_with_global_sync(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        runtime_root_override=None,
-        execute=True,
-        lark_event_inbox_agent_id=agent_id,
-        clear_lark_event_inbox_config=True,
-    ), agent_id
+        error = "source registry path is required to unregister the Agent inbox"
+        return {"ok": False, "error": error}, agent_id
+    try:
+        return configure_goal_with_global_sync(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            runtime_root_override=None,
+            execute=True,
+            lark_event_inbox_agent_id=agent_id,
+            clear_lark_event_inbox_config=True,
+        ), agent_id
+    except (OSError, ValueError, TimeoutError) as exc:
+        # The binding removal already landed; report the cleanup failure as a
+        # failed packet instead of raising past the caller mid-disconnect.
+        return {"ok": False, "error": str(exc)}, agent_id
 
 
 @serialize_goal_binding_mutation
