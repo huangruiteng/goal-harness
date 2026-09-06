@@ -264,6 +264,24 @@ loopx status</code></pre>
 
 </section>
 
+<section id="references">
+<h2>References and further reading</h2>
+<h3>Original essay</h3>
+<ul><li><a href="https://my.feishu.cn/wiki/DPdLwMajaiEmWHky7jhcPOtEnEf">Original Chinese essay on Feishu: From one-shot agents to long-horizon control</a>. The longer original and this edited bilingual edition are maintained separately.</li></ul>
+<h3>LoopX implementation and experimental evidence</h3>
+<ul>
+<li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/docs/architecture.md">LoopX architecture</a>: the design of goals, state, and execution boundaries. For operating instructions, start with the <a href="../../docs/book/en/">Developer Book</a>.</li>
+<li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/loopx/control_plane/effect_program.ts">Effect Program implementation</a> and <a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/tests/control_plane_ts/effect_program.test.ts">its tests</a>: settlement order, receipts, replay, and recovery from interruptions.</li>
+<li><a href="../../benchmarks/swe-marathon/">Bilingual SWE-Marathon research brief</a> and <a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/benchmark/swe-marathon/data.json">pinned aggregate data</a>: settings, results, costs, and limitations across five execution modes.</li>
+</ul>
+<h3>Related public materials</h3>
+<ul>
+<li><a href="https://openai.com/index/trustworthy-third-party-evaluations-foundations/">OpenAI: A shared playbook for trustworthy third party evaluations</a>: how harness and budget choices shape evaluation claims.</li>
+<li><a href="https://docs.langchain.com/oss/python/langgraph/persistence">LangGraph: Persistence</a>: checkpointing, recovery, and human intervention.</li>
+<li><a href="https://docs.temporal.io/activities">Temporal: Activities</a>: external work, retries, and application-level idempotency.</li>
+</ul>
+</section>
+
   <p class="edition">Public blog edition. Implementation references are pinned to <a href="https://github.com/huangruiteng/loopx/tree/41a35880fc63ed8b51696e08ec1f17b5369b1a4b">41a3588</a>; use the current documentation for operating instructions.</p>
   </article>
 </div>
