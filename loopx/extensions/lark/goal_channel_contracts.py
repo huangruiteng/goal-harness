@@ -216,40 +216,50 @@ def binding_for_goal(
     agent_id: str | None = None,
     connection_id: str | None = None,
 ) -> dict[str, Any] | None:
-    candidates = bindings_for_goal(
-        payload,
-        goal_id,
-        provider_target=provider_target,
-    )
+    # Select one raw connection before resolving its provider target. A target
+    # belongs to one connection; applying it to every sibling lets an unrelated
+    # Agent's target invalidate the requested Agent's otherwise valid binding.
+    candidates = bindings_for_goal(payload, goal_id)
+    selected: dict[str, Any] | None = None
     if connection_id:
-        return next(
+        selected = next(
             (item for item in candidates if item.get("connection_id") == connection_id),
             None,
         )
-    if agent_id is not None:
-        return next(
+    elif agent_id is not None:
+        selected = next(
             (item for item in candidates if item.get("agent_id") == agent_id),
             None,
         )
-    bindings = payload.get("bindings")
-    stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
-    default_id = (
-        str(stored.get("default_connection_id") or "")
-        if isinstance(stored, Mapping)
-        else ""
-    )
-    if default_id:
-        selected = next(
-            (item for item in candidates if item.get("connection_id") == default_id),
-            None,
+    else:
+        bindings = payload.get("bindings")
+        stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
+        default_id = (
+            str(stored.get("default_connection_id") or "")
+            if isinstance(stored, Mapping)
+            else ""
         )
-        if selected is not None:
-            return selected
-    # Keep the invalid-default fallback aligned with the writer in
-    # _without_goal_topic_connection, which promotes min(connection_id).
-    if not candidates:
-        return None
-    return min(candidates, key=lambda item: str(item.get("connection_id") or ""))
+        if default_id:
+            selected = next(
+                (
+                    item
+                    for item in candidates
+                    if item.get("connection_id") == default_id
+                ),
+                None,
+            )
+        if selected is None and candidates:
+            # Keep the invalid-default fallback aligned with the writer in
+            # _without_goal_topic_connection, which promotes min(connection_id).
+            selected = min(
+                candidates,
+                key=lambda item: str(item.get("connection_id") or ""),
+            )
+    return (
+        _resolve_goal_binding(selected, provider_target=provider_target)
+        if selected is not None
+        else None
+    )
 
 
 def human_gate_auto_notify_enabled(binding: Mapping[str, Any] | None) -> bool:
