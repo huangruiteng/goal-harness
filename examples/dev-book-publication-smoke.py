@@ -331,6 +331,8 @@ def main() -> int:
 
     project_version = tomllib.loads(read(REPO_ROOT / "pyproject.toml"))["project"]["version"]
     release_tag = f"v{project_version}"
+    # Historical migration milestones must not move with the package version.
+    migration_baseline_tag = "v0.5.4"
     release_markers = {
         "index.md": (
             f"LoopX 发布锚点：`{release_tag}`",
@@ -410,7 +412,7 @@ def main() -> int:
         "chapters/03-one-turn.md",
         "en/chapters/03-one-turn.md",
         (
-            (f"`{release_tag}` 仍提供", f"`{release_tag}` still ships"),
+            (f"`{migration_baseline_tag}` 仍提供", f"`{migration_baseline_tag}` still ships"),
             ("显式 opt-in 集成", "explicit opt-in integrations"),
             ("Turn settlement", "Turn settlement"),
             ("Todo completion", "Todo completion"),
@@ -427,7 +429,7 @@ def main() -> int:
         "chapters/state-substrate.md",
         "en/chapters/state-substrate.md",
         (
-            (f"`{release_tag}` 的 shared-authority 工作", f"Shared-authority work in `{release_tag}`"),
+            (f"`{migration_baseline_tag}` 的 shared-authority 工作", f"Shared-authority work in `{migration_baseline_tag}`"),
             ("provider-neutral TypeScript `AuthorityStore` contract", "provider-neutral TypeScript `AuthorityStore` contract"),
             ("不自动获得 runtime authority", "do not acquire runtime authority automatically"),
             ("不应倒推成", "are not evidence that"),
@@ -448,7 +450,7 @@ def main() -> int:
         "chapters/source-protocol-map.md",
         "en/chapters/source-protocol-map.md",
         (
-            (f"在 `{release_tag}` 的迁移基线上", f"On the `{release_tag}` migration baseline"),
+            (f"在 `{migration_baseline_tag}` 的迁移基线上", f"On the `{migration_baseline_tag}` migration baseline"),
             ("bounded context 和实现语言是两个维度", "bounded context and implementation language are separate dimensions"),
             ("本地 task-lease lifecycle", "local task-lease lifecycle"),
             ("receipt-bound scheduler follow-up", "receipt-bound scheduler follow-up"),
@@ -472,7 +474,7 @@ def main() -> int:
         "en/chapters/appendix-reference.md",
         (
             ("loopx todo list --goal-id <goal-id> --thin --format json", "loopx todo list --goal-id <goal-id> --thin --format json"),
-            (f"`{release_tag}` 新增的 `todo list --thin`", f"The `todo list --thin` option added in `{release_tag}`"),
+            (f"`{migration_baseline_tag}` 新增的 `todo list --thin`", f"The `todo list --thin` option added in `{migration_baseline_tag}`"),
             ("不改变默认 list 的选择、排序、quota 或 lifecycle 语义", "without changing default selection, ordering, quota, or lifecycle semantics"),
         ),
     )
