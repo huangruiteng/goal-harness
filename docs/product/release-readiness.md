@@ -534,6 +534,14 @@ path, and canary route rather than as a user-facing release baseline.
   advances staged file, PostgreSQL, and NoKV shared-authority providers;
   completes the periodic-report lifecycle; makes the DSH plugin one-step ready; and adds
   public-safe benchmark study projection without granting upload authority.
+- `v1.0.0` on 2026-09-06 20:44 +08:00: the Workspace milestone release at the
+  matching `v1.0.0` tag (merge `d6e8387e`). The desktop companion gains signed
+  in-app updates with a paired runtime and a recovery path for interrupted
+  installs (#3994); Todo claim and update authority finishes its
+  claim-neutral correction through the TypeScript transaction (#4005, with
+  promoted claim retry identity from #3987); multi-agent Goal Channels ship
+  with per-agent connection resolution (#3969); and reward-memory recall
+  guides outbound messages behind a digest-bound review loop (#3968).
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.
