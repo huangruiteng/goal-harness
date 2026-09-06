@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: signed-desktop-${{ github.event.release.tag_name || 'main' }}
+  group: signed-desktop-${{ github.event_name == 'release' && 'stable' || 'main' }}
   cancel-in-progress: false
 
 jobs:
@@ -36,12 +36,13 @@ jobs:
       - run: cargo test --locked && cargo clippy --all-targets --locked -- -D warnings
         working-directory: apps/desktop/loopx-control-plane/src-tauri
   identity:
-    if: github.repository == 'huangruiteng/loopx' && (github.event_name == 'release' || github.ref == 'refs/heads/main')
+    if: github.repository == 'huangruiteng/loopx' && ((github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) || (github.event_name != 'release' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.identity.outputs.ref }}
       version: ${{ steps.identity.outputs.version }}
       tag: ${{ steps.identity.outputs.tag }}
+      channel: ${{ steps.identity.outputs.channel }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,18 +50,23 @@ jobs:
       - id: identity
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease || false }}
         run: |
           set -euo pipefail
           echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           if [ -n "$RELEASE_TAG" ]; then
+            channel="$(python3 scripts/desktop_update_feed.py --classify-release "$RELEASE_TAG" --prerelease "$IS_PRERELEASE")"
+            echo "channel=$channel" >> "$GITHUB_OUTPUT"
             echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
             echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           else
+            echo "channel=main" >> "$GITHUB_OUTPUT"
             echo "version=0.0.0-main.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
             echo "tag=desktop-main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
           fi
   build:
     needs: identity
+    if: needs.identity.outputs.channel == 'stable' || needs.identity.outputs.channel == 'main'
     strategy:
       fail-fast: false
       matrix:
@@ -135,6 +141,7 @@ jobs:
           RELEASE_TAG: ${{ needs.identity.outputs.tag }}
           SOURCE_REF: ${{ needs.identity.outputs.ref }}
           EVENT_NAME: ${{ github.event_name }}
+          CHANNEL: ${{ needs.identity.outputs.channel }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" != release ]; then
@@ -144,7 +151,9 @@ jobs:
             gh release upload "$RELEASE_TAG" "$artifact"
           done
           gh release upload "$RELEASE_TAG" dist/updater/desktop-updater.json --clobber
-          if [ "$EVENT_NAME" != release ]; then
-            gh release view desktop-main >/dev/null 2>&1 || gh release create desktop-main --prerelease --target "$SOURCE_REF" --title "Desktop main channel" --notes "Pointer to the latest complete signed desktop build."
-            gh release upload desktop-main dist/updater/desktop-updater.json --clobber
-          fi
+          # Channel pointers are independent of repository Latest, which also
+          # serves separately versioned plugin releases. Advance only after the
+          # immutable signed assets and feed are completely uploaded.
+          pointer="desktop-$CHANNEL"
+          gh release view "$pointer" >/dev/null 2>&1 || gh release create "$pointer" --prerelease --latest=false --target "$SOURCE_REF" --title "Desktop $CHANNEL channel" --notes "Pointer to the latest complete signed desktop build."
+          gh release upload "$pointer" dist/updater/desktop-updater.json --clobber
