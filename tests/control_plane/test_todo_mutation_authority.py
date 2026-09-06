@@ -224,6 +224,20 @@ def test_multi_agent_update_requires_actor_and_is_atomic(tmp_path: Path) -> None
     assert state.read_text(encoding="utf-8") == before
 
 
+def test_registered_actor_can_correct_unclaimed_todo_without_claim(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = _add_agent_todo(registry, claimed_by=None)
+    result = update_goal_todo(
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT, text="Correct unclaimed copy", note="Correct note",
+    )
+    assert result["mutation_authority"]["mode"] == "registered_peer_actor"
+    corrected = _agent_todo(state, todo["todo_id"])
+    assert corrected["text"] == "Correct unclaimed copy"
+    assert corrected["note"] == "Correct note"
+    assert not corrected.get("claimed_by")
+
+
 def test_excluded_actor_cannot_mutate_unclaimed_todo(tmp_path: Path) -> None:
     registry, state = _write_fixture(tmp_path)
     todo = _add_agent_todo(

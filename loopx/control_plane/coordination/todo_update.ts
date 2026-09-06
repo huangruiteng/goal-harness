@@ -155,8 +155,16 @@ function targetRejection(
     return failure("unsupported_todo_update_target",
       "native metadata update currently requires a non-completed agent Todo");
   }
-  if (todo.claimed_by !== input.actor_agent_id) {
-    return failure("update_owner_mismatch", "Todo update requires the current claim owner");
+  if (Array.isArray(todo.excluded_agents) && todo.excluded_agents.includes(input.actor_agent_id)) {
+    return failure("actor_excluded", "Todo update actor is excluded from this Todo");
+  }
+  if (todo.bound_agent && todo.bound_agent !== input.actor_agent_id) {
+    return failure("bound_agent_mismatch", "Todo update requires the bound agent");
+  }
+  // Text/note correction is not a claim or an execution transition. Registered
+  // peers may edit unclaimed work, but must not edit another owner's work.
+  if (todo.claimed_by && todo.claimed_by !== input.actor_agent_id) {
+    return failure("update_owner_mismatch", "Todo update cannot edit another claim owner's work");
   }
   // Lease-bearing updates need an execution-instance fence in addition to the
   // actor identity. Until the native request carries that proof, fail closed.

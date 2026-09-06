@@ -17,10 +17,11 @@ function todo(overrides: Record<string, unknown> = {}) {
     claimed_by: "agent-a", note: "old note", ...overrides};
 }
 
-async function seeded() {
+async function seeded(overrides: Record<string, unknown> = {}) {
   const root = await mkdtemp(join(tmpdir(), "loopx-todo-update-"));
   const store = new FileAuthorityStore(root, "goal-a");
-  const records = [todo()];
+  const records = [todo(overrides)];
+  if (records[0]!.claimed_by === null) Reflect.deleteProperty(records[0]!, "claimed_by");
   await store.commitAuthority({operation_id: "seed", expected_provider_revision: null,
     events: [], receipts: [], next_projection: {goal_id: "goal-a", todos: records, leases: [],
       todo_read_model: {schema_version: TODO_DOMAIN_READ_RECORD_SCHEMA, todo_count: 1,
@@ -52,6 +53,40 @@ test("provider-first update commits complete record and replays by intent", asyn
     patch: {text: "Different"}})).reason_code, "coordination_operation_identity_mismatch");
 });
 
+test("unclaimed text edits are claim-neutral, including preview and replay", async () => {
+  const {store, request} = await seeded({claimed_by: null});
+  const before = await store.loadAuthority();
+  for (const actor_agent_id of [null, "unknown"]) {
+    assert.equal((await executeCoordinationTodoUpdate(store, {...request, actor_agent_id})).reason_code,
+      "actor_not_registered");
+  }
+  assert.equal((await executeCoordinationTodoUpdate(store, {...request, dry_run: true})).status, "planned");
+  assert.deepEqual(await store.loadAuthority(), before);
+  assert.equal((await executeCoordinationTodoUpdate(store, request)).status, "applied");
+  assert.equal((await executeCoordinationTodoUpdate(store, request)).status, "replayed");
+  const after = await store.loadAuthority();
+  assert.equal(after.status, "loaded");
+  if (after.status !== "loaded") return;
+  const updated = (after.head.todos as Record<string, unknown>[])[0]!;
+  assert.equal(updated.text, "New text");
+  assert.equal(updated.note, undefined);
+  assert.equal(Object.hasOwn(updated, "claimed_by"), false);
+  assert.equal(updated.last_actor_agent_id, "agent-a");
+});
+
+test("unclaimed edits preserve actor exclusion and binding fences", async () => {
+  for (const [overrides, reason] of [
+    [{excluded_agents: ["agent-a"]}, "actor_excluded"],
+    [{bound_agent: "agent-b"}, "bound_agent_mismatch"],
+  ] as const) {
+    const {store, request} = await seeded({claimed_by: null, ...overrides});
+    const before = await store.loadAuthority();
+    assert.equal((await executeCoordinationTodoUpdate(store, request)).reason_code, reason);
+    assert.deepEqual(await store.loadAuthority(), before);
+    assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+  }
+});
+
 test("provider-first update rejects authority and lifecycle escalation", async () => {
   const {store, request} = await seeded();
   assert.equal((await executeCoordinationTodoUpdate(store, {...request,
@@ -74,8 +109,9 @@ test("provider-first update rejects authority and lifecycle escalation", async (
   }
 });
 
-test("provider-first update fails closed without a hard-lease execution proof", async () => {
-  const {store, request} = await seeded();
+for (const claimed_by of ["agent-a", null]) {
+test(`provider-first update fails closed without a hard-lease execution proof (${claimed_by ?? "unclaimed"})`, async () => {
+  const {store, request} = await seeded({claimed_by});
   const head = await store.loadAuthority();
   assert.equal(head.status, "loaded");
   if (head.status !== "loaded") return;
@@ -89,6 +125,7 @@ test("provider-first update fails closed without a hard-lease execution proof", 
   assert.equal(result.reason_code, "update_lease_unsupported");
   assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
 });
+}
 
 test("provider-first update records no-change identity without state mutation", async () => {
   const {store, request} = await seeded();

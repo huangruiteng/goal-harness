@@ -28,6 +28,13 @@ coordination 路径使用同一份语言中立的 `coordination_state_contract_v
 仅将 typed read result 适配为兼容 summary。这是 contract 检查点，不是已经完成的
 CLI lifecycle cutover。
 
+Provider-first `todo update --text/--note` 保留不改变认领关系的文案修正：
+已注册、未被排除且符合 agent binding 的 actor，可以编辑未认领、active 且未完成的
+agent Todo，不得因此写入 `claimed_by`；其他 claim owner 的 Todo 仍拒绝修改。
+只允许 patch/clear text 与 note，不授予治理字段修改权或 hard-lease 执行权。
+资格检查、CAS 与 receipt replay 由 TS 事务持有；promotion 不应把文案修正变成认领。
+Provider conformance 同时覆盖原生与 v0 记录，真实 CLI 在无 Markdown 时验证该行为。
+
 默认 Markdown 与显式 promotion 两条 `todo claim` 路径现在都由同一个 TS claim
 decision 处理 actor、registration、role、status、archive、exclusion 与现有 owner
 检查；Python legacy writer 只在持锁后提交该 decision。显式 promotion 后，claim
