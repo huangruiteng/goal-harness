@@ -86,9 +86,9 @@ The official public protocols remain authoritative for protocol facts. Commands 
 releases remain authoritative in the release you use, its current `--help`, and official documentation.
 This book owns the learning path and explanatory model, not another complete command reference.
 
-In `v1.0.0`, key semantics for the Effect Program, Turn settlement, Todo completion, quota delivery
+In `v0.5.4`, key semantics for the Effect Program, Turn settlement, Todo completion, quota delivery
 routing, workspace causality, and scheduler state sit behind typed TypeScript owners. During the
 migration, the Python CLI still owns transport, legacy projections, external Provider calls, and some
 durable writeback. These are not two independently evolving control planes. Treat the
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)
-on current `main` as the direction for later stages, not as shipped `v1.0.0` behavior.
+on current `main` as the direction for later stages, not as shipped `v0.5.4` behavior.
