@@ -571,7 +571,11 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
   });
   await page.route("**/periodic-report-workspace?*", async (route) => {
-    const goalId = new URL(route.request().url()).searchParams.get("goal_id");
+    const requestUrl = new URL(route.request().url());
+    const goalId = requestUrl.searchParams.get("goal_id");
+    if (requestUrl.searchParams.get("limit") !== "100" || requestUrl.searchParams.get("offset") !== "0") {
+      throw new Error("Periodic-report index request did not negotiate a bounded window");
+    }
     const items = goalId === periodicReportProjection.goal_id ? [{
       goal_id: periodicReportProjection.goal_id,
       agent_id: periodicReportProjection.agent_id,
@@ -588,7 +592,19 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     }] : [];
     await route.fulfill({
       contentType: "application/json",
-      json: { ok: true, periodic_reports: { schema_version: "periodic_report_workspace_index_v0", count: items.length, items } },
+      json: {
+        ok: true,
+        periodic_reports: {
+          schema_version: "periodic_report_workspace_index_v0",
+          count: items.length,
+          returned_count: items.length,
+          total_count: items.length,
+          limit: 100,
+          offset: 0,
+          truncated: false,
+          items,
+        },
+      },
       status: 200,
     });
   });

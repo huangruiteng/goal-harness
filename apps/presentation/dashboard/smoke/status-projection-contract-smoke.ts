@@ -1,4 +1,10 @@
-import { parseStatusPayload } from "../src/data/status";
+import { z } from "zod";
+
+import {
+  parseStatusPayload,
+  periodicReportIndexItemSchema,
+  periodicReportIndexResponseSchema,
+} from "../src/data/status";
 import { mergeScopedStatusProjections } from "../src/data/status-merge";
 import {
   beginStatusRequest,
@@ -401,5 +407,60 @@ const fg = beginStatusRequest(fence, url, { background: false });
 assert(fg !== null, "foreground request starts");
 assert(!statusRequestCanCommit(fence, bg2), "background request cannot commit after foreground started");
 assert(statusRequestCanCommit(fence, fg), "foreground request can commit");
+
+// 8) periodic-report index remains compatible across staggered app/server upgrades.
+const periodicReportItem = {
+  goal_id: "synthetic-goal",
+  agent_id: "synthetic-agent",
+  generation_id: "generation-one",
+  publication_id: "publication-one",
+  delivered_at: "2026-09-06T00:00:00Z",
+  detail_ref: {
+    goal_id: "synthetic-goal",
+    agent_id: "synthetic-agent",
+    generation_id: "generation-one",
+    content_sha256: `sha256:${"1".repeat(64)}`,
+  },
+};
+const legacyPeriodicReportIndexResponseSchema = z.object({
+  ok: z.literal(true),
+  periodic_reports: z.object({
+    schema_version: z.literal("periodic_report_workspace_index_v0"),
+    count: z.number().int().nonnegative(),
+    items: z.array(periodicReportIndexItemSchema),
+  }).strict(),
+}).strict();
+const legacyIndexResponse = {
+  ok: true as const,
+  periodic_reports: {
+    schema_version: "periodic_report_workspace_index_v0" as const,
+    count: 1,
+    items: [periodicReportItem],
+  },
+};
+const newServerLegacyIndexResponse = {
+  ...legacyIndexResponse,
+  periodic_reports: { ...legacyIndexResponse.periodic_reports },
+};
+const windowedIndexResponse = {
+  ok: true as const,
+  periodic_reports: {
+    ...legacyIndexResponse.periodic_reports,
+    returned_count: 1,
+    total_count: 1,
+    limit: 100,
+    offset: 0,
+    truncated: false,
+  },
+};
+legacyPeriodicReportIndexResponseSchema.parse(legacyIndexResponse);
+periodicReportIndexResponseSchema.parse(legacyIndexResponse);
+legacyPeriodicReportIndexResponseSchema.parse(newServerLegacyIndexResponse);
+periodicReportIndexResponseSchema.parse(windowedIndexResponse);
+equal(
+  periodicReportIndexResponseSchema.parse(legacyIndexResponse).periodic_reports.total_count,
+  1,
+  "new reader normalizes a legacy index response",
+);
 
 console.log("status projection contract smoke: ok");

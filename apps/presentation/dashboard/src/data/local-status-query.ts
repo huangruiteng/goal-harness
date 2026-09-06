@@ -144,6 +144,8 @@ export function periodicReportApiUrls(
 export async function fetchPeriodicReportIndex(indexUrl: string, goalId: string) {
   const url = new URL(indexUrl);
   url.searchParams.set("goal_id", goalId);
+  url.searchParams.set("limit", "100");
+  url.searchParams.set("offset", "0");
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} while loading published reports`);

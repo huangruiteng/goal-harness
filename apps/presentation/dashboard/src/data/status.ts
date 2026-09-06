@@ -856,13 +856,35 @@ export const periodicReportIndexItemSchema = z.object({
   detail_ref: periodicReportDetailRefSchema,
 }).strict();
 
+const periodicReportIndexBaseSchema = z.object({
+  schema_version: z.literal("periodic_report_workspace_index_v0"),
+  count: z.number().int().nonnegative(),
+  items: z.array(periodicReportIndexItemSchema),
+});
+
+const periodicReportWindowedIndexSchema = periodicReportIndexBaseSchema.extend({
+  returned_count: z.number().int().nonnegative(),
+  total_count: z.number().int().nonnegative(),
+  limit: z.number().int().nonnegative(),
+  offset: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+}).strict();
+
+const periodicReportLegacyIndexSchema = periodicReportIndexBaseSchema.strict().transform((value) => ({
+  ...value,
+  returned_count: value.count,
+  total_count: value.count,
+  limit: value.count,
+  offset: 0,
+  truncated: false,
+}));
+
 export const periodicReportIndexResponseSchema = z.object({
   ok: z.literal(true),
-  periodic_reports: z.object({
-    schema_version: z.literal("periodic_report_workspace_index_v0"),
-    count: z.number().int().nonnegative(),
-    items: z.array(periodicReportIndexItemSchema),
-  }).strict(),
+  periodic_reports: z.union([
+    periodicReportWindowedIndexSchema,
+    periodicReportLegacyIndexSchema,
+  ]),
 }).strict();
 
 export const periodicReportProjectionSchema = z.object({
