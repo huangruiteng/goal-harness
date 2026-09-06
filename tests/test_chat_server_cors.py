@@ -186,3 +186,57 @@ def test_chat_status_rejects_invalid_goal_activation_scope(monkeypatch) -> None:
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def test_workspace_directory_skips_expensive_projection_and_respects_scope(monkeypatch) -> None:
+    registry = {"goals": [{"id": "alpha", "display_name": "Alpha"}, {"id": "beta"}]}
+    monkeypatch.setattr("loopx.chat_status_api.load_registry", lambda _: registry)
+    monkeypatch.setattr("loopx.chat_status_api.collect_status", lambda **_: (_ for _ in ()).throw(AssertionError("directory must not collect status")))
+    server, thread = _start_server()
+    server.selected_goal_id = "alpha"
+    try:
+        response = _request(server.server_address[1], method="GET", origin=None, path="/status.json?view=workspace-directory")
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert [goal["id"] for goal in payload["goals"]] == ["alpha"]
+        assert payload["schema_version"] == "loopx_workspace_directory_v1"
+        for query in ("goal_id=beta", "goal_id=alpha&goal_id=beta", "goal_id=", "view=unknown", "view=workspace-directory&view=workspace-directory"):
+            response = _request(server.server_address[1], method="GET", origin=None, path="/status.json?" + query)
+            response.read()
+            assert response.status == 400
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_workspace_scoped_status_revision_and_membership_fences(monkeypatch) -> None:
+    registry = {"goals": [{"id": "alpha"}, {"id": "beta"}]}
+    monkeypatch.setattr("loopx.chat_status_api.load_registry", lambda _: registry)
+    calls = []
+    def collect(**kwargs):
+        calls.append(kwargs["goal_id"])
+        return {"ok": True}
+    monkeypatch.setattr("loopx.chat_status_api.collect_status", collect)
+    server, thread = _start_server()
+    try:
+        response = _request(server.server_address[1], method="GET", origin=None, path="/status.json?goal_id=alpha")
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert calls == ["alpha"]
+        assert payload["workspace_registry_revision"]
+        response = _request(server.server_address[1], method="GET", origin=None, path="/status.json?goal_id=missing")
+        response.read()
+        assert response.status == 404
+        assert calls == ["alpha"]
+        def racing_collect(**kwargs):
+            registry["goals"].pop()
+            return {"ok": True}
+        monkeypatch.setattr("loopx.chat_status_api.collect_status", racing_collect)
+        response = _request(server.server_address[1], method="GET", origin=None, path="/status.json?goal_id=alpha")
+        response.read()
+        assert response.status == 409
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()

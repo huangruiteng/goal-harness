@@ -57,10 +57,10 @@ export function GoalSidebar({
         onClick={() => onSelectGoal(goal.goalId)}
         type="button"
       >
-        <span className={`personal-goal-state-dot ${goalStateClass[goal.state]}`} />
+        <span className={`personal-goal-state-dot ${goal.loadState ? "" : goalStateClass[goal.state]}`} />
         <span className="personal-goal-link-copy">
           <strong>{goal.title}</strong>
-          <small>{localizedGoalState(goal.state, locale)}{goal.needsYou && !stopped ? ` · ${t("home.lane.needsYou")}` : ""}</small>
+          <small>{(goal.loadState ? t(goal.loadState === "error" ? "startup.goalError" : "startup.goalLoading") : localizedGoalState(goal.state, locale))}{goal.needsYou && !stopped ? ` · ${t("home.lane.needsYou")}` : ""}</small>
         </span>
         <ChevronRight size={15} />
       </button>

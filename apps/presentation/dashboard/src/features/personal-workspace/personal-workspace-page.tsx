@@ -104,7 +104,7 @@ function ManagerHomeBoard({
   const active = Object.fromEntries(activeHomeLanes.map((lane) => [lane.key, [] as WorkspaceGoal[]])) as Record<(typeof activeHomeLanes)[number]["key"], WorkspaceGoal[]>;
   const history: WorkspaceGoal[] = [];
   const stopped: WorkspaceGoal[] = [];
-  goals.forEach((goal) => {
+  goals.filter((goal) => !goal.loadState).forEach((goal) => {
     const lane = workspaceHomeLaneForGoal(goal);
     if (lane === "history") history.push(goal);
     else if (lane === "stopped") stopped.push(goal);
@@ -117,7 +117,7 @@ function ManagerHomeBoard({
         : goal.agentLabel ?? goal.agentId}</span>
       <strong>{goal.title}</strong>
       <p>{goal.needsYou ?? goal.nextSentence}</p>
-      <footer><span>{localizedGoalState(goal.state, locale)}</span><small title={goal.latestActivity}>{goal.latestActivity ? activityTimeLabel(goal.latestActivity, locale, t) : goal.agentTodos.length ? t("home.taskCount", { count: goal.agentTodos.length }) : t("home.noActivity")}</small></footer>
+      <footer><span>{(goal.loadState ? t(goal.loadState === "error" ? "startup.goalError" : "startup.goalLoading") : localizedGoalState(goal.state, locale))}</span><small title={goal.latestActivity}>{goal.loadState ? "" : goal.latestActivity ? activityTimeLabel(goal.latestActivity, locale, t) : goal.agentTodos.length ? t("home.taskCount", { count: goal.agentTodos.length }) : t("home.noActivity")}</small></footer>
     </button>
   );
   return (
@@ -138,6 +138,10 @@ function ManagerHomeBoard({
           ) : null}
         </div>
       ) : null}
+      {goals.some((goal) => goal.loadState) ? <section className="personal-home-lane" aria-live="polite">
+        <header>{t("startup.progress", { loaded: goals.filter((goal) => !goal.loadState).length, total: goals.length })}</header>
+        {goals.filter((goal) => goal.loadState).map(goalCard)}
+      </section> : null}
       <div className="personal-home-lanes">
         {activeHomeLanes.map((lane) => (
           <section className={`personal-home-lane is-${lane.key}`} data-testid={`personal-home-lane-${lane.key}`} key={lane.key}>
@@ -1714,7 +1718,7 @@ export function PersonalWorkspacePage({
             managerChatOpen={managerChatOpen}
             mobileNavigationOpen={mobileSidebarOpen}
             onOpenGoalCapabilities={selectedGoal ? () => setSelection({ goalId: selectedGoal.goalId, kind: "settings", tab: "capabilities" }) : undefined}
-            onOpenGoalDetail={selectedGoal ? () => setSelection({ item: selectedGoal, kind: "goal" }) : undefined}
+            onOpenGoalDetail={selectedGoal && !selectedGoal.loadState ? () => setSelection({ item: selectedGoal, kind: "goal" }) : undefined}
             onRefresh={callbacks.onRefresh ? () => void refreshWorkspace() : undefined}
             onOpenNavigation={() => setMobileSidebarOpen(true)}
             onOpenManagerChat={() => {
@@ -1754,10 +1758,16 @@ export function PersonalWorkspacePage({
             {!selectedGoal && !managerChatOpen ? (
               <section className="personal-manager-greeting">
                 <span><Bot size={20} /></span>
-                <div><strong>{t("home.greeting")}</strong><p>{t("home.waitingCount", { count: managerNeedsYouCount })} {t("home.blockingSummary", { count: managerBlockingCount })}</p></div>
+                <div><strong>{t("home.greeting")}</strong><p>{model.goals.some((goal) => goal.loadState) ? t("startup.partial") : <>{t("home.waitingCount", { count: managerNeedsYouCount })} {t("home.blockingSummary", { count: managerBlockingCount })}</>}</p></div>
               </section>
             ) : null}
-            {selectedGoal && selectedGoalTab === "tasks" ? (
+            {selectedGoal?.loadState ? (
+              <section className="personal-manager-greeting" role="status" data-testid="goal-status-loading">
+                <div><strong>{t(selectedGoal.loadState === "error" ? "startup.goalError" : "startup.goalLoading")}</strong>
+                <p>{t("startup.independent")}</p>
+                {selectedGoal.loadState === "error" ? <button className="personal-action-button" type="button" onClick={() => void callbacks.onRefresh?.()}>{t("startup.retry")}</button> : null}</div>
+              </section>
+            ) : selectedGoal && selectedGoalTab === "tasks" ? (
               <GoalTasksView
                 historyEnabled={!readOnly}
                 goal={selectedGoal}

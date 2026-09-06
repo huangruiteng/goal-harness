@@ -1,3 +1,4 @@
+import { directoryStatusPayload, fetchWorkspaceDirectory, loadWorkspaceGoalSnapshots, type WorkspaceProgress } from "../data/workspace-progressive-status";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert, Moon, RefreshCw, Sun } from "lucide-react";
 
@@ -58,7 +59,6 @@ import {
 import {
   beginStatusRequest,
   createStatusRequestFence,
-  resetStatusRequestFence,
   reserveStatusSourceSelection,
   statusRequestCanCommit,
   statusRequestIsCurrent,
@@ -425,6 +425,7 @@ type PersonalRunEvidence = {
 };
 
 type PersonalGoalItem = {
+  loadState?: "loading" | "error";
   activationState: "active" | "stopped";
   agentId: string;
   agentSentence: string;
@@ -1045,6 +1046,9 @@ function answerPersonalManagerQuestion(
   model: PersonalHomeModel,
   question: string,
 ): PersonalManagerAnswer {
+  if (model.goals.some((goal) => goal.loadState)) return {
+    text: "Goal 状态尚未全部加载，暂不能给出完整统计。可先打开已加载的 Goal，失败项可重试。", lines: [],
+  };
   if (personalManagerMatches(question, ["Agent", "agent", "推进", "在做"])) {
     const activeGoals = model.goals.filter((goal) =>
       !["安静运行", "已完成", "已停止"].includes(goal.state)
@@ -1100,7 +1104,7 @@ function answerPersonalManagerQuestion(
   }
 
   if (personalManagerMatches(question, ["状态", "异常", "修复", "健康"])) {
-    const globalHealthFailed = !payload.ok
+    const globalHealthFailed = model.systemHealth ? !model.systemHealth.ok : !payload.ok
       || !payload.contract?.ok
       || !payload.global_registry?.ok
       || (payload.global_registry?.summary?.high ?? 0) > 0;
@@ -1337,6 +1341,7 @@ function PersonalGoalHome({
   onRefresh,
   onRetryGoalArchive,
   payload,
+  progress,
   rows,
   selectedGoalId,
   statusSourceControl,
@@ -1352,6 +1357,7 @@ function PersonalGoalHome({
   onRefresh: () => void | Promise<void>;
   onRetryGoalArchive: () => void | Promise<void>;
   payload: StatusPayload;
+  progress: WorkspaceProgress | null;
   rows: GoalDirectoryRow[];
   selectedGoalId: string;
   statusSourceControl: StatusSourceControl;
@@ -1374,21 +1380,44 @@ function PersonalGoalHome({
     trust_scope?: string;
   }>>([]);
   const [goalSubagentConfigurationEnabled, setGoalSubagentConfigurationEnabled] = useState(false);
-  const model = buildPersonalHomeModel(
-    payload,
-    rows,
-    goalSubagentConfigurationEnabled,
-  );
+  const model = useMemo(() => {
+    const base = buildPersonalHomeModel(payload, rows, goalSubagentConfigurationEnabled);
+    if (!progress) return base;
+    const models = Object.values(progress.snapshots).map((snapshot) => buildPersonalHomeModel(
+      snapshot, buildGoalDirectoryRows(snapshot.run_history.goals, snapshot.attention_queue.items),
+      goalSubagentConfigurationEnabled,
+    ));
+    const loadedGoals = new Map(models.flatMap((item) => item.goals).map((goal) => [goal.goalId, goal]));
+    const goals = base.goals.map((goal) => loadedGoals.get(goal.goalId) ?? {
+      ...goal, loadState: progress.errors[goal.goalId] ? "error" as const : "loading" as const,
+      agentId: "", agentSentence: "", nextSentence: "", subagentExecution: undefined,
+    });
+    const userTodos = models.flatMap((item) => item.userTodos);
+    const incomplete = goals.some((goal) => goal.loadState);
+    const issues = [...new Set(models.flatMap((item) => item.systemHealth?.issues ?? []))];
+    return {
+      ...base, goals, userTodos, visibleUserTodos: userTodos.slice(0, 5),
+      openUserTodoCount: userTodos.length, blockingTodoCount: userTodos.filter((todo) => todo.blocking).length,
+      workers: [...new Map(models.flatMap((item) => item.workers ?? []).map((worker) => [worker.agentId, worker])).values()],
+      goalNotifications: models.flatMap((item) => item.goalNotifications ?? []),
+      systemHealth: incomplete || models.length === 0 ? undefined : {
+        ok: models.every((item) => item.systemHealth?.ok), issues,
+        summary: issues.length ? `发现 ${issues.length} 项系统健康关注点` : "状态检查已完成",
+        freshnessWarning: models.map((item) => item.systemHealth?.freshnessWarning).filter(Boolean).join("；") || null,
+      },
+    };
+  }, [payload, rows, progress, goalSubagentConfigurationEnabled]);
   const selectedGoal = model.goals.find((goal) => goal.goalId === selectedGoalId) ?? null;
+  const selectedPayload = progress?.snapshots[selectedGoalId] ?? payload;
   const [periodicReport, setPeriodicReport] = useState<PeriodicReportProjection | null>(null);
   const [periodicReportError, setPeriodicReportError] = useState<string | null>(null);
   const [periodicReportLoading, setPeriodicReportLoading] = useState(false);
-  const sessionDiscoveryKey = model.goals.map((goal) => `${goal.goalId}:${goal.agentId}`).join("|");
+  const sessionDiscoveryKey = model.goals.some((goal) => goal.loadState === "loading")
+    ? "loading" : model.goals.map((goal) => `${goal.goalId}:${goal.agentId}`).join("|");
   const contextId = selectedGoal?.goalId ?? "manager";
-  const managerSummary = !payload.ok
-    || !payload.contract?.ok
-    || !payload.global_registry?.ok
-    || (payload.global_registry?.summary?.high ?? 0) > 0
+  const managerSummary = model.goals.some((goal) => goal.loadState)
+    ? "Goal 状态正在逐个更新，当前统计尚不完整。"
+    : (model.systemHealth ? !model.systemHealth.ok : !payload.ok)
     ? "LoopX 当前存在状态问题，可以打开运行详情查看原因。"
     : model.openUserTodoCount > 0
       ? `你有 ${model.openUserTodoCount} 项需要处理，其中 ${model.blockingTodoCount} 项正在阻塞 Agent。`
@@ -1490,7 +1519,7 @@ function PersonalGoalHome({
       statusSourceControl.activeSource.statusUrl,
       window.location.href,
     );
-    const urls = resolved.source ? periodicReportApiUrls(payload, resolved.source) : null;
+    const urls = resolved.source ? periodicReportApiUrls(selectedPayload, resolved.source) : null;
     if (!selectedGoal || !urls?.indexUrl || !urls.detailUrl) {
       setPeriodicReport(null);
       setPeriodicReportError(null);
@@ -1520,7 +1549,7 @@ function PersonalGoalHome({
       cancelled = true;
     };
   }, [
-    payload,
+    selectedPayload,
     selectedGoal?.goalId,
     statusSourceControl.activeSource.statusUrl,
   ]);
@@ -1767,9 +1796,9 @@ function PersonalGoalHome({
 
   useEffect(() => {
     if (readOnly) return;
-    if (selectedGoal || model.goals.length === 0) return;
+    if (selectedGoal || model.goals.length === 0 || sessionDiscoveryKey === "loading") return;
     let cancelled = false;
-    void Promise.all(model.goals.map(async (goal) => {
+    void Promise.all(model.goals.filter((goal) => !goal.loadState).map(async (goal) => {
       const listed = await fetchChatSessions({
         agentId: goal.agentId,
         channelId: `goal.${goal.goalId}`,
@@ -1970,7 +1999,7 @@ function PersonalGoalHome({
 
     const isProjectionQuickQuestion = targetContextId === "manager" && isManagerProjectionQuestion(question);
     if (isProjectionQuickQuestion || selectedRoute.agentId === "status-only" || !targetGoal) {
-      const answer = answerPersonalManagerQuestion(payload, targetQuestionModel, question);
+      const answer = answerPersonalManagerQuestion(selectedPayload, targetQuestionModel, question);
       const usesStatusOnlyRoute = selectedRoute.agentId === "status-only";
       appendManagerAssistantMessage(targetContextId, {
         agentLabel: usesStatusOnlyRoute ? "仅查状态" : "LoopX 管家",
@@ -2703,7 +2732,6 @@ function PersonalGoalHome({
 function StatusRequestView({
   error,
   isLoading,
-  onReset,
   onRetry,
   requestedUrl,
   theme,
@@ -2711,7 +2739,6 @@ function StatusRequestView({
 }: {
   error: string | null;
   isLoading: boolean;
-  onReset: () => void;
   onRetry: () => void;
   requestedUrl: string;
   theme: "light" | "dark";
@@ -2727,14 +2754,20 @@ function StatusRequestView({
       <main className="min-h-screen bg-[#f6f7f9] text-slate-950 dark:bg-[#09090b] dark:text-zinc-50">
         <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
           <div>
-            <h1 className="text-xl font-semibold">LoopX 看板</h1>
-            <p className="mt-1 break-all text-sm text-slate-500 dark:text-zinc-400">{requestedUrl}</p>
+            <h1 className="text-xl font-semibold">LoopX Workspace</h1>
+            <p className="mt-1 break-all text-sm text-slate-500 dark:text-zinc-400">Personal Workspace</p>
           </div>
           <Button aria-label="切换主题" onClick={toggleTheme} size="icon" variant="secondary">
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         </header>
-        <div className="mx-auto max-w-3xl p-4 sm:p-6">
+        <div className="grid min-h-[calc(100vh-80px)] sm:grid-cols-[240px_1fr]">
+          <aside className="hidden border-r border-slate-200 p-6 dark:border-zinc-800 sm:block" aria-label="Workspace">
+            <strong>LoopX</strong><p className="mt-6 text-sm">Workspace</p>
+            <p className="mt-8 text-xs text-slate-500">Goals</p>
+            {[1, 2, 3].map((item) => <div key={item} className="mt-4 h-8 rounded bg-slate-100 dark:bg-zinc-900" />)}
+          </aside>
+          <div className="p-4 sm:p-8">
           <Card data-testid="initial-status-state">
             <CardContent className="flex min-h-64 items-center justify-center p-6">
               <div className="max-w-xl text-center">
@@ -2763,17 +2796,15 @@ function StatusRequestView({
                         <RefreshCw className="h-4 w-4" />
                         重试
                       </Button>
-                      <Button disabled={isLoading} onClick={onReset} variant="ghost">
-                        使用示例
-                      </Button>
                     </div>
                   </>
                 ) : <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-zinc-400" role="status">
-                  正在读取 Goal 状态，历史较多时可能需要几秒。页面仍在响应，请稍候。 / Loading Goal state; this may take a few seconds.
+                  正在连接 Workspace，Goal 列表将先出现，详细状态会逐个补齐。 / Connecting to your Workspace. Goals load independently.
                 </p>}
               </div>
             </CardContent>
           </Card>
+          </div>
         </div>
       </main>
     </div>
@@ -2785,6 +2816,10 @@ export function DashboardPage() {
   const search = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [progress, setProgress] = useState<WorkspaceProgress | null>(null);
+  const progressiveAbortRef = useRef<AbortController | null>(null);
+  const preferredGoalRef = useRef(search.goalId);
+  preferredGoalRef.current = search.goalId;
   const [payload, setPayload] = useState<StatusPayload>(exampleStatusPayload);
   const [source, setSource] = useState<DataSource>({ kind: "example", label: "bundled example" });
   const [statusSourceCatalog, setStatusSourceCatalog] = useState(() =>
@@ -2857,6 +2892,7 @@ export function DashboardPage() {
   function retryGoalArchive() {
     const url = source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl);
     const request = beginStatusRequest(statusRequestFenceRef.current, url, { background: true });
+    if (progress) { void loadFromUrl(url); return; }
     if (request) loadGoalArchive(url, request);
   }
 
@@ -2905,6 +2941,9 @@ export function DashboardPage() {
       selectionRevision: options.selectionRevision,
     });
     if (!request) return;
+    progressiveAbortRef.current?.abort();
+    const progressiveAbort = new AbortController();
+    progressiveAbortRef.current = progressiveAbort;
     if (!background) {
       suppressedStatusUrlRef.current = null;
       setExampleModeRequested(false);
@@ -2914,10 +2953,34 @@ export function DashboardPage() {
       setGoalArchiveLoadState({ error: null, phase: "idle" });
     }
     try {
+      const directory = await fetchWorkspaceDirectory(trimmed, window.location.href).catch(() => null);
+      if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+      if (directory) {
+        setProgress({ directory, snapshots: {}, errors: {} });
+        const initial = directoryStatusPayload(directory);
+        if (background) setPayload(initial);
+        else if (!await commitLoadedStatus(trimmed, initial, request)) return;
+        setGoalArchiveLoadState({ error: null, phase: "loading" });
+        await loadWorkspaceGoalSnapshots(trimmed, window.location.href, directory,
+          (id, snapshot, error) => setProgress((current) => current ? {
+            ...current,
+            snapshots: snapshot ? { ...current.snapshots, [id]: snapshot } : current.snapshots,
+            errors: error ? { ...current.errors, [id]: error } : current.errors,
+          } : current),
+          () => statusRequestCanCommit(statusRequestFenceRef.current, request),
+          () => preferredGoalRef.current,
+          progressiveAbort.signal,
+        );
+        if (statusRequestCanCommit(statusRequestFenceRef.current, request)) {
+          setGoalArchiveLoadState({ error: null, phase: "ready" });
+        }
+        return;
+      }
       const nextPayload = await fetchStatusPayload(
         scopedStatusUrl(trimmed, "active", window.location.href),
       );
       if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+      setProgress(null);
       request.registryRevision = nextPayload.goal_projection?.registry_revision ?? null;
       if (!await commitLoadedStatus(trimmed, nextPayload, request)) return;
       if (nextPayload.goal_projection?.scope !== "active"
@@ -2937,6 +3000,7 @@ export function DashboardPage() {
   }
 
   function selectStatusSource(nextSource: StatusSource, options: { ensureTunnel?: boolean } = {}) {
+    progressiveAbortRef.current?.abort();
     const selectionRevision = reserveStatusSourceSelection(
       statusRequestFenceRef.current,
       nextSource.statusUrl,
@@ -3002,25 +3066,6 @@ export function DashboardPage() {
       ? [...statusSourceCatalog.sources, activeStatusSource]
       : statusSourceCatalog.sources,
   };
-
-  function resetToExample() {
-    resetStatusRequestFence(statusRequestFenceRef.current);
-    suppressedStatusUrlRef.current = search.statusUrl.trim() || null;
-    setExampleModeRequested(true);
-    setPayload(exampleStatusPayload);
-    setSource({ kind: "example", label: "bundled example" });
-    setStatusUrl("");
-    setRequestedStatusUrl(null);
-    setLoadError(null);
-    setIsLoading(false);
-    setGoalArchiveLoadState({ error: null, phase: "ready" });
-    void navigate({
-      search: (current) => ({
-        ...current,
-        statusUrl: "",
-      }),
-    });
-  }
 
   useEffect(() => {
     const trimmedStatusUrl = search.statusUrl.trim();
@@ -3091,7 +3136,6 @@ export function DashboardPage() {
       <StatusRequestView
         error={loadError}
         isLoading={isLoading}
-        onReset={resetToExample}
         onRetry={() => void loadFromUrl(activeStatusRequestUrl || defaultGlobalStatusUrl)}
         requestedUrl={activeStatusRequestUrl || defaultGlobalStatusUrl}
         theme={theme}
@@ -3107,10 +3151,16 @@ export function DashboardPage() {
       onGoalActivationStateChange={(goalId, activationState) => {
         statusRequestFenceRef.current.projectionRevision += 1;
         setPayload((current) => withGoalActivationState(current, goalId, activationState));
+        setProgress((current) => current ? { ...current, snapshots: Object.fromEntries(
+          Object.entries(current.snapshots).map(([id, snapshot]) => [id, withGoalActivationState(snapshot, goalId, activationState)]),
+        ) } : current);
       }}
       onGoalDeleted={(goalId) => {
         statusRequestFenceRef.current.projectionRevision += 1;
         setPayload((current) => withoutGoal(current, goalId));
+        setProgress((current) => current ? { ...current, snapshots: Object.fromEntries(
+          Object.entries(current.snapshots).filter(([id]) => id !== goalId),
+        ) } : current);
       }}
       onSelectGoal={selectGoal}
       onReconcileStatus={() => loadFromUrl(
@@ -3120,6 +3170,7 @@ export function DashboardPage() {
       onRetryGoalArchive={retryGoalArchive}
       onRefresh={() => loadFromUrl(source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl))}
       payload={payload}
+      progress={progress}
       rows={goalRows}
       selectedGoalId={search.goalId}
       statusSourceControl={statusSourceControl}
