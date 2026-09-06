@@ -31,6 +31,15 @@ native creation, archival, receipt replay, and store reopen are tested without
 Markdown metadata. Python only adapts the typed read result to the compatibility
 summary. This is a contract checkpoint, not a completed CLI lifecycle cutover.
 
+Provider-first `todo update --text/--note` preserves claim-neutral correction:
+a registered, non-excluded actor may edit an unclaimed active, non-completed
+agent Todo, subject to its agent binding. It must not introduce `claimed_by`.
+Another claim owner's Todo remains rejected. Only text/note may be patched or
+cleared; governance fields and hard-lease execution authority are not granted.
+The TS transaction owns eligibility, CAS, and receipt replay; promotion must
+not turn a copy correction into a claim. Provider conformance covers both
+native and v0 records, and the production CLI is tested without Markdown.
+
 The default Markdown and explicitly promoted `todo claim` paths now share one
 TypeScript claim decision for actor, registration, role, status, archive,
 exclusion, and existing-owner checks; the Python legacy writer only commits

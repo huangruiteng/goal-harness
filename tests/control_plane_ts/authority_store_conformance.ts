@@ -526,12 +526,27 @@ export function registerAuthorityStoreConformance(
         events: [], receipts: [], next_projection: todoClaimProjection(goalId, native),
       });
       assert.equal(initialized.status, "applied");
+      const correction = {goal_id: goalId, todo_id: "todo-claim", expected_role: "agent",
+        actor_agent_id: "agent-b", registered_agents: ["agent-a", "agent-b"],
+        operation_id: "correct-unclaimed", patch: {text: "Correct unclaimed copy", note: "Correct note"},
+        clear_fields: [], dry_run: false, now: new Date("2026-09-05T05:00:00Z")};
+      assert.equal((await executeCoordinationTodoUpdate(store, correction)).status, "applied");
+      assert.equal((await executeCoordinationTodoUpdate(contender, correction)).status, "replayed");
+      const corrected = await store.loadAuthority();
+      assert.equal(corrected.status, "loaded");
+      if (corrected.status !== "loaded") return;
+      const correctedTodo = (corrected.head.todos as Record<string, unknown>[])[0]!;
+      assert.equal(correctedTodo.claimed_by, undefined);
+      assert.equal(correctedTodo.note, "Correct note");
+      assert.equal(correctedTodo.last_actor_agent_id, "agent-b");
       assert.equal((await executeCoordinationTodoClaim(store, {
         goal_id: goalId, todo_id: "todo-claim", claimed_by: "agent-a",
         actor_agent_id: "agent-a", expected_role: "agent",
         registered_agents: ["agent-a", "agent-b"], operation_id: "claim-before-update",
         dry_run: false, now: new Date("2026-09-05T05:15:00Z"),
       })).status, "applied");
+      assert.equal((await executeCoordinationTodoUpdate(store, {...correction,
+        operation_id: "correct-after-another-agent-claims"})).reason_code, "update_owner_mismatch");
       const request = {goal_id: goalId, todo_id: "todo-claim", expected_role: "agent",
         actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"],
         operation_id: "update-native", patch: {text: "Updated provider-neutrally"},

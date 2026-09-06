@@ -506,6 +506,25 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     assert by_id["todo_successor"]["completion_continuation"] == "no_followup"
     assert result["authority_read"]["todo_read_model"]["todo_count"] == 3
 
+    # The public compatibility CLI must retain claim-neutral text correction
+    # after promotion; it must not reconstruct or write the Markdown source.
+    correction_command = [
+        sys.executable, "-m", "loopx.cli", "--format", "json",
+        "--registry", str(registry_path), "todo", "update", "--goal-id", "goal-a",
+        "--todo-id", "todo_claimable", "--agent-id", "agent-b",
+        "--text", "Corrected before claiming",
+    ]
+    correction = subprocess.run(correction_command, capture_output=True, text=True,
+                                check=True, timeout=30)
+    assert json.loads(correction.stdout)["ok"] is True
+    corrected = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
+    corrected_item = next(item for item in corrected["todos"]
+                          if item["todo_id"] == "todo_claimable")
+    assert corrected_item["text"] == "Corrected before claiming"
+    assert not corrected_item.get("claimed_by")
+    assert corrected_item["last_actor_agent_id"] == "agent-b"
+    assert not state_file.exists()
+
     claim_command = [
         sys.executable, "-m", "loopx.cli", "--format", "json",
         "--registry", str(registry_path), "todo", "claim", "--goal-id", "goal-a",
