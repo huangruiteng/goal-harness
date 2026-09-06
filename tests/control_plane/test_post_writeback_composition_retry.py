@@ -737,3 +737,24 @@ def test_receipt_identity_separates_policy_versions(tmp_path: Path) -> None:
     pending = pending_composition_retry_receipts(runtime_root, "goal-1")
     assert len(pending) == 1
     assert pending[0]["hooks"][0]["policy_version"] == "v0"
+
+    # The original version's own composition still settles its receipt
+    # idempotently after a replacement tried and failed to claim it.
+    settled, settled_flag = settle_composition_retry_receipt(
+        composition_retry_receipt_log_path(runtime_root, "goal-1"),
+        goal_id="goal-1",
+        event_kind="todo_complete",
+        identity=_identity(),
+        state_version="2026-09-06T00:00:00Z",
+        committed_at="2026-09-06T00:00:00Z",
+        hook_identities=[
+            {
+                "hook_id": "periodic_report.stage_completion",
+                "capability_id": "periodic-report",
+                "policy_version": "v0",
+            }
+        ],
+    )
+    assert settled_flag is True
+    assert settled["status"] == "settled"
+    assert pending_composition_retry_receipts(runtime_root, "goal-1") == []
