@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from ...file_lock import exclusive_file_lock
-from .turn_journal_runtime import write_turn_journal
+from ..effect_program import SettlementIdentity
+from .turn_journal_runtime import (
+    interpret_turn_journal_projection,
+    write_turn_journal,
+)
 
 
 LOOPX_TURN_JOURNAL_SCHEMA_VERSION = "loopx_turn_journal_v0"
@@ -148,47 +152,122 @@ def _envelope_observed_capabilities(envelope: Mapping[str, Any]) -> list[str]:
     return observed
 
 
+def _identity_binding_tuple(identity: SettlementIdentity) -> tuple[str, ...]:
+    """Render the typed identity fields that bind one settlement effect."""
+
+    return (
+        identity.goal_id,
+        identity.agent_id,
+        identity.binding_kind.value,
+        identity.binding_id,
+        identity.turn_instance_id,
+        identity.effect_id,
+    )
+
+
+def _journal_settlement_identity_matches(
+    plan: Mapping[str, Any], completion: SettlementIdentity
+) -> bool:
+    """Require the journal's typed settlement identity to be this completion's."""
+
+    transaction = plan.get("transaction")
+    if not isinstance(transaction, Mapping):
+        return False
+    settlement = transaction.get("settlement_plan")
+    if not isinstance(settlement, Mapping):
+        return False
+    identity = settlement.get("identity")
+    if not isinstance(identity, Mapping):
+        return False
+    try:
+        journal_identity = SettlementIdentity.from_runtime_payload(identity)
+    except RuntimeError:
+        return False
+    return _identity_binding_tuple(journal_identity) == _identity_binding_tuple(
+        completion
+    )
+
+
+def _settlement_matched_journal_capabilities(
+    path: Path,
+    *,
+    completion: SettlementIdentity,
+) -> list[str] | None:
+    """Read capabilities only after the TS owner validated this journal."""
+
+    turn_key = f"sha256:{path.stem}"
+    if not TURN_KEY_RE.fullmatch(turn_key):
+        return None
+    try:
+        journal = load_turn_journal(path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    if journal is None or journal.get("goal_id") != completion.goal_id:
+        return None
+    plan = journal.get("plan")
+    if not isinstance(plan, Mapping):
+        return None
+    if _journal_plan_turn_instance_id(plan) != completion.turn_instance_id:
+        return None
+    try:
+        inspection = interpret_turn_journal_projection(
+            journal,
+            goal_id=completion.goal_id,
+            agent_id=completion.agent_id,
+            turn_key=turn_key,
+        )
+    except (RuntimeError, ValueError):
+        return None
+    if (
+        inspection.get("decision") != "replay_legal"
+        or inspection.get("violations") != []
+    ):
+        return None
+    if not _journal_settlement_identity_matches(plan, completion):
+        return None
+    envelope = plan.get("turn_envelope")
+    if not isinstance(envelope, Mapping):
+        return None
+    return _envelope_observed_capabilities(envelope)
+
+
 def turn_journal_observed_capabilities(
     runtime_root: Path,
     *,
-    goal_id: str,
-    turn_instance_id: str,
+    settlement_identity: Mapping[str, Any],
 ) -> list[str] | None:
-    """Return capabilities the settled Turn durably observed, if any.
+    """Return capabilities only a journal fully bound to this settlement observed.
 
-    The Turn journal is the settlement-grade record: its envelope froze the
-    scheduler decision that already judged capability gates for this exact
-    turn_instance_id. Unreadable, missing, or unmatched journals return None
-    so callers fail closed instead of guessing from the current environment.
+    The reader stays a consumer of the TypeScript-owned journal authority:
+    every candidate journal must pass ``turn_journal.inspect`` replay
+    validation for this completion's goal/agent/turn identity, and its typed
+    settlement-plan identity must equal the current completion identity
+    (goal/agent/binding/turn/effect). A journal that only shares the goal and
+    a caller-supplied turn id — another agent's, another Todo's, or one whose
+    transaction and settlement disagree — provides no evidence, so unreadable,
+    missing, unmatched, or ambiguous journals return None and callers fail
+    closed instead of borrowing capabilities from a foreign settlement.
     """
 
-    normalized_turn_instance_id = str(turn_instance_id or "").strip()
-    if not normalized_turn_instance_id:
+    try:
+        completion = SettlementIdentity.from_runtime_payload(
+            dict(settlement_identity)
+        )
+    except RuntimeError:
         return None
-    turns_dir = runtime_root / "goals" / goal_id / "turns"
+    turns_dir = runtime_root / "goals" / completion.goal_id / "turns"
     if not turns_dir.is_dir():
         return None
+    matched: list[list[str]] = []
     for path in sorted(turns_dir.glob("*.json")):
-        try:
-            journal = load_turn_journal(path)
-        except (OSError, ValueError, json.JSONDecodeError):
-            continue
-        if journal is None:
-            continue
-        if journal.get("goal_id") != goal_id:
-            continue
-        plan = journal.get("plan")
-        if not isinstance(plan, Mapping):
-            continue
-        if (
-            _journal_plan_turn_instance_id(plan)
-            != normalized_turn_instance_id
-        ):
-            continue
-        envelope = (
-            plan.get("turn_envelope")
-            if isinstance(plan.get("turn_envelope"), Mapping)
-            else {}
+        evidence = _settlement_matched_journal_capabilities(
+            path, completion=completion
         )
-        return _envelope_observed_capabilities(envelope)
-    return None
+        if evidence is not None:
+            matched.append(evidence)
+    if len(matched) != 1:
+        # Zero fully-bound journals means no evidence; more than one would be
+        # an ambiguity about a single settlement effect the reader must not
+        # resolve by picking a winner.
+        return None
+    return matched[0]

@@ -1169,14 +1169,15 @@ def handle_todo_command(
         identity = settlement_identity.as_dict()
         committed_at = str(payload.get("updated_at") or "").strip()
         if committed_at:
-            # Capability evidence comes only from the validated Turn
-            # settlement context: the journaled envelope froze what this
-            # Turn's scheduler already observed. No journal means no
-            # evidence, and gated successors stay excluded (fail closed).
+            # Capability evidence comes only from a Turn journal the TS
+            # journal owner validated against this completion's full
+            # settlement identity (goal/agent/binding/turn/effect): the
+            # journaled envelope froze what this exact Turn's scheduler
+            # observed. No fully-bound journal means no evidence, and gated
+            # successors stay excluded (fail closed).
             observed = turn_journal_observed_capabilities(
                 resolve_runtime_root(load_registry(registry_path), runtime_root_arg),
-                goal_id=args.goal_id,
-                turn_instance_id=str(identity.get("turn_instance_id") or ""),
+                settlement_identity=identity,
             )
             projected = runtime_capabilities_for_cli_projection(observed)
             if projected:

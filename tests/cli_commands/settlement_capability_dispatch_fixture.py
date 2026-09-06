@@ -26,6 +26,17 @@ COMPLETED_TODO = "todo_report_stage"
 GATED_TODO = "todo_network_resume"
 PLAIN_TODO = "todo_next_family"
 EFFECT_ID = f"{GOAL_ID}:{AGENT_ID}:{COMPLETED_TODO}:{TURN_ID}"
+TURN_KEY = "sha256:" + "9" * 64
+# Ordered prefix of the loopx_turn_transaction_contract_v0 phases.
+COMPLETED_PHASES = [
+    "host_execute",
+    "typed_result",
+    "validation",
+    "durable_writeback",
+    "quota_spend",
+    "scheduler_apply",
+    "scheduler_ack",
+]
 
 
 def write_periodic_report_registry(project: Path, runtime: Path) -> Path:
@@ -132,23 +143,43 @@ def write_turn_heartbeat_receipt(runtime: Path) -> None:
 
 
 def write_turn_journal(runtime: Path, *, observed: list[str]) -> None:
+    """Write a settlement-legible journal the TS journal owner can validate."""
+
     turns_dir = runtime / "goals" / GOAL_ID / "turns"
     turns_dir.mkdir(parents=True, exist_ok=True)
-    envelope: dict[str, object] = {"goal_id": GOAL_ID, "agent_id": AGENT_ID}
+    envelope: dict[str, object] = {
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "action": {"selected_todo": {"todo_id": COMPLETED_TODO}},
+    }
     if observed:
         envelope["boundary"] = {"available_capabilities": list(observed)}
     journal = {
         "schema_version": "loopx_turn_journal_v0",
-        "turn_key": "sha256:" + "9" * 64,
+        "turn_key": TURN_KEY,
         "goal_id": GOAL_ID,
         "status": "committed",
-        "completed_phases": ["apply", "acknowledge"],
+        "completed_phases": list(COMPLETED_PHASES),
         "plan": {
-            "transaction": {"turn_instance_id": TURN_ID},
+            "transaction": {
+                "turn_key": TURN_KEY,
+                "turn_instance_id": TURN_ID,
+                "settlement_plan": {
+                    "schema_version": "quota_settlement_plan_v1",
+                    "identity": {
+                        "schema_version": "quota_settlement_identity_v0",
+                        "effect_id": EFFECT_ID,
+                        "goal_id": GOAL_ID,
+                        "agent_id": AGENT_ID,
+                        "todo_id": COMPLETED_TODO,
+                        "turn_instance_id": TURN_ID,
+                    },
+                },
+            },
             "turn_envelope": envelope,
         },
     }
-    (turns_dir / f"{'9' * 64}.json").write_text(
+    (turns_dir / f"{TURN_KEY.removeprefix('sha256:')}.json").write_text(
         json.dumps(journal),
         encoding="utf-8",
     )
