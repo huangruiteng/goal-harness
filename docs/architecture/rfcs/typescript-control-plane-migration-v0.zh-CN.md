@@ -41,6 +41,14 @@ decision 处理 actor、registration、role、status、archive、exclusion 与�
 前失败。CLI 每次调用仍生成新的 operation id；跨调用重试身份和 claim/lease
 联合获取仍是后续工作，不能视为当前 claim-only 事务已提供的保证。
 
+下一 replacement slice 让 promotion 后的 `todo add` 成为同一 authority owner 上的
+原生 create transaction。Python 只校验既有 CLI 参数并一次性适配为带版本的 domain
+record；语义重复、replay、actor/owner 资格、CAS、receipt 和 projection-outbox
+mutation 都由 TypeScript 持有。preview 与真实 subprocess CLI 路径会先删除 Markdown
+state file 再验证，因此 promotion 不会悄悄恢复 Markdown 写入。completion-validation
+argv 保持 typed data，不退回 shell 编码的兼容字段。未 promotion 的默认 goal 在显式
+promotion 边界前继续使用既有 Markdown transaction。
+
 旧 v0 consumer manifest 继续可读，并保留所有已有字段。默认 Markdown capture 仍
 输出 v0；本 PR 不改写已存 head，也不自动晋升 goal。schema 分层不等于允许后续迁移
 丢失 v0 provenance 或改变旧排序。
@@ -107,7 +115,8 @@ lifecycle classification code 或其他 cadence policy，不能宣称全局已�
    合成/资格化 goal 的验证里程碑，不是真实 goal 的 promote：一旦 promote，其余
    legacy writer 仍被 fence 以 fail-closed 拦截。因此活跃 goal 的 promote 要等
    到其 agent 实际使用的写命令族都经由同一个统一 TS 提交权威（同一入口的分命令
-   patch 类型，而不是平行 adapter），并且 capture/projection outbox 落盘接通之后。
+   transaction 类型（共享同一个 effect-runtime 边界，而不是平行语义 owner），并且
+   capture/projection outbox 落盘接通之后。
    删除的收益只在该入口背后的 in-place Markdown editor 被纯投影 renderer 替代时兑现。
 
 2. **先资格化，再启用。** 与 shared-authority RFC 的显式 v0 import、consumer

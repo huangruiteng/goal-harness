@@ -12,6 +12,9 @@ from loopx.control_plane.coordination.legacy_writer_fence import (
     legacy_todo_write_transaction,
     require_legacy_coordination_write_allowed,
 )
+from loopx.control_plane.coordination.local_authority import (
+    LocalCoordinationAuthorityUnavailable,
+)
 from loopx.file_lock import lock_holder_path
 from loopx.todos import add_goal_todo
 
@@ -222,19 +225,34 @@ def test_todo_write_lock_lands_under_the_effective_runtime_root(
         assert not lock_holder_path(registry_lock).exists()
 
 
-def test_goal_todo_add_is_fenced_when_the_override_root_holds_the_fence(
+def test_goal_todo_add_uses_provider_at_override_root_when_promoted(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """End to end: todo add shares the CLI override root with the fence."""
+    """End to end: promoted todo add reads authority from the override root."""
 
-    registry, _state, _runtime_registry, runtime_override = _write_split_root_fixture(
+    registry, state, _runtime_registry, runtime_override = _write_split_root_fixture(
         tmp_path
     )
     _engage_fence(runtime_override)
-    _blocked_effect_runtime(monkeypatch)
+    captured: dict[str, object] = {}
 
-    with pytest.raises(LegacyCoordinationWriterFenced):
+    def missing_provider(method: str, params: dict[str, object]) -> dict[str, object]:
+        captured.update(method=method, params=params)
+        return {
+            "status": "missing",
+            "source_authority": "file_v0",
+            "decision_read_from_provider": True,
+            "legacy_fallback_used": False,
+        }
+
+    monkeypatch.setattr(
+        "loopx.control_plane.coordination.local_authority.effect_runtime_result",
+        missing_provider,
+    )
+    state_before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(LocalCoordinationAuthorityUnavailable) as exc_info:
         add_goal_todo(
             registry_path=registry,
             goal_id=SPLIT_ROOT_GOAL_ID,
@@ -244,3 +262,12 @@ def test_goal_todo_add_is_fenced_when_the_override_root_holds_the_fence(
             claimed_by=SPLIT_ROOT_AGENT,
             runtime_root_arg=str(runtime_override),
         )
+
+    assert exc_info.value.code == "local_authority_todo_list_unavailable"
+    assert captured["method"] == "coordination.local_authority.todo_list"
+    assert captured["params"] == {
+        "schema_version": "loopx_local_coordination_todo_list_request_v0",
+        "runtime_root": str(runtime_override.resolve()),
+        "goal_id": SPLIT_ROOT_GOAL_ID,
+    }
+    assert state.read_text(encoding="utf-8") == state_before

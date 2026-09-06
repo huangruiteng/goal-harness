@@ -16,6 +16,7 @@ import {
 } from "../../loopx/control_plane/coordination/coordination_state_contract.ts";
 import { prepareCoordinationProjectionCommit } from "../../loopx/control_plane/coordination/coordination_projection.ts";
 import { executeCoordinationTodoClaim } from "../../loopx/control_plane/coordination/todo_claim.ts";
+import { executeCoordinationTodoCreate } from "../../loopx/control_plane/coordination/todo_create.ts";
 import { editCoordinationTodo, TODO_COMPATIBILITY_EDIT_SCHEMA } from "../../loopx/control_plane/coordination/todo_compatibility_edit.ts";
 
 export interface AuthorityStoreConformanceFixture {
@@ -222,6 +223,111 @@ export function registerAuthorityStoreConformance(
   });
 
   for (const native of [false, true]) {
+    test(`${providerName} conformance: native Todo create is atomic and replayable (${native ? "native" : "v0"})`, async (t) => {
+      const {store, contender} = await factory(t);
+      const goalId = "goal-claim";
+      const projection = todoClaimProjection(goalId, native);
+      const initialized = await store.commitAuthority({
+        expected_provider_revision: null, operation_id: "init-create",
+        events: [], receipts: [], next_projection: projection,
+      });
+      assert.equal(initialized.status, "applied");
+      if (initialized.status !== "applied") return;
+      const todo = {
+        schema_version: TODO_DOMAIN_ITEM_SCHEMA,
+        todo_id: "todo-created",
+        role: "agent",
+        status: "open",
+        done: false,
+        text: "Create through the provider-neutral transaction",
+        archive_state: "active",
+        task_class: "advancement_task",
+        action_kind: "implement",
+        claimed_by: "agent-a",
+      };
+      const request = {
+        goal_id: goalId, todo, actor_agent_id: "agent-a",
+        registered_agents: ["agent-a", "agent-b"], operation_id: "create-todo",
+        dry_run: false, now: new Date("2026-09-05T06:00:00Z"),
+      };
+      const preview = await executeCoordinationTodoCreate(store, {...request, dry_run: true});
+      assert.equal(preview.status, "planned");
+      assert.equal((await store.loadAuthority()).status, "loaded");
+      const [first, second] = await Promise.all([
+        executeCoordinationTodoCreate(store, request),
+        executeCoordinationTodoCreate(contender, {...request,
+          operation_id: "create-todo-contender", todo: {...todo, text: "Competing create"}}),
+      ]);
+      assert.deepEqual(
+        [first.status, second.status].sort((left, right) =>
+          String(left).localeCompare(String(right))
+        ),
+        ["applied", "conflict"],
+      );
+      const applied = first.status === "applied" ? first : second;
+      const replayRequest = first.status === "applied" ? request : {...request,
+        operation_id: "create-todo-contender", todo: {...todo, text: "Competing create"}};
+      assert.equal(applied.todo_id, todo.todo_id);
+      assert.equal((await executeCoordinationTodoCreate(store, replayRequest)).status, "replayed");
+      assert.equal((await executeCoordinationTodoCreate(store, {...replayRequest,
+        todo: {...replayRequest.todo, note: "different intent"}})).status, "failed");
+      assert.equal((await executeCoordinationTodoCreate(store, {...replayRequest,
+        operation_id: "semantic-duplicate", todo: {...replayRequest.todo, todo_id: "todo-other"}})).status,
+      "no_change");
+      const conflictingDuplicate = await executeCoordinationTodoCreate(store, {...replayRequest,
+        operation_id: "semantic-duplicate-conflict", todo: {...replayRequest.todo,
+          todo_id: "todo-other", task_class: "continuous_monitor"}});
+      assert.equal(conflictingDuplicate.status, "failed");
+      assert.equal(conflictingDuplicate.reason_code, "todo_semantic_duplicate_conflict");
+      const deferredSameText = {
+        ...replayRequest.todo,
+        todo_id: "todo-deferred-terminal",
+        status: "deferred",
+        done: true,
+        text: "Repeat terminal work",
+        ...(native ? {} : {schema_version: "todo_item_v0", source_section: "Agent Todo"}),
+      };
+      const loadedBeforeDeferred = await store.loadAuthority();
+      assert.equal(loadedBeforeDeferred.status, "loaded");
+      if (loadedBeforeDeferred.status !== "loaded") return;
+      const deferredCommit = prepareCoordinationProjectionCommit({
+        goal_id: goalId,
+        operation_id: "seed-deferred-terminal",
+        expected_provider_revision: loadedBeforeDeferred.provider_revision,
+        projection: loadedBeforeDeferred.head,
+        mutations: [{kind: "todo_upsert", todo: deferredSameText}],
+      });
+      assert.equal((await store.commitAuthority(deferredCommit)).status, "applied");
+      const recreatedAfterDeferred = await executeCoordinationTodoCreate(store, {
+        ...replayRequest,
+        operation_id: "create-after-deferred-terminal",
+        todo: {...replayRequest.todo, todo_id: "todo-after-deferred-terminal",
+          text: "Repeat terminal work"},
+      });
+      assert.equal(recreatedAfterDeferred.status, "applied");
+      const inconsistentTerminal = await executeCoordinationTodoCreate(store, {
+        ...replayRequest,
+        operation_id: "reject-inconsistent-terminal",
+        todo: {...replayRequest.todo, todo_id: "todo-inconsistent-terminal",
+          status: "done", done: false},
+      });
+      assert.equal(inconsistentTerminal.status, "failed");
+      assert.equal(inconsistentTerminal.reason_code, "invalid_coordination_todo_create");
+      const loaded = await store.loadAuthority();
+      assert.equal(loaded.status, "loaded");
+      if (loaded.status !== "loaded") return;
+      const created = (loaded.head.todos as Record<string, unknown>[])
+        .find((item) => item.todo_id === todo.todo_id)!;
+      assert.equal(created.created_by, "agent-a");
+      assert.equal(created.last_actor_agent_id, "agent-a");
+      assert.equal(created.updated_at, "2026-09-05T06:00:00Z");
+      assert.equal((loaded.head.todo_read_model as Record<string, unknown>).todo_count, 4);
+      for (const invalid of [
+        {...request, operation_id: "bad-actor", actor_agent_id: "agent-b"},
+        {...request, operation_id: "bad-status", todo: {...todo, todo_id: "todo-done", status: "done", done: true}},
+        {...request, operation_id: "bad-projection", todo: {...todo, todo_id: "todo-projection", source_section: "Agent Todo"}},
+      ]) assert.equal((await executeCoordinationTodoCreate(store, invalid)).status, "failed");
+    });
     test(`${providerName} conformance: compatibility edit cannot overwrite a concurrent claim (${native ? "native" : "v0"})`, async (t) => {
       const {store, contender} = await factory(t);
       const goalId = "goal-claim";

@@ -49,6 +49,16 @@ invalid preview booleans fail before provider access. The CLI creates a fresh op
 cross-invocation retry identity and combined claim/lease acquisition remain
 follow-up work, not guarantees of this claim-only transaction.
 
+The next replacement slice makes promoted `todo add` a native create
+transaction on that same authority owner. Python validates the established CLI
+arguments and adapts them once into the versioned domain record; TypeScript
+owns duplicate identity, replay, actor/owner eligibility, CAS, receipt, and
+projection-outbox mutation. Preview and the real subprocess CLI path are tested
+after deleting the Markdown state file, so promotion cannot silently regain a
+Markdown write path. Completion-validation argv remains typed data rather than
+a shell-encoded compatibility field. Default, unpromoted goals retain their
+existing Markdown transaction until their explicit promotion boundary.
+
 The old v0 consumer manifest remains readable and retains all existing fields.
 Default Markdown capture still emits v0; this PR neither rewrites stored heads
 nor auto-promotes a goal. The schema split is not permission to drop v0
@@ -136,8 +146,8 @@ slice; they must not be reported as migrated or globally free of prose rules.
    qualification goals, never a real-goal promotion: once a goal is promoted,
    every other legacy writer is still fenced fail-closed. Promoting a live goal
    therefore waits until the write-command family its agents actually use routes
-   through the same unified TS commit authority (per-command patch types on one
-   entry point, not parallel adapters) and until capture/projection outbox
+   through the same unified TS commit authority (per-command transaction types
+   behind one effect-runtime boundary, not parallel semantic owners) and until capture/projection outbox
    delivery is flushed. The deletion payoff lands only when the in-place
    Markdown editor is replaced by a pure projection renderer behind that one
    entry point.
