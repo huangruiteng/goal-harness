@@ -191,6 +191,7 @@ type TodoExplorerItem = {
 };
 
 type PersonalAgentTodoItem = {
+  resumeWhen?: string | null;
   claimedBy?: string | null;
   done: boolean;
   evidence?: string | null;
@@ -700,8 +701,10 @@ function personalTodoText(todo: TodoItem) {
 
 function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): PersonalAgentTodoItem {
   return {
+    resumeWhen: todo.resume_when ?? null,
     claimedBy: todo.claimed_by ?? null,
-    done: todo.done,
+    // Legacy summaries mark deferred entries checked; they are not completed work.
+    done: todo.status === "deferred" ? false : todo.done,
     evidence: todo.evidence ? compactShareText(todo.evidence, 96) : null,
     index: todo.index,
     priority: todo.priority ?? null,
@@ -713,8 +716,21 @@ function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): Perso
   };
 }
 
+// Owner Workspace needs the queue, not the bounded public-share preview.
+// Use the same items for cards and completion deduplication.
+function personalAgentTodoItems(row: GoalDirectoryRow): TodoItem[] {
+  const queue = row.queueItem?.agent_todos;
+  const items = queue?.items ?? row.queueItem?.project_asset?.agent_todos?.items ?? [];
+  const merged = new Map(items.map((todo) => [todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`, todo]));
+  for (const todo of queue?.deferred_items ?? []) {
+    const key = todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`;
+    if (!merged.has(key)) merged.set(key, todo);
+  }
+  return [...merged.values()];
+}
+
 function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
-  return (getShareTodos(row, "agent")?.items ?? []).map((todo) => personalAgentTodoFromItem(todo, row));
+  return personalAgentTodoItems(row).map((todo) => personalAgentTodoFromItem(todo, row));
 }
 
 function personalSubagentDomainCandidates(
@@ -776,7 +792,7 @@ function mergePersonalAgentTodos(
 /**
  * Projected completion facts for a Goal. The status payload reports completed
  * Todos as a count (project_asset.agent_todos.done) plus a bounded
- * recent-completed lane; the items list itself only carries open Todos.
+ * recent-completed lane. Queue items may also include completed Todos.
  */
 function personalAgentTodoFacts(row: GoalDirectoryRow): {
   doneTodoCount: number;
@@ -785,13 +801,13 @@ function personalAgentTodoFacts(row: GoalDirectoryRow): {
 } {
   const assetTodos = row.queueItem?.project_asset?.agent_todos;
   const queueTodos = row.queueItem?.agent_todos;
-  const items = assetTodos?.items?.length ? assetTodos.items : queueTodos?.items ?? [];
+  const items = personalAgentTodoItems(row);
   const doneFromCount = assetTodos?.advancement_done_count
     ?? queueTodos?.advancement_done_count
     ?? assetTodos?.done
     ?? queueTodos?.done_count
     ?? null;
-  const doneFromItems = items.filter((todo) => todo.done).length;
+  const doneFromItems = items.filter((todo) => todo.done && todo.status !== "deferred").length;
   const doneTodoCount = Math.max(doneFromCount ?? 0, doneFromItems);
   const seenTodoIds = new Set(
     items

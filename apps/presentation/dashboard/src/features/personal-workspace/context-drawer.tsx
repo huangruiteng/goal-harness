@@ -506,7 +506,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
             <section className="personal-task-inspector-summary">
               <div className="personal-task-inspector-status">
                 <span className={selection.item.done ? "is-done" : selection.item.status === "blocked" ? "is-blocked" : "is-open"}>
-                  <i />{selection.item.done ? t("drawer.taskStatusCompleted") : selection.item.status === "blocked" ? t("drawer.taskStatusBlocked") : t("drawer.taskStatusOpen")}
+                  <i />{selection.item.done ? t("drawer.taskStatusCompleted") : selection.item.status === "deferred" ? t("drawer.taskStatusDeferred") : selection.item.status === "blocked" ? t("drawer.taskStatusBlocked") : t("drawer.taskStatusOpen")}
                 </span>
                 {selection.item.priority ? <span>{selection.item.priority}</span> : null}
                 <span>{selection.item.taskClass === "advancement_task" ? t("drawer.taskAdvancement") : selection.item.taskClass ?? t("drawer.taskOrdinary")}</span>
@@ -518,10 +518,11 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
               <dl>
                 <div><dt>Goal</dt><dd>{selection.item.goalTitle}</dd></div>
                 <div><dt>{t("common.owner")}</dt><dd>{selection.item.ownerLabel ?? selection.item.claimedBy ?? t("drawer.notAssigned")}</dd></div>
-                <div><dt>{t("common.status")}</dt><dd>{selection.item.done ? t("drawer.taskStatusCompleted") : selection.item.status === "blocked" ? t("drawer.taskStatusBlocked") : t("drawer.taskStatusOpen")}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd>{selection.item.done ? t("drawer.taskStatusCompleted") : selection.item.status === "deferred" ? t("drawer.taskStatusDeferred") : selection.item.status === "blocked" ? t("drawer.taskStatusBlocked") : t("drawer.taskStatusOpen")}</dd></div>
                 <div><dt>{t("drawer.priority")}</dt><dd>{selection.item.priority ?? t("drawer.notSet")}</dd></div>
                 <div><dt>{t("drawer.dependencies")}</dt><dd>{selection.item.dependencies?.join(" · ") || t("common.none")}</dd></div>
-                <div><dt>{t("drawer.nextTransition")}</dt><dd>{selection.item.nextTransition ?? (selection.item.done ? t("drawer.taskNextCompleted") : t("drawer.taskNextOpen"))}</dd></div>
+                {selection.item.status === "deferred" ? <div><dt>{t("drawer.resumeWhen")}</dt><dd>{selection.item.resumeWhen || t("drawer.notSet")}</dd></div> : null}
+                <div><dt>{t("drawer.nextTransition")}</dt><dd>{selection.item.nextTransition ?? (selection.item.done ? t("drawer.taskNextCompleted") : selection.item.status === "deferred" ? t("drawer.taskNextDeferred") : t("drawer.taskNextOpen"))}</dd></div>
               </dl>
             </section>
             {!readOnly && !selection.item.done ? <div className="personal-task-inspector-actions" aria-label={t("drawer.taskActions")}>
