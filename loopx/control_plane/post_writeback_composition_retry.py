@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -261,19 +263,24 @@ def append_composition_retry_receipt(
             if current is not None and current.get("status") == "settled":
                 return current, False
             handle.write(json.dumps(payload, sort_keys=True, ensure_ascii=False) + "\n")
-            _compact_composition_retry_journal(handle)
+            _compact_composition_retry_journal(log_path, handle)
     return payload, True
 
 
-def _compact_composition_retry_journal(handle: Any) -> None:
+def _compact_composition_retry_journal(log_path: Path, handle: Any) -> None:
     """Fold the journal back to one row per receipt id once it grows.
 
     Runs under the append lock, so compaction never races another writer.
-    Keeping only the newest row per receipt id preserves every receipt's
-    latest lifecycle state (the only fact readers consume) while bounding
-    storage on high-churn goals.
+    The folded replacement is materialized, synced, and verified in a
+    sibling temporary file before one atomic replace swaps it in: a
+    process exit or I/O failure at any point leaves the previous journal
+    fully intact instead of truncating the only durable copy, and
+    lock-free readers only ever observe the complete old or the complete
+    folded file. Compaction failures propagate; the journal is never
+    recovered by swallowing the error or truncating again.
     """
 
+    handle.flush()
     handle.seek(0)
     lines = handle.read().splitlines()
     if len(lines) <= _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT:
@@ -301,12 +308,35 @@ def _compact_composition_retry_journal(handle: Any) -> None:
         if receipt_id not in latest:
             order.append(receipt_id)
         latest[receipt_id] = row
-    handle.seek(0)
-    handle.truncate()
-    for receipt_id in order:
-        handle.write(
-            json.dumps(latest[receipt_id], sort_keys=True, ensure_ascii=False) + "\n"
-        )
+    replacement = "".join(
+        json.dumps(latest[receipt_id], sort_keys=True, ensure_ascii=False) + "\n"
+        for receipt_id in order
+    )
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=log_path.parent,
+            prefix=f"{log_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_handle:
+            temporary_name = temporary_handle.name
+            temporary_handle.write(replacement)
+            temporary_handle.flush()
+            os.fsync(temporary_handle.fileno())
+        verified = _iter_composition_retry_rows(Path(temporary_name))
+        if [str(row.get("receipt_id")) for row in verified] != order:
+            raise OSError("composition retry journal replacement is unverifiable")
+        os.replace(temporary_name, log_path)
+    except BaseException:
+        if temporary_name:
+            try:
+                os.unlink(temporary_name)
+            except OSError:
+                pass
+        raise
 
 
 def settle_composition_retry_receipt(

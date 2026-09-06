@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,7 @@ from loopx.control_plane.post_writeback_composition_retry import (
     composition_retry_receipt_log_path,
     composition_retry_receipt_ref,
     pending_composition_retry_receipts,
+    pending_composition_retry_receipts_for_path,
     settle_composition_retry_receipt,
 )
 
@@ -657,6 +660,187 @@ def test_pending_view_keeps_unresolved_receipts_beyond_the_compaction_bound(
     still_visible = pending_composition_retry_receipts(runtime_root, "goal-1")
     assert original[0]["receipt_id"] in {row["receipt_id"] for row in still_visible}
     assert len(still_visible) == len(after)
+
+
+def _filler_append(journal_path: Path, index: int) -> None:
+    identity = _identity()
+    identity["todo_id"] = f"todo_filler_{index:04d}"
+    append_composition_retry_receipt(
+        journal_path,
+        build_composition_retry_receipt(
+            goal_id="goal-1",
+            event_kind="todo_complete",
+            identity=identity,
+            state_version=f"vision-revision-{index}",
+            committed_at="2026-09-06T00:00:00Z",
+            hook_identities=[
+                {
+                    "hook_id": "periodic_report.stage_completion",
+                    "capability_id": "periodic-report",
+                }
+            ],
+            error_code="source_projection_failed",
+        ),
+    )
+
+
+def test_failed_compaction_keeps_the_journal_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1 regression: interrupted compaction must never lose pending receipts.
+
+    Owner fault injection: 512 pending receipts, the next append triggers
+    compaction, and an OSError lands right after the destructive in-place
+    step. The legacy truncate-then-rewrite path left a 0-byte journal and
+    every unhandled failure vanished from the pending readback; the folded
+    replacement must be swapped in atomically so the failure propagates
+    while the pre-compaction journal stays fully readable.
+    """
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+    journal_path = composition_retry_receipt_log_path(runtime_root, "goal-1")
+
+    for index in range(_COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT):
+        _filler_append(journal_path, index)
+    assert (
+        len(pending_composition_retry_receipts(runtime_root, "goal-1"))
+        == _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT
+    )
+
+    real_path_open = Path.open
+
+    class _JournalHandle:
+        def __init__(self, handle: Any) -> None:
+            self._handle = handle
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._handle, name)
+
+        def __iter__(self) -> Any:
+            return iter(self._handle)
+
+        def __enter__(self) -> _JournalHandle:
+            self._handle.__enter__()
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self._handle.__exit__(*exc)  # type: ignore[func-returns-value]
+
+        def truncate(self, *args: object, **kwargs: object) -> object:
+            self._handle.truncate(*args, **kwargs)
+            raise OSError("injected after journal truncation")
+
+    def exploding_journal_open(self: Path, *args: object, **kwargs: object) -> object:
+        handle = real_path_open(self, *args, **kwargs)  # type: ignore[arg-type]
+        mode = str(args[0] if args else kwargs.get("mode", "r"))
+        if self == journal_path and "a" in mode:
+            return _JournalHandle(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", exploding_journal_open)
+    monkeypatch.setattr(
+        os,
+        "replace",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("injected at journal replacement")
+        ),
+    )
+
+    with pytest.raises(OSError, match="injected"):
+        _filler_append(journal_path, _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT)
+
+    surviving = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert len(surviving) == _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT + 1
+    journal_lines = [
+        line
+        for line in journal_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(journal_lines) == _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT + 1
+    assert not list(journal_path.parent.glob("*.tmp"))
+
+
+def test_concurrent_reader_never_observes_a_partial_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1 regression: readers only ever see the complete old or folded file."""
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+    journal_path = composition_retry_receipt_log_path(runtime_root, "goal-1")
+
+    bound = _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT
+    for _round in range(2):
+        for index in range(bound):
+            _filler_append(journal_path, index)
+
+    real_replace = os.replace
+    swap_observations: dict[str, int] = {}
+
+    def observing_replace(src: object, dst: object, *args: object) -> object:
+        destination = Path(str(dst))
+        swap_observations["before"] = len(
+            [
+                line
+                for line in destination.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        )
+        result = real_replace(src, dst, *args)
+        swap_observations["after"] = len(
+            [
+                line
+                for line in destination.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        )
+        return result
+
+    monkeypatch.setattr(os, "replace", observing_replace)
+
+    _filler_append(journal_path, 0)
+
+    # The swap point observes the complete unfolded journal (the second
+    # append round already folds at every row, so the journal holds one
+    # extra row per swap) and the complete folded replacement.
+    assert swap_observations == {"before": bound + 1, "after": bound}
+    pending = pending_composition_retry_receipts(runtime_root, "goal-1")
+    assert len(pending) == bound
+
+
+def test_live_readers_during_repeated_compaction_see_complete_journals(
+    tmp_path: Path,
+) -> None:
+    """P1 regression: lock-free readers never observe a truncated journal."""
+
+    registry_path, runtime_root = _write_registry(tmp_path)
+    journal_path = composition_retry_receipt_log_path(runtime_root, "goal-1")
+
+    bound = _COMPOSITION_RETRY_JOURNAL_COMPACT_ROW_LIMIT
+    for _round in range(2):
+        for index in range(bound):
+            _filler_append(journal_path, index)
+
+    stop = threading.Event()
+    observations: list[int] = []
+
+    def reader() -> None:
+        while not stop.is_set():
+            observations.append(
+                len(pending_composition_retry_receipts_for_path(journal_path))
+            )
+
+    reader_thread = threading.Thread(target=reader)
+    reader_thread.start()
+    try:
+        for index in range(32):
+            _filler_append(journal_path, index)
+    finally:
+        stop.set()
+        reader_thread.join(timeout=10.0)
+    assert not reader_thread.is_alive()
+
+    assert observations
+    assert set(observations) == {bound}
 
 
 def test_later_turn_discovers_and_clears_pending_composition_retries(
