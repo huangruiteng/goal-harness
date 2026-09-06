@@ -11,6 +11,20 @@ the repository Pages base (`/loopx/`) and in root-base local previews.
 The language switch keeps English as the default and provides a public-safe
 Chinese locale. `?lang=zh` is the shareable Chinese entry.
 
+The Blog is a static editorial section under `public/blog/`. `/blog/` and its
+articles default to English; `/blog/zh/` contains the paired Chinese editions.
+Each language has a direct URL, a matching language switch, canonical and
+alternate-language metadata, and the complete article in HTML. Reading and
+navigation work without JavaScript. Vite copies these pages into both the local
+build and the existing Pages export; no separate hosting or content service is
+needed. Relative navigation supports both root and repository base paths.
+
+Edit the paired HTML editions together, including their index summaries and
+metadata. Preserve matching section anchors and public source attribution.
+Keep source-document exports, private references, and unreviewed media outside
+the public tree. Follow `docs/development/design.md` and obtain first-screen
+review before changing the Blog or its homepage entry.
+
 The first-run CTA opens one setup dialog with a recommended Agent path and a
 manual Shell path. The Agent option copies the localized, public-safe setup
 contract; the Shell option copies the commands shown in the terminal section.
