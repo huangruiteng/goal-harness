@@ -283,6 +283,10 @@ def _derived_obligation(
     return obligation
 
 
+def _goal_state_text(specs: list[dict[str, str]]) -> str:
+    return "\n".join([*STATE_HEADER_LINES, *_todo_lines(specs)]) + "\n"
+
+
 def _write_fixture(
     root: Path,
     *,
@@ -298,10 +302,7 @@ def _write_fixture(
         state_relative = Path(".codex") / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
         state_file = project / state_relative
         state_file.parent.mkdir(parents=True)
-        state_file.write_text(
-            "\n".join([*STATE_HEADER_LINES, *_todo_lines(specs)]) + "\n",
-            encoding="utf-8",
-        )
+        state_file.write_text(_goal_state_text(specs), encoding="utf-8")
         _assert_fixture_todos_parsed(state_file, specs)
         return state_file, str(state_relative)
 
@@ -1047,14 +1048,50 @@ def test_conflicting_proposal_id_replay_fails_closed(tmp_path: Path) -> None:
     assert rows[0]["changed"] == ["acceptance now requires the recovered receipt"]
 
 
-def test_markdown_basis_admits_with_unverifiable_fact(tmp_path: Path) -> None:
+def test_markdown_basis_zero_from_real_projection_admits(tmp_path: Path) -> None:
+    # Review round 6 counterexample (P2-2): a Goal without an event log gets
+    # state_event_basis_sequence=0 from the real Stage 1 projection. The
+    # proposal must be able to consume that real basis verbatim — a decoder
+    # demanding a positive integer here forces proposers to fabricate
+    # history. (_proposal binds the live derived basis, so sequence is 0.)
     paths = _write_fixture(tmp_path, events=None)
 
-    record = _admit(paths, _proposal(paths, {"base_state_event_basis_sequence": 5}))
+    proposal = _proposal(paths)
+    assert proposal["base_state_event_basis_sequence"] == 0
+
+    record = _admit(paths, proposal)
 
     assert record["admission"] == "admitted"
     assert record["admission_facts"] == ["base_source_basis_unverifiable"]
     assert record["canonical_effect"] == "none"
+    assert record["base_state_event_basis_sequence"] == 0
+
+
+def test_markdown_basis_with_fabricated_positive_sequence_fails_closed(
+    tmp_path: Path,
+) -> None:
+    # The inverse counterexample: with sequence fabricated to 5 the old
+    # decoder happily admitted the proposal as unverifiable. 0 is the only
+    # markdown basis the Stage 1 producer can emit, so any other value is
+    # not a producible base and must fail closed instead of being retained.
+    paths = _write_fixture(tmp_path, events=None)
+
+    with pytest.raises(ValueError, match="markdown_active_state"):
+        _admit(paths, _proposal(paths, {"base_state_event_basis_sequence": 5}))
+
+    assert _journal_rows(paths) == []
+
+
+def test_event_log_basis_rejects_zero_sequence(tmp_path: Path) -> None:
+    # Event-log bases stay strictly positive: an append sequence of 0 cannot
+    # exist under revision_basis=state_event_log, so it is a schema-level
+    # rejection, not a "behind the head" needs_rebase retention.
+    paths = _write_fixture(tmp_path, events=_default_events())
+
+    with pytest.raises(ValueError, match="state_event_log"):
+        _admit(paths, _proposal(paths, {"base_state_event_basis_sequence": 0}))
+
+    assert _journal_rows(paths) == []
 
 
 def test_admission_has_zero_canonical_effect(tmp_path: Path) -> None:

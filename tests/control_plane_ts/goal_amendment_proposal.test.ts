@@ -170,9 +170,17 @@ test("a base sequence ahead of the derived head fails closed", () => {
   );
 });
 
-test("a markdown basis admits with an unverifiable base fact", () => {
+test("a markdown basis admits the real sequence 0 as unverifiable", () => {
+  // Producer-consumer contract (review round 6 counterexample 2): a goal
+  // without an event log projects state_event_basis_sequence=0, and the
+  // proposal consumes that real 0 verbatim — the decoder must never force
+  // the proposer to fabricate a positive sequence.
   const result = admitGoalAmendmentProposal(
     baseRequest({
+      proposal: {
+        ...baseRequest().proposal,
+        base_state_event_basis_sequence: 0,
+      },
       derived_basis: {
         state_event_basis_sequence: 0,
         revision_basis: "markdown_active_state",
@@ -182,7 +190,64 @@ test("a markdown basis admits with an unverifiable base fact", () => {
   );
 
   assert.equal(result.admission, "admitted");
+  assert.equal(result.base_state_event_basis_sequence, 0);
   assert.deepEqual(result.admission_facts, ["base_source_basis_unverifiable"]);
+});
+
+test("a fabricated positive base sequence under a markdown basis fails closed", () => {
+  // The inverse counterexample: 0 is the only markdown sequence the Stage 1
+  // producer can emit, so 17 is not a producible base and must be rejected
+  // instead of being admitted as unverifiable.
+  assert.throws(
+    () =>
+      admitGoalAmendmentProposal(
+        baseRequest({
+          proposal: {
+            ...baseRequest().proposal,
+            base_state_event_basis_sequence: 17,
+          },
+          derived_basis: {
+            state_event_basis_sequence: 0,
+            revision_basis: "markdown_active_state",
+            source_basis_digest: DIGEST,
+          },
+        }),
+      ),
+    /must be 0 when the derived revision_basis is markdown_active_state/,
+  );
+});
+
+test("a zero base sequence under an event-log basis fails closed", () => {
+  // Event append sequences start at 1: 0 cannot exist under
+  // state_event_log and is a request rejection, not a behind-head
+  // needs_rebase retention.
+  assert.throws(
+    () =>
+      admitGoalAmendmentProposal(
+        baseRequest({
+          proposal: {
+            ...baseRequest().proposal,
+            base_state_event_basis_sequence: 0,
+          },
+        }),
+      ),
+    /must be a positive integer when the derived revision_basis is state_event_log/,
+  );
+});
+
+test("a negative base sequence is rejected", () => {
+  assert.throws(
+    () =>
+      admitGoalAmendmentProposal(
+        baseRequest({
+          proposal: {
+            ...baseRequest().proposal,
+            base_state_event_basis_sequence: -1,
+          },
+        }),
+      ),
+    /must be a non-negative integer/,
+  );
 });
 
 test("an unknown amendment class is rejected", () => {

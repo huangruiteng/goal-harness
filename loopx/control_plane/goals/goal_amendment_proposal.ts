@@ -41,8 +41,12 @@ import {
  *
  * The derived goal basis facts arrive from the Python adapter via the Stage 1
  * alignment projection (`state_event_log` head = last append sequence). When
- * no event log exists the basis is `markdown_active_state` and the base is
- * reported unverifiable instead of fabricating a stale verdict.
+ * no event log exists the basis is `markdown_active_state` with sequence 0 —
+ * the only sequence the markdown producer can emit — and a proposal binding
+ * that real 0 is admitted as unverifiable instead of being forced to
+ * fabricate a positive sequence; conversely a positive sequence under
+ * `markdown_active_state` (or 0 under `state_event_log`) is not a producible
+ * base and fails closed as a request rejection.
  *
  * Causal binding (RFC §5 "impact scope"): the request also carries typed
  * inventories the Python authority derived at admission time — the goal's
@@ -367,7 +371,7 @@ function decodeProposal(value: unknown): GoalAmendmentProposal {
       "goal_amendment_proposal.amendment_class",
       "amendment class is unsupported",
     ),
-    base_state_event_basis_sequence: positiveInteger(
+    base_state_event_basis_sequence: nonNegativeInteger(
       proposal.base_state_event_basis_sequence,
       "goal_amendment_proposal.base_state_event_basis_sequence",
     ),
@@ -390,12 +394,43 @@ function decodeProposal(value: unknown): GoalAmendmentProposal {
   };
 }
 
-function positiveInteger(value: unknown, label: string): number {
+function nonNegativeInteger(value: unknown, label: string): number {
   const decoded = requireInteger(value, label);
-  if (decoded < 1) {
-    throw new EffectRuntimeRequestError(`${label} must be a positive integer`);
+  if (decoded < 0) {
+    throw new EffectRuntimeRequestError(`${label} must be a non-negative integer`);
   }
   return decoded;
+}
+
+function requireProducibleBaseSequence(
+  proposal: GoalAmendmentProposal,
+  derived: DerivedGoalBasisFacts,
+): void {
+  // The proposal's base sequence must be a value the Stage 1 producer can
+  // actually emit for the goal's current revision basis — never a decoded
+  // integer the caller invented. A markdown goal (no state event log)
+  // always projects state_event_basis_sequence=0, so 0 is the only real
+  // markdown base and a fabricated positive sequence is a request
+  // rejection, not an unverifiable admission. An event-log base stays
+  // strictly positive: append sequences start at 1, so 0 cannot exist
+  // under state_event_log and is rejected instead of silently becoming a
+  // "behind the head" needs_rebase retention.
+  if (
+    derived.revision_basis === "markdown_active_state" &&
+    proposal.base_state_event_basis_sequence !== 0
+  ) {
+    throw new EffectRuntimeRequestError(
+      "goal_amendment_proposal.base_state_event_basis_sequence must be 0 when the derived revision_basis is markdown_active_state (the real markdown basis has no event append sequence; do not fabricate one)",
+    );
+  }
+  if (
+    derived.revision_basis === "state_event_log" &&
+    proposal.base_state_event_basis_sequence < 1
+  ) {
+    throw new EffectRuntimeRequestError(
+      "goal_amendment_proposal.base_state_event_basis_sequence must be a positive integer when the derived revision_basis is state_event_log",
+    );
+  }
 }
 
 function decodeDerivedBasis(value: unknown): DerivedGoalBasisFacts {
@@ -685,6 +720,7 @@ export function admitGoalAmendmentProposal(
 ): GoalAmendmentProposalAdmission {
   const request = decodeGoalAmendmentProposalRequest(value);
   const { proposal } = request;
+  requireProducibleBaseSequence(proposal, request.derived_basis);
   requireCausalBinding(proposal, request);
   const outcome = admissionOutcome(proposal, request.derived_basis);
   return {

@@ -9,6 +9,16 @@ journal lives under ``runtime/goals/<goal_id>/amendment-proposals/``.
 The causal replan obligation inventory is never a CLI input: admission
 derives it on the spot from the authoritative quota run-history projection
 under ``runtime/goals/<goal_id>/runs/``.
+
+Submit and readback share one selector precedence (see
+``_resolve_goal_routing``): the CLI-resolved registry (``--registry`` /
+``LOOPX_REGISTRY`` / default) is authoritative for both modes and
+``--project`` never replaces it with a project-local registry — two
+registries can register the same Goal over different runtime roots, and a
+readback that swapped registries would report another runtime's journal
+even though the submit succeeded. The runtime root follows the same
+registry: ``--runtime-root`` wins, else the registry's
+``common_runtime_root``.
 """
 
 from __future__ import annotations
@@ -23,7 +33,6 @@ from ..control_plane.goals.goal_amendment_proposal import (
     read_goal_amendment_proposal_journal,
 )
 from ..control_plane.goals.shared_goal_alignment import (
-    DEFAULT_REGISTRY_RELATIVE_PATH,
     _registered_goal,
 )
 from ..runtime import validate_goal_id_path_segment
@@ -130,7 +139,10 @@ def register_goal_amendment_proposal_command(
         "--project",
         help=(
             "Project directory containing the goal or active state. "
-            "Defaults to the registry goal repository."
+            "Defaults to the registry goal repository. Never selects the "
+            "registry: the explicit --registry (or its resolved default) "
+            "stays authoritative for both submit and --list, so the same "
+            "selectors always read back what they submitted."
         ),
     )
 
@@ -150,7 +162,6 @@ def handle_goal_amendment_proposal_command(
         runtime_root = Path(runtime_root_arg).expanduser() if runtime_root_arg else None
         if args.list:
             payload = _handle_list(
-                args,
                 goal_id=goal_id,
                 registry_path=registry_path,
                 runtime_root=runtime_root,
@@ -203,8 +214,54 @@ def _runtime_root_from_registry(
     return Path(text).expanduser() if text else None
 
 
+def _resolve_goal_routing(
+    *,
+    goal_id: str,
+    registry_path: Path,
+    runtime_root: Path | None,
+) -> tuple[Path, dict[str, object], Path]:
+    """Resolve the registry/runtime pair both submit and readback route through.
+
+    One documented selector precedence, shared by ``--proposal-json`` submit
+    and ``--list`` readback so the journal a submission lands in is always
+    the journal the same selectors read back:
+
+    1. Registry: the CLI-resolved registry path (``--registry``,
+       ``LOOPX_REGISTRY``, or the resolved default) is authoritative and is
+       never silently replaced by a project-local ``<project>/.loopx/
+       registry.json``. Two registries can register the same Goal over
+       different runtime roots, so letting ``--project`` swap the registry
+       on one path only makes a successful submission unreadable — the
+       readback reports another runtime's journal (usually an empty list)
+       even though nothing failed. ``--project`` selects the Goal state
+       directory for submit, not the registry.
+    2. Runtime root: an explicit ``--runtime-root`` wins; otherwise the
+       selected registry's ``common_runtime_root``.
+
+    Raises the same unreadable/invalid-registry and missing-runtime-root
+    errors for both modes, before any journal read or write.
+    """
+
+    try:
+        registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ValueError(f"goal registry is unreadable: {registry_path}") from None
+    if not isinstance(registry_payload, dict):
+        raise TypeError("goal registry must contain a JSON object")
+    _registered_goal(registry_payload, goal_id=goal_id)
+
+    effective_runtime_root = runtime_root
+    if effective_runtime_root is None:
+        effective_runtime_root = _runtime_root_from_registry(registry_payload)
+    if effective_runtime_root is None:
+        raise ValueError(
+            "proposal journal routing requires a runtime root "
+            "(--runtime-root or the registry common_runtime_root)"
+        )
+    return registry_path, registry_payload, effective_runtime_root
+
+
 def _handle_list(
-    args: argparse.Namespace,
     *,
     goal_id: str | None,
     registry_path: Path,
@@ -214,35 +271,13 @@ def _handle_list(
         raise ValueError("--list requires --goal-id")
     safe_goal_id = validate_goal_id_path_segment(goal_id)
 
-    effective_registry_path = registry_path
-    if getattr(args, "project", None):
-        project_candidate = (
-            Path(args.project).expanduser() / DEFAULT_REGISTRY_RELATIVE_PATH
-        )
-        if project_candidate.is_file():
-            effective_registry_path = project_candidate
-
-    try:
-        registry_payload = json.loads(
-            effective_registry_path.read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError):
-        raise ValueError(
-            f"goal registry is unreadable: {effective_registry_path}"
-        ) from None
-    if not isinstance(registry_payload, dict):
-        raise TypeError("goal registry must contain a JSON object")
-
-    _registered_goal(registry_payload, goal_id=safe_goal_id)
-
-    effective_runtime_root = runtime_root
-    if effective_runtime_root is None:
-        effective_runtime_root = _runtime_root_from_registry(registry_payload)
-    if effective_runtime_root is None:
-        raise ValueError(
-            "proposal journal readback requires a runtime root "
-            "(--runtime-root or the registry common_runtime_root)"
-        )
+    # Readback routes through the same selector precedence as submit: the
+    # explicit registry is authoritative and --project never replaces it.
+    _, _, effective_runtime_root = _resolve_goal_routing(
+        goal_id=safe_goal_id,
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+    )
     rows = read_goal_amendment_proposal_journal(
         runtime_root=effective_runtime_root,
         goal_id=safe_goal_id,
@@ -279,10 +314,18 @@ def _handle_submit(
         goal_id=proposal_goal_id,
         registry_path=registry_path,
     )
+    # Submit routes through the same selector precedence as readback (see
+    # _resolve_goal_routing): the explicit registry wins for both, so the
+    # journal this append lands in is exactly the one --list reads back.
+    effective_registry_path, _, _ = _resolve_goal_routing(
+        goal_id=proposal_goal_id,
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+    )
     record = admit_goal_amendment_proposal(
         proposal=proposal,
         project=project,
-        registry_path=registry_path,
+        registry_path=effective_registry_path,
         runtime_root=runtime_root,
     )
     return dict(record)

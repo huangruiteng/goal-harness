@@ -20,7 +20,14 @@ from typing import Any
 import pytest
 
 from loopx.cli import main as cli_main
+from loopx.event_sourced_state import (
+    TODO_ADDED,
+    AppendOnlyStateEventStore,
+    make_state_event,
+)
 from tests.control_plane.test_goal_amendment_proposal import (
+    AGENTS,
+    EVENT_LOG_NAME,
     GOAL_ID,
     OTHER_GOAL_ID,
     _ack_run,
@@ -71,6 +78,88 @@ def _submit_argv(
         str(paths["project"]),
         *extra,
     )
+
+
+def _write_dual_registry_fixture(root: Path) -> dict[str, Path]:
+    """Registry A with runtime A, plus project B's own registry B with
+    runtime B — both registering the same Goal over project B's state file.
+
+    This is the two-registry caller counterexample from review round 6:
+    ``--registry A --project B`` submit lands in runtime A's journal, so the
+    same selectors must read runtime A's journal back — never project B's
+    local registry routing to an empty runtime B list.
+    """
+
+    from tests.control_plane.test_goal_amendment_proposal import (
+        _default_events,
+        _default_todo_specs,
+        _goal_state_text,
+    )
+
+    project = root / "project-b"
+    runtime_a = root / "runtime-a"
+    runtime_b = root / "runtime-b"
+    state_relative = Path(".codex") / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    state_file = project / state_relative
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text(_goal_state_text(_default_todo_specs()), encoding="utf-8")
+    store = AppendOnlyStateEventStore(state_file.with_name(EVENT_LOG_NAME))
+    for event in _default_events():
+        store.append(
+            make_state_event(
+                event_id=event["event_id"],
+                goal_id=GOAL_ID,
+                event_type=TODO_ADDED,
+                actor_agent_id=event["actor_agent_id"],
+                refs={"todo_id": event["todo_id"]},
+                payload={"text": f"Fixture event for {event['todo_id']}."},
+            )
+        )
+
+    def _registry(common_runtime_root: Path) -> str:
+        return (
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "common_runtime_root": str(common_runtime_root),
+                    "goals": [
+                        {
+                            "id": GOAL_ID,
+                            "domain": "shared-goal-alignment-stage2",
+                            "status": "active",
+                            "repo": str(project),
+                            "state_file": str(state_relative),
+                            "quota": {"compute": 1.0, "window_hours": 24},
+                            "coordination": {
+                                "agent_model": "peer_v1",
+                                "registered_agents": list(AGENTS),
+                            },
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
+
+    registry_a = root / "registry-a" / "registry.json"
+    registry_a.parent.mkdir(parents=True)
+    registry_a.write_text(_registry(runtime_a), encoding="utf-8")
+    registry_b = project / ".loopx" / "registry.json"
+    registry_b.parent.mkdir(parents=True)
+    registry_b.write_text(_registry(runtime_b), encoding="utf-8")
+
+    paths = {
+        "project": project,
+        "runtime": runtime_a,
+        "registry": registry_a,
+        "runtime_b": runtime_b,
+        "registry_b": registry_b,
+    }
+    _append_runs(paths, _stall_runs())
+    return paths
 
 
 def test_cli_submits_proposal_and_lists_journal_json(
@@ -130,6 +219,102 @@ def test_cli_submits_proposal_and_lists_journal_json(
     assert list_payload["count"] == 1
     assert list_payload["rows"][0]["proposal_id"] == "gap_stage2_001"
     assert list_payload["rows"][0]["journal_append_sequence"] == 1
+
+
+def test_cli_submit_and_list_share_one_registry_selector(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Review round 6 counterexample (P2-1): registry A/runtime A register the
+    # goal while project B carries its own registry B/runtime B registering
+    # the same goal. Submitting with `--registry A --project B` lands the
+    # journal in runtime A, so the SAME two selectors in --list mode must
+    # read runtime A's journal back. A readback that silently swaps in the
+    # project-local registry B reports another runtime's empty list even
+    # though nothing failed.
+    paths = _write_dual_registry_fixture(tmp_path)
+    proposal = _proposal(paths)
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
+
+    exit_code, payload, _ = _run_amendment_cli(
+        capsys,
+        paths["registry"],
+        "goal-amendment-proposal",
+        *_submit_argv(paths, proposal_json),
+        "--format",
+        "json",
+    )
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["admission"] == "admitted"
+    journal_a = (
+        paths["runtime"] / "goals" / GOAL_ID / "amendment-proposals" / "journal.jsonl"
+    )
+    journal_b = (
+        paths["runtime_b"] / "goals" / GOAL_ID / "amendment-proposals" / "journal.jsonl"
+    )
+    assert journal_a.is_file()
+    assert not journal_b.exists(), "submit must route through the explicit registry"
+
+    list_code, list_payload, _ = _run_amendment_cli(
+        capsys,
+        paths["registry"],
+        "goal-amendment-proposal",
+        "--list",
+        "--goal-id",
+        GOAL_ID,
+        "--project",
+        str(paths["project"]),
+        "--format",
+        "json",
+    )
+    assert list_code == 0
+    assert list_payload["ok"] is True
+    assert list_payload["count"] == 1, (
+        "the same --registry/--project selectors that submitted must find the "
+        "retained row; a project-local registry must never silently replace "
+        "the explicit one on the readback path"
+    )
+    assert list_payload["rows"][0]["proposal_id"] == "gap_stage2_001"
+
+
+def test_cli_single_registry_submit_and_list_positive_control(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Positive control: with one registry there is no routing ambiguity —
+    # submit and --list agree, including when --project names the registry's
+    # own project directory (whose local registry IS the selected registry).
+    paths = _write_fixture(tmp_path, events=_default_events())
+    proposal = _proposal(paths)
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
+
+    exit_code, payload, _ = _run_amendment_cli(
+        capsys,
+        paths["registry"],
+        "goal-amendment-proposal",
+        *_submit_argv(paths, proposal_json),
+        "--format",
+        "json",
+    )
+    assert exit_code == 0
+    assert payload["admission"] == "admitted"
+
+    list_code, list_payload, _ = _run_amendment_cli(
+        capsys,
+        paths["registry"],
+        "goal-amendment-proposal",
+        "--list",
+        "--goal-id",
+        GOAL_ID,
+        "--project",
+        str(paths["project"]),
+        "--format",
+        "json",
+    )
+    assert list_code == 0
+    assert list_payload["count"] == 1
+    assert list_payload["rows"][0]["proposal_id"] == "gap_stage2_001"
 
 
 def test_cli_submits_proposal_markdown(

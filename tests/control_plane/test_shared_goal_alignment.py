@@ -26,8 +26,8 @@ from loopx.control_plane.todos.active_state_todo_parser import (
     parse_active_state_todos,
 )
 from loopx.event_sourced_state import (
-    TODO_ADDED,
     AppendOnlyStateEventStore,
+    TODO_ADDED,
     make_state_event,
 )
 
