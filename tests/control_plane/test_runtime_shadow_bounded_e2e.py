@@ -86,6 +86,31 @@ def acquire_native(tmp_path: Path, registry: Path, runtime: Path, todo_id: str) 
     })
 
 
+def test_source_snapshot_preserves_ordinal_mixed_case_lease_inventory(tmp_path: Path) -> None:
+    registry, runtime, state = workspace(tmp_path)
+    directory = runtime / "goals" / "goal-a" / "task-leases"
+    directory.mkdir(parents=True)
+    # Imported baseline files use the snapshot contract's ASCII filename range.
+    # Their order is independent of locale and filesystem enumeration order.
+    for todo_id in ("todo_alpha", "todo_Zulu", "todo_Bravo"):
+        (directory / f"{todo_id}.json").write_text(json.dumps({
+            "schema_version": "task_lease_v0", "goal_id": "goal-a", "todo_id": todo_id,
+            "owner": "agent-a", "status": "released", "version": 1,
+            "write_scopes": ["src/"], "idempotency_key": f"baseline-{todo_id}",
+        }), encoding="utf-8")
+    goal = enable(registry)
+    projection, snapshot = build_runtime_shadow_source_snapshot(
+        goal=goal, runtime_root=runtime, state_path=state, registry_path=registry)
+    expected = ["todo_Bravo", "todo_Zulu", "todo_alpha"]
+    assert [entry["name"] for entry in snapshot["lease_inventory"]] == [f"{name}.json" for name in expected]
+    assert [lease["todo_id"] for lease in projection["leases"]] == expected
+    boot = cli(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", "goal-a", "--execute")
+    assert boot["bootstrap"]["status"] == "applied", boot
+    inspected = cli(registry, runtime, "coordination-shadow", "inspect", "--goal-id", "goal-a")
+    assert inspected["inspection"]["status"] == "matched", inspected
+    assert history(tmp_path, runtime)[0]["projection"]["leases"] == projection["leases"]
+
+
 def test_public_cli_and_independent_native_writer_qualify_one_complete_lineage(tmp_path: Path) -> None:
     registry, runtime, state = workspace(tmp_path)
     cli(registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "soft_claim")

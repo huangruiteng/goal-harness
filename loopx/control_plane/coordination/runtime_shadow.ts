@@ -142,7 +142,13 @@ export async function verifyShadowSourceSnapshot(request: ShadowRequest): Promis
   }
   const inventory: JsonObject[] = [];
   const leases: JsonObject[] = [];
-  for (const name of names.filter((name) => /^[A-Za-z0-9_.-]+\.json$/.test(name)).sort()) {
+  // ASCII filenames must use the same ordinal order as Python's source snapshot.
+  const leaseNames = names.filter((name) => /^[A-Za-z0-9_.-]+\.json$/.test(name)).sort((left, right) => {
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  });
+  for (const name of leaseNames) {
     const data = await readFile(join(directory, name));
     const lease = canonicalAuthorityObject(JSON.parse(data.toString("utf8")), "lease");
     if (lease.goal_id !== request.goal_id || lease.todo_id !== name.slice(0, -5)) throw new ShadowManagementError("source_lease_identity_mismatch");

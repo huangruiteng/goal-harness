@@ -191,7 +191,7 @@ jobs:
           cache: npm
       - name: Install test and package build tools
         run: |
-          python -m pip install --disable-pip-version-check -e ".[test]" "build>=1,<2"
+          python -m pip install --disable-pip-version-check -e ".[test]" "build==1.6.0"
           npm ci --ignore-scripts
       - name: Qualify real CLI, mixed writers, process death, and recovery
         run: python -m pytest -q -m stage2c_e2e --junitxml=stage2c-e2e.xml

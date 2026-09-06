@@ -141,7 +141,7 @@ print(json.dumps({'executable': sys.executable, 'package': str(package),
         self.report["provenance"] = provenance
         self.checked("installed_python_ts_json_resources", resource_count=len(provenance["resources"]))
 
-        initialized = self.cli("console_project_bootstrap", "bootstrap", "--project", str(self.project),
+        self.cli("console_project_bootstrap", "bootstrap", "--project", str(self.project),
             "--goal-id", GOAL, "--objective", "Qualify installed authority transactions.",
             "--no-onboarding-scan", "--onboarding-connection-validation", "provider-prevalidated", "--no-global-sync")
         # Set configuration only, before shadow bootstrap creates the real binding.
@@ -151,8 +151,8 @@ print(json.dumps({'executable': sys.executable, 'package': str(package),
             "runtime_shadow": {"schema_version": "loopx_coordination_runtime_shadow_config_v0",
                 "enabled": True, "provider": "file_v0"}})
         self.registry.write_text(json.dumps(registry))
-        state = Path(initialized["state_file"])
-        state.write_text(state.read_text().replace("---\n", "---\nhandoff_mode: hard_lease\n", 1))
+        self.cli("console_handoff_mode_hard_lease", "handoff-mode", "set", "--goal-id", GOAL,
+            "--mode", "hard_lease")
         boot = self.cli("console_shadow_bootstrap", "coordination-shadow", "bootstrap", "--goal-id", GOAL, "--execute")["bootstrap"]
         require(boot.get("status") == "applied" and bool(boot.get("capture_lineage_id")), f"bootstrap not applied: {boot}")
         self.checked("real_baseline_bootstrap", capture_lineage_id=boot["capture_lineage_id"])

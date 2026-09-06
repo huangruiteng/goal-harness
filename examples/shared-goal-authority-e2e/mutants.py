@@ -149,6 +149,13 @@ CASES.extend([
         "if (resolve(String(snapshot.state_path)) !== resolve(String(snapshot.registered_state_path)))",
         "if (false && resolve(String(snapshot.state_path)) !== resolve(String(snapshot.registered_state_path)))")),),
          "tests/control_plane/test_runtime_shadow_bounded_e2e.py::test_controller_cannot_bind_an_alternate_state_file_before_or_after_bootstrap"),
+    Case("locale_dependent_lease_order", ((COORDINATION + "runtime_shadow.ts", replacement(
+        '''.sort((left, right) => {
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  });''', ".sort((left, right) => left.localeCompare(right));")),),
+         "tests/control_plane/test_runtime_shadow_bounded_e2e.py::test_source_snapshot_preserves_ordinal_mixed_case_lease_inventory"),
 ])
 
 # Restore both halves of the obsolete mirror: the public CLI hook and an actual
