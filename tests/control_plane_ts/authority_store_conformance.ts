@@ -306,6 +306,14 @@ export function registerAuthorityStoreConformance(
           text: "Repeat terminal work"},
       });
       assert.equal(recreatedAfterDeferred.status, "applied");
+      const createdDeferred = await executeCoordinationTodoCreate(store, {
+        ...replayRequest,
+        operation_id: "create-deferred",
+        todo: {...replayRequest.todo, todo_id: "todo-new-deferred",
+          text: "Wait for the external dependency", status: "deferred", done: true,
+          resume_when: "material_change"},
+      });
+      assert.equal(createdDeferred.status, "applied");
       const inconsistentTerminal = await executeCoordinationTodoCreate(store, {
         ...replayRequest,
         operation_id: "reject-inconsistent-terminal",
@@ -322,7 +330,7 @@ export function registerAuthorityStoreConformance(
       assert.equal(created.created_by, "agent-a");
       assert.equal(created.last_actor_agent_id, "agent-a");
       assert.equal(created.updated_at, "2026-09-05T06:00:00Z");
-      assert.equal((loaded.head.todo_read_model as Record<string, unknown>).todo_count, 4);
+      assert.equal((loaded.head.todo_read_model as Record<string, unknown>).todo_count, 5);
       for (const invalid of [
         {...request, operation_id: "bad-actor", actor_agent_id: "agent-b"},
         {...request, operation_id: "bad-status", todo: {...todo, todo_id: "todo-done", status: "done", done: true}},
