@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ...control_plane.todos.contract import normalize_todo_claimed_by
 from .experiment import (
     resolve_reward_memory_experiment,
     resolve_reward_memory_surface_config,
@@ -34,6 +35,7 @@ def outbound_guidance_hook(
         raise ValueError("invalid outbound message purpose")
     if not goal_id or not agent_id:
         return None
+    normalized_agent_id = normalize_todo_claimed_by(agent_id) or ""
     _, config = resolve_reward_memory_experiment(
         registry_path=registry_path, goal_id=goal_id, agent_id=agent_id
     )
@@ -57,12 +59,10 @@ def outbound_guidance_hook(
                 "session_ref",
             )
         }
-        if current["peer_ref"] != f"agent:{agent_id}":
-            raise ValueError(
-                "outbound recall requires the exact configured agent scope"
-            )
+        if current["peer_ref"] != f"agent:{normalized_agent_id}":
+            return None
         if identity is not None and identity != current:
-            raise ValueError("outbound recall corpora must share an identity scope")
+            return None
         identity = current
         checkpoints[corpus["corpus_id"]] = {
             **{k: v for k, v in current.items() if v is not None},

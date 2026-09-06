@@ -79,8 +79,7 @@ def test_disabled_urgent_failure_and_wrong_peer(tmp_path, monkeypatch):
     assert outbound.outbound_guidance_hook(**kwargs, purpose="urgent")("intent")[
         "continue_delivery"
     ]
-    with pytest.raises(ValueError, match="agent scope"):
-        outbound.outbound_guidance_hook(**(kwargs | {"agent_id": "other"}))
+    assert outbound.outbound_guidance_hook(**(kwargs | {"agent_id": "other"})) is None
     config["automation"]["automatic_recall"] = False
     assert outbound.outbound_guidance_hook(**kwargs) is None
     configure(tmp_path, monkeypatch, unavailable=True)
@@ -183,7 +182,9 @@ def test_cli_opaque_turn_uses_real_timestamp(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("command", ["send", "reply"])
-def test_cli_legacy_namespace_preserves_default_off_sender(tmp_path, monkeypatch, command):
+def test_cli_legacy_namespace_preserves_default_off_sender(
+    tmp_path, monkeypatch, command
+):
     from loopx.cli_commands import lark_inbox as cli
 
     config, _, project = _fixture(tmp_path, lifecycle=False)
@@ -195,27 +196,48 @@ def test_cli_legacy_namespace_preserves_default_off_sender(tmp_path, monkeypatch
 
     def send(**kwargs):
         calls.append(kwargs)
-        return {"ok": True, "status": "preview_ready", "external_write_performed": False}
+        return {
+            "ok": True,
+            "status": "preview_ready",
+            "external_write_performed": False,
+        }
 
     monkeypatch.setattr(
-        cli, "reply_lark_event_inbox" if command == "reply" else "send_lark_inbox_message", send
+        cli,
+        "reply_lark_event_inbox" if command == "reply" else "send_lark_inbox_message",
+        send,
     )
     # Direct callers predating outbound recall do not have the new parser fields.
     args = argparse.Namespace(
-        command="lark-inbox", lark_inbox_command=command,
-        goal_id=None, agent_id=None, message_id="om_reaction_fixture",
-        route_key="example", text="done", execute=False, provider_preflight=True,
+        command="lark-inbox",
+        lark_inbox_command=command,
+        goal_id=None,
+        agent_id=None,
+        message_id="om_reaction_fixture",
+        route_key="example",
+        text="done",
+        execute=False,
+        provider_preflight=True,
     )
     results = []
-    assert cli.handle_lark_inbox_command(
-        args, registry_path=tmp_path / "registry.json", runtime_root_arg=None,
-        output_format=lambda *a: "json",
-        print_payload=lambda payload, *a: results.append(payload),
-    ) == 0
+    assert (
+        cli.handle_lark_inbox_command(
+            args,
+            registry_path=tmp_path / "registry.json",
+            runtime_root_arg=None,
+            output_format=lambda *a: "json",
+            print_payload=lambda payload, *a: results.append(payload),
+        )
+        == 0
+    )
     assert len(calls) == 1
     assert calls[0] == {
-        "project": project, "config_path": config, "text": "done",
-        "execute": False, "provider_preflight": True, "before_send": None,
+        "project": project,
+        "config_path": config,
+        "text": "done",
+        "execute": False,
+        "provider_preflight": True,
+        "before_send": None,
         **({"message_id": "om_reaction_fixture"} if command == "reply" else {}),
     }
     assert results[0]["status"] == "preview_ready"
@@ -263,3 +285,18 @@ def test_cli_installs_hook_at_real_sender(tmp_path, monkeypatch, command):
     assert results[0]["status"] == "agent_review_required"
     assert results[0]["external_write_performed"] is False
     assert "not a request for user approval" in cli._render(results[0])
+
+
+def test_unnormalized_agent_id_and_scope_drift_fail_open(tmp_path, monkeypatch):
+    """Build-stage scope problems must never crash the send path."""
+
+    configure(tmp_path, monkeypatch)
+    kwargs = dict(registry_path=tmp_path / "registry.json", goal_id="goal")
+    for raw_agent_id in ("pilot", "pilot ", "Pilot"):
+        hook = outbound.outbound_guidance_hook(
+            **kwargs, agent_id=raw_agent_id, purpose="progress"
+        )
+        assert callable(hook), (
+            f"agent_id={raw_agent_id!r} must normalize to the configured scope"
+        )
+        assert hook("sha256:intent")["status"] == "applied"
