@@ -1144,7 +1144,7 @@ def test_doctor_accepts_subcommand_json_format(
     monkeypatch.setattr(
         doctor_command,
         "collect_doctor",
-        lambda *, deep=False, agent_type=None: {
+        lambda *, deep=False, agent_type=None, installation_only=False: {
             "ok": True,
             "deep": deep,
             "agent_type": agent_type,

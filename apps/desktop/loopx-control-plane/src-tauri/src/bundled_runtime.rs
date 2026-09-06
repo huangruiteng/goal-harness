@@ -132,6 +132,13 @@ fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
         .env("LOOPX_PROMOTE_DEFAULT", "1")
         // The archive staging directory is temporary, never a canary checkout.
         .env("LOOPX_INSTALL_CANARY", "0")
+        // Preparing the App runtime must not inspect/modify host integrations
+        // or invoke provider doctors that can request user-folder access.
+        .env("LOOPX_INSTALL_SKILL", "0")
+        .env("LOOPX_INSTALL_SLASH_COMMANDS", "0")
+        .env("LOOPX_INSTALL_CLAUDE", "0")
+        .env("LOOPX_INSTALL_OPENCODE", "0")
+        .env("LOOPX_INSTALL_REVALIDATE_EXTENSIONS", "0")
         .env_remove("LOOPX_ARCHIVE_URL")
         .env_remove("LOOPX_ARCHIVE_SHA256")
         .env("LOOPX_REPO", "huangruiteng/loopx")

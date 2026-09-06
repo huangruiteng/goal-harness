@@ -50,6 +50,14 @@ mismatched override must be corrected by its owner.
 The installer and App-owned services use the same bounded tool search,
 including standard Homebrew locations on macOS, without loading interactive
 shell profiles. Finder launches therefore do not depend on terminal PATH setup.
+Installation uses `loopx doctor --deep --installation-only`: package ownership,
+representative imports/commands/files and the TypeScript runtime semantic probe
+remain required, but existing Goal projects are not traversed. Native runtime
+preparation also leaves host skills/slash commands and provider doctors alone;
+it cannot depend on a macOS Documents-folder consent prompt. Ordinary
+`loopx doctor` retains its full operator/integration diagnostics. Terminal
+installation still revalidates enabled extensions by default; the App sets
+`LOOPX_INSTALL_REVALIDATE_EXTENSIONS=0` for its bounded bootstrap.
 Failed runtime preparation remains supervised, with at most three automatic
 install attempts per App process and at least 30 seconds between attempts.
 Existing recovery controls remain available after that budget is exhausted,

@@ -203,6 +203,10 @@ tool search for installer and child services, retain exact revision checks,
 bound automatic installation retries, and prove failed preparation followed by
 repair reaches service startup without recreating the App process. Only an App
 binary replacement requires restart; runtime repair resumes the same window.
+Installation readiness must not traverse registered Goal workspaces or run
+host/provider integration checks. Use `doctor --deep --installation-only` to
+retain package/toolchain validation without waiting on user-folder consent;
+full operator diagnostics remain available through ordinary `doctor`.
 
 For most repairs, capture:
 
