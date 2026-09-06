@@ -32,6 +32,7 @@ COMMANDS = (
     "enroll",
     "snapshot",
     "rollback",
+    "reset-cooldown",
 )
 
 
@@ -204,8 +205,8 @@ def run(argv=None) -> int:
     parser.add_argument("--fast", action="store_true")
     args = parser.parse_args(argv)
     settings = OperatorSettings.read(args.config)
-    if args.command == "enroll" and not args.slot:
-        raise ValueError("enroll requires --slot")
+    if args.command in {"enroll", "reset-cooldown"} and not args.slot:
+        raise ValueError(f"{args.command} requires --slot")
     if args.command == "rollback" and not args.snapshot_id:
         raise ValueError("rollback requires --snapshot-id")
     receipt = {
@@ -238,10 +239,12 @@ def run(argv=None) -> int:
             result = catalog.probe()
             receipt["passed"] = result["passed"]
             receipt["model_count"] = len(result["projected_selectors"])
+            receipt["visible_selectors"] = result["visible_selectors"]
             receipt["checks"] = {
                 k: result[k]
                 for k in (
                     "missing",
+                    "unexpected_visible",
                     "hidden",
                     "cpa_missing",
                     "route_mismatches",
@@ -252,6 +255,8 @@ def run(argv=None) -> int:
             runtime.prepare()
             enroll(runtime, args.slot)
             receipt["enrolled_slot"] = args.slot
+        elif args.command == "reset-cooldown":
+            receipt["recovery"] = runtime.reset_cooldown(args.slot)
         elif args.command == "snapshot":
             receipt["rollback_snapshot"] = snapshot(runtime)
         elif args.command == "rollback":

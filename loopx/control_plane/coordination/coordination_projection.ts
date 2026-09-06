@@ -40,7 +40,7 @@ export interface CoordinationProjectionIndex extends CoordinationTodoProjectionI
 }
 
 export type CoordinationProjectionMutation =
-  | { readonly kind: "todo_upsert"; readonly todo: JsonObject }
+  | { readonly kind: "todo_upsert"; readonly todo: JsonObject; readonly clear_fields?: readonly string[] }
   | { readonly kind: "todo_remove"; readonly todo_id: string }
   | { readonly kind: "lease_upsert"; readonly lease: JsonObject }
   | { readonly kind: "lease_remove"; readonly todo_id: string };
@@ -175,10 +175,12 @@ function requireCompleteTodoReplacement(
   previous: JsonObject | undefined,
   replacement: JsonObject,
   index: number,
+  clearFields: readonly string[] = [],
 ): void {
   if (previous === undefined) return;
+  const explicitClears = new Set(clearFields);
   const omittedFields = Object.keys(previous)
-    .filter((field) => !(field in replacement))
+    .filter((field) => !(field in replacement) && !explicitClears.has(field))
     .sort(authorityUnicodeCompare);
   if (omittedFields.length > 0) {
     throw new AuthorityStoreProtocolError(
@@ -201,7 +203,7 @@ function applyCoordinationMutation(
       const todoId = requireAuthorityStoreId(todo.todo_id, `mutations[${index}].todo_id`);
       claimMutationTarget("todo", todoId);
       if (requireCompleteReplacement) {
-        requireCompleteTodoReplacement(todos.get(todoId), todo, index);
+        requireCompleteTodoReplacement(todos.get(todoId), todo, index, mutation.clear_fields);
       }
       todos.set(todoId, todo);
       return;
