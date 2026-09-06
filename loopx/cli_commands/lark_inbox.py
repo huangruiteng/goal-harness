@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..capabilities.issue_fix.provider_hooks import IssueFixReviewerProviderHooks
+from ..capabilities.reward_memory.feedback_hint import build_feedback_review_hint
 from ..capabilities.reward_memory.outbound import outbound_guidance_hook
 from ..control_plane.capability_hooks import (
     TURN_START_HOOK_RESULT_SCHEMA_VERSION,
@@ -555,6 +556,11 @@ def _render(payload: dict[str, object]) -> str:
                 + str(guidance.get("review_digest"))
                 + ". This is not a request for user approval."
             )
+    feedback = payload.get("reward_memory_feedback_review")
+    if isinstance(feedback, dict):
+        lines.append(f"- Reward Memory (advisory): {feedback['instruction']}")
+        lines.append(f"- preview: {feedback['preview_command']}")
+        lines.append("- configured routes: " + json.dumps(feedback["routes"]))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -602,6 +608,19 @@ def handle_lark_inbox_command(
                 config_path=config_path,
                 limit=args.limit,
             )
+            if (
+                payload.get("enabled") is True
+                and payload.get("items")
+                and not getattr(args, "config", None)
+                and not getattr(args, "project", None)
+            ):
+                hint = build_feedback_review_hint(
+                    registry_path=registry_path,
+                    goal_id=getattr(args, "goal_id", None),
+                    agent_id=getattr(args, "agent_id", None),
+                )
+                if hint is not None:
+                    payload["reward_memory_feedback_review"] = hint
         elif args.lark_inbox_command == "ack":
             payload = acknowledge_routed_lark_event_inbox(
                 project=project,

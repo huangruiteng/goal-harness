@@ -31,6 +31,15 @@ parent sender is the app id of the configured profile. A reply to a person,
 another app, or an unverifiable parent remains captured but does not wake the
 agent. The agent does not need to keep a websocket open.
 
+When Lark inbox and the same registered agent's Reward Memory are both enabled,
+a non-empty registry-routed drain can also return an advisory
+`reward_memory_feedback_review` hint. It asks the agent to review reusable
+feedback and preview the existing scoped `reward-memory ingest-event` command;
+it does not ingest chat, grant authority, or change settlement/ACK requirements.
+This explicit path does not require `automatic_ingest=true`. See the
+[Reward Memory inbox workflow](../../../capabilities/reward_memory/README.md#inbox-feedback-review-explicit-ingestion)
+for eligibility, source verification, write/readback and default-off behavior.
+
 ### Optional turn-start Agent reading hook
 
 Realtime collection is the preferred ingress, but a long-running Agent may also

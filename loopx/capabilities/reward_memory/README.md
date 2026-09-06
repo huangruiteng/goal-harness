@@ -144,6 +144,53 @@ verified. Issue Fix continues normally when the experiment is disabled,
 unavailable, rejected by guards, or fails exact readback. Invalid or non-v1
 configuration resolves unavailable with both automatic flags false.
 
+### Inbox feedback review (explicit ingestion)
+
+When a registry-routed `loopx lark-inbox drain --goal-id <goal> --agent-id
+<agent>` returns messages, it also emits `reward_memory_feedback_review` if
+Reward Memory is enabled for that agent and has an active, writable
+`scoped_feedback` route with an enabled standing policy and exact
+`peer_ref=agent:<agent>`. The hint lists configured destinations and a preview
+command bound to the same registry, Goal and Agent. It is advisory: there is no
+provider call, automatic candidate creation, new permission, or ACK gate.
+Both JSON and Markdown drains expose it. Empty/disabled inboxes, disabled or
+invalid memory configurations, unconfigured agents, incompatible routes, and
+explicit `--config`/`--project` overrides retain their previous output.
+
+The agent reviews the conversation before choosing what, if anything, to learn:
+
+1. Verify the source actor and existing authority, current evidence, conflicts
+   and applicability. A policy's allowed roles are not proof of a sender's role.
+   A disagreement is not a universal ban, and one-off task state belongs in
+   Todo/vision rather than durable preference memory.
+2. Distill only confirmed reusable feedback into an applicable configured
+   `soft_preference`, `procedural_experience`, or independently authorized
+   `hard_policy` route. Never widen the route or enable automation to make an
+   event pass. Keep raw chat and credentials out of the event.
+3. Prepare `{adapter, event, observed_at}` using the
+   [scoped feedback fixture](../../../examples/fixtures/reward-memory-scoped-feedback-ingest.public.json)
+   for field shape only. The event uses
+   `schema_version=scoped_feedback_reward_memory_event_v0`, a stable
+   `feedback_ref`, actual `source`, `reasoning`, `guard_context`, compact
+   `content_summary`, `target_class`, and exact identity/surface/revision/action
+   scope. Advisory classes require empty `requested_action_scopes`; allowed
+   policy scopes do not grant advisory memory action authority. Do not copy the
+   fixture's actor or verified-guard assertions.
+4. Replace the hint's input placeholder and preview `ingest-event` without
+   `--execute`. Inspect its guards. Only then execute within the standing
+   policy and verify `exact_readback_verified` and
+   `memory_available_for_recall`; a preview is not a learned memory.
+5. Finish normal reply/material-review/ACK. No reusable feedback or unavailable
+   memory is an honest no-memory outcome, not a reason to block the inbox or
+   repeatedly ask the user for permission. Actual write failures remain visible
+   in the existing ingestion receipt.
+
+`automatic_ingest=false` does **not** prohibit this explicit workflow. Enabling
+it also does **not** wire raw inbox messages into ingestion. Issue Fix's compact
+feedback adapter and recall hooks share the same core but are not a general
+inbox-to-memory feedback loop. Disable the hint by disabling Reward Memory for
+the agent (or its applicable route); no extra store, queue or scheduler exists.
+
 ## Five first-class classes
 
 | Class | Source and scope | Authority and use | Lifecycle |
