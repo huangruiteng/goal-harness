@@ -11,36 +11,49 @@ The operator's `abc-sol-astra` preset uses the existing `compile_catalog` ring
 contract. Its credentials, App catalog, validation and observations share the
 same selector definitions.
 
-| Entry | Sol and Astra candidate order | Terminal fallback |
+| Visible Auto | Sol and Astra candidate order | Terminal behavior |
 | --- | --- | --- |
-| Auto / Prefer A | A → B → C | Ark, for eligible Standard text requests |
-| Prefer B | B → C → A | Ark, for eligible Standard text requests |
-| Prefer C | C → A → B | Ark, for eligible Standard text requests |
-| Fast variants | Same account order | None |
-| Luna | A → B → C | None |
+| `auto/MODEL` | A → B → C | Report exhaustion; no model substitution |
+| `auto-with-ds/MODEL` | A → B → C → DeepSeek | Explicit Standard text fallback |
 
-Both Sol and Astra expose Auto, Prefer A/B/C and four Fast siblings. Together
-with Luna and four existing Ark/compatibility rows, the App catalog has 21 rows.
-Bare Sol/Astra identifiers are compatibility aliases and are not picker rows.
-A preferred account is an entrypoint, not an exclusive pin. Ineligible, cooling
-or exhausted accounts can be skipped. Auto affinity is a hint that CPA must
-revalidate against account availability, input modality and service tier.
+Sol and Astra each have these two visible options: four picker rows total.
+The catalog retains 19 hidden compatibility rows (Prefer A/B/C, Fast, Luna and
+manual Ark identifiers), so existing tasks keep their metadata and route ids.
+Legacy Standard, bare Sol/Astra and Prefer aliases now stay within A/B/C. Only
+`auto-with-ds/` aliases admit Ark. Existing tasks are not silently opted into it.
+The four-route picker does not advertise Fast; the three-account picker retains
+native speed tiers. Image-bearing history excludes the text-only fallback.
 
-Standard routes keep the existing heterogeneous fallback, so their model labels
-explicitly name Ark. Image history, effective priority tier and unsupported tool
-transport must not be silently sent to a text/function-only provider. Code Mode
-needs the CPA candidate's qualified `custom_tool_call` adaptation; the extension
-compiler alone cannot enforce a wire capability. Fast/Luna routes have no Ark
-alias at all. Transparent retry ends at the first visible output or tool call.
+A preferred legacy account remains an entrypoint, not an exclusive pin. Auto
+keeps an eligible subscription affinity for session stability; a recovered
+higher-priority subscription does not forcibly steal an eligible binding.
+Removing Ark aliases from the three-account routes prevents an old degraded
+binding from keeping those routes on DeepSeek.
 
-The pinned CPA runtime remains the only online router. The operator emits
-configuration and metadata; it does not reimplement request retries. Existing
-retry settings remain 10 CPA retries, up to a 65-second advised wait, and one
-account-ring traversal per selection pass. Outer App retries are separate and
-can start another request: one ring pass is **not** a bound on total turn time.
-Account A no longer bypasses cooling. Fresh quota resets and recovery probes
-remain CPA's responsibility; a cached quota observation is not permission to
-permanently disable an account.
+The four-route operator requires a CPA build with
+[custom-tool namespace recovery](https://github.com/huangruiteng/CLIProxyAPI/pull/1). Chat Completions encodes custom tools as functions
+with an `input` string. CPA must restore `custom_tool_call`, the original input,
+namespace and call id in streamed and non-streamed responses. Historical custom
+calls must replay under the same qualified name as the current declaration.
+An omitted namespace can be recovered only from a unique current declaration;
+exact names take precedence and ambiguous names must never be guessed.
+This fixes transport, not model behavior: DeepSeek can still choose poorer code
+or miss Code Mode's output instructions. Keep the three-subscription route as
+the default for coding tasks. Explicit Ark access remains available by id.
+
+CPA owns online retry and cooling. The operator retains 10 CPA retries and up
+to a 65-second advised wait. App retries are separate; a single ring traversal
+is not a bound on total turn time. Do not disable cooling globally to recover
+one account: it would repeatedly hit known exhausted subscriptions.
+
+If an upstream account recovers earlier than its previously reported reset,
+CPA may still cache the old cooldown. After confirming recovery, permit a new
+attempt with `reset-cooldown --slot b --execute` (see the runnable command
+below). This uses CPA's targeted management API, does not rotate OAuth tokens,
+restart other accounts, modify task stores, or claim that quota was replenished.
+It refuses disabled slots. Verify with a bounded live request and actual account
+selection; a successful cache reset alone is not a health check. This explicit
+operator action does not install a background polling loop.
 
 Fast rows set a picker default and the checksum-pinned request plugin forces
 `service_tier=priority` before alias mapping. Verify the provider-bound request,
@@ -118,8 +131,21 @@ refuses to signal a launchd-managed or unrelated process. For launchd, unload th
 specific configured service before changing its program, then load it again.
 The operator does not modify LaunchAgents, App bundles or App processes itself.
 Restart only the affected App after changing its model catalog, and verify the
-21-row readback. Model registration is not proof of account entitlement or a
+four-visible/19-hidden row readback. Model registration is not proof of account entitlement or a
 successful model call; perform a bounded live request separately.
+
+## Early quota recovery
+
+```sh
+# Plan first; the executed command clears only the named slot's CPA cooldown.
+loopx-cpa-operator --config /absolute/private/operator.json reset-cooldown --slot b
+loopx-cpa-operator --config /absolute/private/operator.json --execute reset-cooldown --slot b
+loopx-cpa-operator --config /absolute/private/operator.json --execute route-status
+```
+
+Run a bounded model request after the reset, then inspect route-status again.
+Its success must identify the recovered subscription; another account succeeding
+is not evidence for the named slot. A fresh limit response reinstates cooling.
 
 ## Rollback and disable
 
