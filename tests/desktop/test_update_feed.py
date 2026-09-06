@@ -12,6 +12,19 @@ spec.loader.exec_module(feed)
 
 
 class FeedTests(unittest.TestCase):
+    def test_only_core_stable_releases_advance_pointer(self):
+        pointer = None
+        for tag, prerelease in [
+            ("v1.0.0", False),
+            ("dsh-loopx-plugin-v0.1.1-beta.4", False),
+            ("v1.1.0-rc.1", True),
+            ("v1.1.0", True),
+            ("v-plugin-2.0.0", False),
+        ]:
+            if feed.release_channel(tag, prerelease) == "stable":
+                pointer = tag
+        self.assertEqual(pointer, "v1.0.0")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

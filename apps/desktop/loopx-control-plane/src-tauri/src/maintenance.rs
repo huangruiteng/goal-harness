@@ -14,6 +14,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 #[derive(Default)]
 pub struct Maintenance {
     busy: AtomicBool,
+    supervision: tauri::async_runtime::Mutex<()>,
     snapshot: Mutex<Value>,
     pending: Mutex<Option<(String, Update)>>,
 }
@@ -28,6 +29,45 @@ impl Maintenance {
         let value = json!({"phase": phase, "details": details});
         *self.snapshot.lock().unwrap() = value.clone();
         value
+    }
+
+    // Service supervision and maintenance must never replace/start different
+    // runtime versions concurrently. A failed connection is not an install.
+    fn reconcile_services<T>(
+        &self,
+        start: impl FnOnce() -> Result<T, String>,
+    ) -> Result<Option<T>, String> {
+        if self.busy.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        let Ok(_guard) = self.supervision.try_lock() else {
+            return Ok(None);
+        };
+        if self.busy.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        let phase = self.snapshot.lock().unwrap()["phase"]
+            .as_str()
+            .unwrap_or("idle")
+            .to_string();
+        if phase == "restart_required" {
+            return Ok(None);
+        }
+        let observing_update = matches!(phase.as_str(), "connecting" | "service_error");
+        match start() {
+            Ok(services) => {
+                if observing_update {
+                    self.publish("ready", json!({}));
+                }
+                Ok(Some(services))
+            }
+            Err(error) => {
+                if observing_update {
+                    self.publish("service_error", json!({"code":"service_start_failed"}));
+                }
+                Err(error)
+            }
+        }
     }
 }
 struct BusyGuard<'a>(&'a AtomicBool);
@@ -45,7 +85,7 @@ fn allow_action(phase: &str, action: &str) -> Result<(), String> {
 }
 fn endpoint(channel: &str) -> Result<tauri::Url, String> {
     Ok(match channel {
-        "stable" => "https://github.com/huangruiteng/loopx/releases/latest/download/desktop-updater.json",
+        "stable" => "https://github.com/huangruiteng/loopx/releases/download/desktop-stable/desktop-updater.json",
         "main" => "https://github.com/huangruiteng/loopx/releases/download/desktop-main/desktop-updater.json",
         _ => return Err("invalid_update_channel".into()),
     }.parse().unwrap())
@@ -72,6 +112,9 @@ pub async fn desktop_update(
     }
     let state = app.state::<Maintenance>();
     let _guard = state.acquire()?;
+    // An explicit action takes priority over the next retry, while awaiting
+    // the current bounded service attempt instead of failing with update_busy.
+    let _supervision = state.supervision.lock().await;
     allow_action(
         state.snapshot.lock().unwrap()["phase"]
             .as_str()
@@ -224,12 +267,9 @@ pub fn resume(app: &AppHandle) -> Result<(), String> {
         }
     }
 }
-pub fn services_ready(app: &AppHandle) {
-    let state = app.state::<Maintenance>();
-    let connecting = state.snapshot.lock().unwrap()["phase"] == "connecting";
-    if connecting {
-        state.publish("ready", json!({}));
-    }
+pub fn start_services(app: &AppHandle) -> Result<Option<crate::services::ServiceSet>, String> {
+    app.state::<Maintenance>()
+        .reconcile_services(|| crate::services::ServiceSet::start().map_err(|e| e.to_string()))
 }
 
 #[cfg(test)]
@@ -241,10 +281,10 @@ mod tests {
         let guard = state.acquire().unwrap();
         assert!(state.acquire().is_err());
         drop(guard);
-        let _ = std::panic::catch_unwind(|| {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = state.acquire().unwrap();
             panic!("simulated task failure");
-        });
+        }));
         assert!(state.acquire().is_ok());
     }
     #[test]
@@ -266,5 +306,26 @@ mod tests {
         let state = Maintenance::default();
         state.publish("downloading", json!({"received":12,"total":24}));
         assert_eq!(state.snapshot.lock().unwrap()["details"]["received"], 12);
+    }
+
+    #[test]
+    fn service_failure_releases_recovery_and_later_success_is_ready() {
+        let state = Maintenance::default();
+        state.publish("connecting", json!({}));
+        assert!(state.reconcile_services::<()>(|| Err("occupied port".into())).is_err());
+        assert_eq!(state.snapshot.lock().unwrap()["phase"], "service_error");
+        assert!(state.acquire().is_ok(), "recovery transaction must be available");
+        assert_eq!(state.reconcile_services(|| Ok(())).unwrap(), Some(()));
+        assert_eq!(state.snapshot.lock().unwrap()["phase"], "ready");
+    }
+
+    #[test]
+    fn service_retry_cannot_race_maintenance_or_restart() {
+        let state = Maintenance::default();
+        let guard = state.acquire().unwrap();
+        assert_eq!(state.reconcile_services::<()>(|| panic!("must not start")).unwrap(), None);
+        drop(guard);
+        state.publish("restart_required", json!({}));
+        assert_eq!(state.reconcile_services::<()>(|| panic!("must not start")).unwrap(), None);
     }
 }

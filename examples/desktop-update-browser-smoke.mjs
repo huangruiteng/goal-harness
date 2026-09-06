@@ -30,7 +30,7 @@ try {
   let nativeState = null;
   let failUpdate = false;
   await page.exposeFunction("nativeInvoke", async (command, args) => {
-    if (command === "desktop_update_status") return { state: nativeState, app_version: "0.5.4" };
+    if (command === "desktop_update_status") return { state: nativeState, app_version: "0.5.4", rollback_available: true };
     calls.push({ command, args });
     if (failUpdate) throw new Error("private diagnostic must not be displayed");
     await new Promise((done) => setTimeout(done, 150));
@@ -92,6 +92,21 @@ try {
   await page.getByText("恢复与更新 / Recovery & updates").click();
   await page.getByRole("button", { name: "检查更新 / Check for updates" }).click();
   await page.getByRole("button", { name: "更新并准备重启 / Install update" }).waitFor();
+  await page.locator("#channel").selectOption("main");
+  // Cross an actual native-state polling tick after changing the selection.
+  await page.waitForTimeout(1200);
+  assert.equal(await page.locator("#update").innerText(), "检查更新 / Check for updates");
+  await page.locator("#update").click();
+  await page.getByRole("button", { name: "更新并准备重启 / Install update" }).waitFor();
+  assert.deepEqual(calls.at(-1).args, { action: "check", channel: "main" });
+  await page.reload();
+  await page.getByText("恢复与更新 / Recovery & updates").click();
+  await page.waitForFunction(() => document.querySelector("#channel").value === "main");
+  nativeState = { phase: "service_error", details: { code: "service_start_failed" } };
+  await page.getByText("运行时已安装，但服务尚未连接。可检查更新、修复或恢复上版；连接仍会自动重试。").waitFor();
+  for (const selector of ["#update", "#repair", "#rollback", "#channel"]) {
+    assert.equal(await page.locator(selector).isEnabled(), true, `${selector} remains usable after service failure`);
+  }
   await page.screenshot({ path: resolve(output, "startup-recovery.png") });
   console.log("desktop-update-browser-smoke: passed (confirmation, failure redaction, mobile, missing assets + reload, startup recovery)");
 } finally {
