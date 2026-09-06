@@ -65,6 +65,7 @@ export const todoItemSchema = z.object({
   todo_id: z.string().optional().nullable(),
   role: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
+  resume_when: z.string().optional().nullable(),
   priority: z.string().optional().nullable(),
   title: z.string().optional().nullable(),
   archive_state: z.string().optional().nullable(),

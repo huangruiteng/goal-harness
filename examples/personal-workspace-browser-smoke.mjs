@@ -411,14 +411,14 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
             currentTodo,
             { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle, title: idlessLongTitle },
             { done: false, index: 7, role: "agent", status: "open", task_class: "advancement_task", text: "Full queue follow-up", title: "Full queue follow-up", todo_id: "todo-progress-full" },
-            { done: true, index: 8, role: "agent", status: "deferred", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
+            { done: true, index: 8, role: "agent", status: "deferred", resume_when: "todo_done:todo-progress-full", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
             { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
             { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
             { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
             { done: true, index: 6, role: "agent", status: "done", task_class: "continuous_monitor", text: "Completed Monitor", title: "Completed Monitor", todo_id: "todo-progress-monitor" },
           ],
           deferred_items: [
-            { done: true, index: 8, role: "agent", status: "deferred", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
+            { done: true, index: 8, role: "agent", status: "deferred", resume_when: "todo_done:todo-progress-full", task_class: "advancement_task", text: "Deferred queue task", title: "Deferred queue task", todo_id: "todo-progress-deferred" },
             { done: true, index: 9, role: "agent", status: "deferred", task_class: "advancement_task", text: "Deferred follow-up outside preview", title: "Deferred follow-up outside preview", todo_id: "todo-progress-deferred-extra" },
           ],
           open_count: 3,
@@ -1899,6 +1899,22 @@ async function main() {
     await progressColumn.getByText("Full queue follow-up", { exact: true }).waitFor();
     await progressColumn.getByText("Deferred queue task", { exact: true }).waitFor();
     await progressColumn.getByText("Deferred follow-up outside preview", { exact: true }).waitFor();
+    async function assertDeferredTask(conditionExpected = true) {
+      const title = conditionExpected ? "Deferred queue task" : "Deferred follow-up outside preview";
+      const card = page.locator(".personal-task-card", { hasText: title });
+      await card.getByText("已延期", { exact: true }).waitFor();
+      if (await card.getByText("待执行", { exact: true }).count()) throw new Error("Deferred task was labeled queued");
+      await card.getByText(title, { exact: true }).click();
+      const drawer = page.getByRole("dialog", { name: "Todo 详情" });
+      await drawer.getByText("等待恢复条件满足后重新评估", { exact: true }).waitFor();
+      const condition = drawer.locator("dl > div", { has: page.getByText("恢复条件", { exact: true }) });
+      await condition.getByText(conditionExpected ? "todo_done:todo-progress-full" : "未设置", { exact: true }).waitFor();
+      if (await drawer.getByText("待执行", { exact: true }).count()) throw new Error("Deferred drawer was labeled ready");
+      await page.screenshot({ path: resolve(outputDir, `deferred-task-${conditionExpected ? "condition" : "missing"}.png`), fullPage: false, animations: "disabled" });
+      await drawer.getByRole("button", { name: /关闭详情/ }).click();
+    }
+    await assertDeferredTask();
+    await assertDeferredTask(false);
     const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
     const taskLaneScrollers = page.locator('.personal-task-kanban .personal-task-lane-scroll');
     if (await taskLaneScrollers.count() !== 4) throw new Error('Every desktop Task lane must own a scroll region');
@@ -1931,6 +1947,7 @@ async function main() {
     let historyRequests = 0;
     page.on('request', request => { if (request.url().includes('/api/chat/completed-todos?')) historyRequests += 1; });
     await page.getByRole('button', { name: '列表', exact: true }).click();
+    await assertDeferredTask();
     const listHistory = page.getByTestId('completed-task-lane');
     await listHistory.getByRole('button', { name: '已完成', exact: false }).click();
     await listHistory.getByText('4087', { exact: true }).waitFor();

@@ -191,6 +191,7 @@ type TodoExplorerItem = {
 };
 
 type PersonalAgentTodoItem = {
+  resumeWhen?: string | null;
   claimedBy?: string | null;
   done: boolean;
   evidence?: string | null;
@@ -700,6 +701,7 @@ function personalTodoText(todo: TodoItem) {
 
 function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): PersonalAgentTodoItem {
   return {
+    resumeWhen: todo.resume_when ?? null,
     claimedBy: todo.claimed_by ?? null,
     // Legacy summaries mark deferred entries checked; they are not completed work.
     done: todo.status === "deferred" ? false : todo.done,
