@@ -6,6 +6,9 @@ amendment-v0: it submits one ``goal_amendment_proposal_v0`` payload through
 the admission adapter and reads the retained append-only journal back.
 Submission is proposal-only — admission has zero canonical effect; the
 journal lives under ``runtime/goals/<goal_id>/amendment-proposals/``.
+The causal replan obligation inventory is never a CLI input: admission
+derives it on the spot from the authoritative quota run-history projection
+under ``runtime/goals/<goal_id>/runs/``.
 """
 
 from __future__ import annotations
@@ -103,7 +106,9 @@ def register_goal_amendment_proposal_command(
         "--proposal-json",
         help=(
             "Path to a goal_amendment_proposal_v0 JSON object to submit "
-            "(submit mode; mutually exclusive with --list)."
+            "(submit mode; mutually exclusive with --list). The causal "
+            "replan obligation inventory is derived from the quota "
+            "run-history projection at submit time; it cannot be injected."
         ),
     )
     parser.add_argument(
@@ -119,15 +124,6 @@ def register_goal_amendment_proposal_command(
         help=(
             "Registered Goal id. Required with --list; in submit mode it "
             "must match proposal.goal_id when given."
-        ),
-    )
-    parser.add_argument(
-        "--obligations-json",
-        help=(
-            "Path to a verified receipt-bound replan obligation authority "
-            "envelope exported from the authoritative receipt store. "
-            "Admission verifies provenance and freshness against the live "
-            "source basis and the durable authority receipt journal."
         ),
     )
     parser.add_argument(
@@ -151,9 +147,7 @@ def handle_goal_amendment_proposal_command(
         return None
     goal_id: str | None = getattr(args, "goal_id", None)
     try:
-        runtime_root = (
-            Path(runtime_root_arg).expanduser() if runtime_root_arg else None
-        )
+        runtime_root = Path(runtime_root_arg).expanduser() if runtime_root_arg else None
         if args.list:
             payload = _handle_list(
                 args,
@@ -178,9 +172,7 @@ def handle_goal_amendment_proposal_command(
         }
         exit_code = 1
 
-    print_payload(
-        payload, output_format(args), render_goal_amendment_proposal_markdown
-    )
+    print_payload(payload, output_format(args), render_goal_amendment_proposal_markdown)
     return exit_code
 
 
@@ -282,11 +274,6 @@ def _handle_submit(
                 f"--goal-id ({goal_id}) must match proposal.goal_id "
                 f"({proposal_goal_id}) when both are given"
             )
-    obligation_envelope = (
-        _read_json_object(args.obligations_json, "--obligations-json")
-        if getattr(args, "obligations_json", None)
-        else None
-    )
     project = _resolve_project(
         args,
         goal_id=proposal_goal_id,
@@ -297,6 +284,5 @@ def _handle_submit(
         project=project,
         registry_path=registry_path,
         runtime_root=runtime_root,
-        obligation_envelope=obligation_envelope,
     )
     return dict(record)

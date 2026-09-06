@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,23 +37,27 @@ from loopx.control_plane.goals.goal_amendment_proposal import (
 from loopx.control_plane.goals.shared_goal_alignment import (
     project_shared_goal_alignment,
 )
+from loopx.control_plane.status.autonomous_replan_projection import (
+    autonomous_replan_obligation_from_runs,
+)
 from loopx.control_plane.todos.active_state_todo_parser import (
     parse_active_state_todos,
-)
-from loopx.control_plane.work_items.autonomous_replan_obligation import (
-    ensure_replan_novelty_policy,
 )
 from loopx.event_sourced_state import (
     TODO_ADDED,
     AppendOnlyStateEventStore,
     make_state_event,
 )
+from loopx.history import load_index
 
 GOAL_ID = "goal-stage2"
 OTHER_GOAL_ID = "goal-stage2-peer"
 AGENTS = ("agent-a", "agent-b")
 EVENT_LOG_NAME = "events.jsonl"
 MISMATCHED_DIGEST = "sha256:" + "a" * 64
+RUNS_LEDGER_RELATIVE = Path("goals") / GOAL_ID / "runs" / "index.jsonl"
+_DEFAULT_RUNS: Any = object()
+_UNSET: Any = object()
 
 STATE_HEADER_LINES = [
     "---",
@@ -71,7 +76,9 @@ def _todo_lines(specs: list[dict[str, str]]) -> list[str]:
     lines: list[str] = []
     for spec in specs:
         tokens = " ".join(f"{key}={value}" for key, value in spec.items())
-        lines.append(f"- [{'x' if spec.get('done') else ' '}] [{spec.get('priority', 'P1')}] {spec['text']}")
+        lines.append(
+            f"- [{'x' if spec.get('done') else ' '}] [{spec.get('priority', 'P1')}] {spec['text']}"
+        )
         lines.append(f"  <!-- loopx:todo {tokens} -->")
     return lines
 
@@ -131,33 +138,149 @@ def _other_goal_todo_specs() -> list[dict[str, str]]:
     ]
 
 
-def _fixture_obligation(
+def _stall_runs(
     agent_id: str | None = "agent-a",
     *,
-    frontier_identity: str = "stage2-amendment-fixture",
-    required: bool = True,
-) -> dict[str, object]:
-    """Build one authority-shaped obligation and derive its real id.
+    count: int = 2,
+    start_minute: int = 0,
+    goal_id: str = GOAL_ID,
+    hypothesis: str = "hypothesis-stage2",
+) -> list[dict[str, object]]:
+    """Typed blocked progress runs on one agent lane — the real producer shape.
 
-    ``ensure_replan_novelty_policy`` computes the deterministic
-    ``replan-<16 hex>`` id from the obligation identity, so fixture ids are
-    exactly what production quota/status projections would emit.
+    Each run carries the typed ``progress_observation`` the quota run
+    ledger persists (same normalization contract as
+    ``test_progress_observation``): two consecutive equivalent blocked
+    observations are exactly what ``typed_progress_repeat_trigger`` needs,
+    so the derived obligation id is the one the status/quota producers
+    would project for this history. ``hypothesis`` shifts the observation
+    fingerprint when two goals must not derive the same obligation id
+    (obligation identity is fingerprint-scoped, not goal-id-scoped).
     """
 
-    obligation: dict[str, object] = {
-        "schema_version": "autonomous_replan_obligation_v0",
-        "required": required,
-        "frontier_identity": frontier_identity,
-        "triggers": [
-            {
-                "kind": "blocked_successor_no_progress_repeat",
-                "frontier_revision": 3,
-            }
-        ],
+    runs: list[dict[str, object]] = []
+    for index in range(count):
+        run: dict[str, object] = {
+            "generated_at": (f"2026-09-01T00:{start_minute + index:02d}:00+00:00"),
+            "goal_id": goal_id,
+            "classification": "bounded_replan_progress",
+            "turn_instance_id": f"turn_stage2_{start_minute + index}",
+            "progress_observation": {
+                "schema_version": "typed_progress_observation_v0",
+                "result_class": "blocked",
+                "surface_id": "surface-stage2",
+                "hypothesis_id": hypothesis,
+                "probe_kind": "probe-stage2",
+                "evidence_ids": ["evidence-stage2"],
+            },
+        }
+        if agent_id:
+            run["agent_id"] = agent_id
+        runs.append(run)
+    return runs
+
+
+def _ack_run(
+    obligation_id: str,
+    *,
+    generated_at: str = "2026-09-01T01:00:00+00:00",
+    agent_id: str | None = "agent-a",
+) -> dict[str, object]:
+    """A settlement ack run — the real product of a refresh-state close.
+
+    The replanning refresh records the accepted semantic delta naming the
+    settled obligation id, and its own progress observation moves to the
+    freshly replanned hypothesis (a new fingerprint): the old stall streak
+    no longer repeats, and the monitor/periodic scans stop at the ack, so
+    the derived obligation disappears exactly as it does in production
+    after a real replan settlement.
+    """
+
+    run: dict[str, object] = {
+        "generated_at": generated_at,
+        "goal_id": GOAL_ID,
+        "classification": "autonomous_replan_recorded",
+        "turn_instance_id": "turn_stage2_ack",
+        "autonomous_replan_ack": {
+            "schema_version": "autonomous_replan_ack_v0",
+            "recorded": True,
+            "source": "refresh_state",
+            "semantic_delta": {
+                "schema_version": "replan_semantic_delta_v0",
+                "accepted": True,
+                "obligation_id": obligation_id,
+                "outcomes": ["new_runnable_successor"],
+            },
+        },
+        "progress_observation": {
+            "schema_version": "typed_progress_observation_v0",
+            "result_class": "advanced",
+            "surface_id": "surface-stage2",
+            "hypothesis_id": "hypothesis.stage2.replanned",
+            "probe_kind": "probe-stage2",
+            "evidence_ids": ["evidence-stage2-successor"],
+        },
     }
     if agent_id:
-        obligation["agent_id"] = agent_id
-    return ensure_replan_novelty_policy(obligation)
+        run["agent_id"] = agent_id
+    return run
+
+
+def _append_runs(
+    paths: dict[str, Path],
+    runs: list[dict[str, object]],
+    *,
+    goal_id: str = GOAL_ID,
+) -> None:
+    ledger = paths["runtime"] / "goals" / goal_id / "runs" / "index.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with ledger.open("a", encoding="utf-8") as stream:
+        for run in runs:
+            stream.write(json.dumps(run, sort_keys=True) + "\n")
+
+
+def _newest_first_runs(
+    paths: dict[str, Path],
+    *,
+    goal_id: str = GOAL_ID,
+) -> list[dict[str, Any]]:
+    runs, _ = load_index(paths["runtime"] / "goals" / goal_id / "runs" / "index.jsonl")
+    return [
+        run
+        for _, run in sorted(
+            enumerate(runs),
+            key=lambda item: (
+                str(item[1].get("generated_at") or ""),
+                item[0],
+            ),
+            reverse=True,
+        )
+    ]
+
+
+def _derived_obligation(
+    paths: dict[str, Path],
+    *,
+    agent_id: str | None = "agent-a",
+    goal_id: str = GOAL_ID,
+) -> dict[str, Any]:
+    """Derive the open obligation straight from the fixture run history.
+
+    This is the same read-only bound status-projection entry point the
+    adapter uses, so the expected id is not hand-minted: admission must
+    bind to exactly what the quota run-history ledger derives.
+    """
+
+    obligation = autonomous_replan_obligation_from_runs(
+        _newest_first_runs(paths, goal_id=goal_id),
+        agent_todos=None,
+        agent_id=agent_id,
+    )
+    assert isinstance(obligation, dict), (
+        "fixture run history must derive an open obligation; check the "
+        "typed progress observation fields are still intact"
+    )
+    return obligation
 
 
 def _write_fixture(
@@ -165,6 +288,8 @@ def _write_fixture(
     *,
     events: list[dict[str, str]] | None = None,
     with_other_goal: bool = False,
+    runs: Any = _DEFAULT_RUNS,
+    other_goal_runs: Any = _DEFAULT_RUNS,
 ) -> dict[str, Path]:
     project = root / "project"
     runtime = root / "runtime"
@@ -248,6 +373,29 @@ def _write_fixture(
     else:
         runtime.mkdir(parents=True, exist_ok=True)
 
+    # The quota run-history ledger is the causal authority: by default the
+    # fixture carries a real open obligation (typed stall runs), and each
+    # test opts into empty, closed, or forged histories explicitly.
+    if runs is _DEFAULT_RUNS:
+        runs = _stall_runs()
+    assert isinstance(runs, list)
+    effective_runs = runs
+    ledger = runtime / RUNS_LEDGER_RELATIVE
+    if effective_runs:
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        with ledger.open("w", encoding="utf-8") as stream:
+            for run in effective_runs:
+                stream.write(json.dumps(run, sort_keys=True) + "\n")
+    if with_other_goal and other_goal_runs is _DEFAULT_RUNS:
+        other_goal_runs = _stall_runs(goal_id=OTHER_GOAL_ID)
+    if with_other_goal and other_goal_runs:
+        assert isinstance(other_goal_runs, list)
+        other_ledger = runtime / "goals" / OTHER_GOAL_ID / "runs" / "index.jsonl"
+        other_ledger.parent.mkdir(parents=True, exist_ok=True)
+        with other_ledger.open("w", encoding="utf-8") as stream:
+            for run in other_goal_runs:
+                stream.write(json.dumps(run, sort_keys=True) + "\n")
+
     paths = {
         "project": project,
         "runtime": runtime,
@@ -315,8 +463,16 @@ def _proposal(
 ) -> dict[str, object]:
     # Default base binds to the live derived basis: equal sequence AND equal
     # source basis digest, exactly like a proposer that just re-read the
-    # Stage 1 projection before proposing. The replan id is the real one
-    # derived by ensure_replan_novelty_policy for the fixture obligation.
+    # Stage 1 projection before proposing. The replan id defaults to the
+    # real one derived from the fixture run history by the status
+    # projection entry point — the same id the adapter re-derives at
+    # submit time. Tests that forge or blank the id pass it as an override
+    # so the default derivation is skipped (it would assert on histories
+    # that legitimately derive nothing).
+    overrides = dict(overrides) if overrides else {}
+    replan_id = overrides.pop("replan_obligation_id", _UNSET)
+    if replan_id is _UNSET:
+        replan_id = _derived_obligation(paths)["obligation_id"]
     basis = _derived_source_basis(paths)
     proposal: dict[str, object] = {
         "schema_version": "goal_amendment_proposal_v0",
@@ -331,35 +487,19 @@ def _proposal(
         "stopped": [],
         "evidence_refs": ["evidence:evt_stage2_001"],
         "affected_todo_ids": ["todo_stage2_a", "todo_stage2_b"],
-        "replan_obligation_id": _fixture_obligation()["obligation_id"],
+        "replan_obligation_id": replan_id,
     }
-    if overrides:
-        proposal.update(overrides)
+    proposal.update(overrides)
     return proposal
-
-
-def _status_item(
-    obligations_by_agent: dict[str, dict[str, object]] | None = None,
-) -> dict[str, object]:
-    return {
-        "autonomous_replan_obligations_by_agent": (
-            obligations_by_agent
-            if obligations_by_agent is not None
-            else {"agent-a": _fixture_obligation("agent-a")}
-        )
-    }
 
 
 def _admit(
     paths: dict[str, Path],
     proposal: dict[str, object],
-    *,
-    status_item: dict[str, object] | None = None,
 ):
     return admit_goal_amendment_proposal(
         proposal=proposal,
         project=paths["project"],
-        status_item=status_item if status_item is not None else _status_item(),
     )
 
 
@@ -384,11 +524,7 @@ def _canonical_tree_snapshot(paths: dict[str, Path]) -> dict[str, bytes]:
 
 def _proposal_journal(paths: dict[str, Path]) -> Path:
     return (
-        paths["runtime"]
-        / "goals"
-        / GOAL_ID
-        / "amendment-proposals"
-        / "journal.jsonl"
+        paths["runtime"] / "goals" / GOAL_ID / "amendment-proposals" / "journal.jsonl"
     )
 
 
@@ -421,45 +557,35 @@ def test_admits_and_retains_a_well_formed_proposal(tmp_path: Path) -> None:
 def test_admission_binds_the_authority_derived_obligation_id(
     tmp_path: Path,
 ) -> None:
-    # The retained replan id is the one ensure_replan_novelty_policy
-    # derived from the fixture obligation identity — never a free-standing
-    # well-shaped string.
+    # The retained replan id is the one the run-history derivation
+    # produced — never a free-standing well-shaped string. The derivation
+    # helper used here is the same read-only status projection entry point
+    # the adapter calls at submit time.
     paths = _write_fixture(tmp_path, events=_default_events())
 
     record = _admit(paths, _proposal(paths))
 
-    expected_id = _fixture_obligation("agent-a")["obligation_id"]
+    expected_id = _derived_obligation(paths)["obligation_id"]
     assert record["replan_obligation_id"] == expected_id
     assert record["admission"] == "admitted"
 
 
-def test_agent_scoped_obligation_folds_into_an_explicit_agent_lane(
+def test_unscoped_goal_obligation_folds_into_a_deterministic_peer_lane(
     tmp_path: Path,
 ) -> None:
-    # The Python authority folds autonomous_replan_scope_decision into the
-    # typed inventory: an agent-scoped obligation admits only its owner,
-    # an unscoped one admits exactly its deterministic peer.
-    paths = _write_fixture(tmp_path, events=_default_events())
-    scoped = _fixture_obligation("agent-a")
-    unscoped = _fixture_obligation(None, frontier_identity="stage2-unscoped")
-    status_item = {
-        "autonomous_replan_obligations_by_agent": {
-            "agent-a": scoped,
-        },
-        "autonomous_replan_obligation": unscoped,
-    }
-
-    _admit(
-        paths,
-        _proposal(
-            paths,
-            {"replan_obligation_id": scoped["obligation_id"]},
-        ),
-        status_item=status_item,
+    # A goal-level (unattributed) stall history derives one unscoped
+    # obligation. The Python authority folds autonomous_replan_scope_
+    # decision into the typed inventory: an unscoped obligation is
+    # deterministically assigned to exactly one registered peer — one
+    # lane admits, the other fails closed.
+    paths = _write_fixture(
+        tmp_path,
+        events=_default_events(),
+        runs=_stall_runs(agent_id=None),
     )
+    unscoped = _derived_obligation(paths, agent_id=None)
+    assert not unscoped.get("agent_id")
 
-    # The unscoped goal-level obligation is deterministically assigned to
-    # exactly one registered peer: one lane admits, the other fails closed.
     unscoped_id = unscoped["obligation_id"]
     statuses = []
     for agent_id in AGENTS:
@@ -472,7 +598,7 @@ def test_agent_scoped_obligation_folds_into_an_explicit_agent_lane(
             },
         )
         try:
-            _admit(paths, proposal, status_item=status_item)
+            _admit(paths, proposal)
             statuses.append("admitted")
         except ValueError as exc:
             assert "bound to another agent lane" in str(exc)
@@ -483,9 +609,7 @@ def test_agent_scoped_obligation_folds_into_an_explicit_agent_lane(
 def test_nonexistent_replan_obligation_fails_closed(tmp_path: Path) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
 
-    with pytest.raises(
-        ValueError, match="does not match an open replan obligation"
-    ):
+    with pytest.raises(ValueError, match="does not match an open replan obligation"):
         _admit(
             paths,
             _proposal(
@@ -497,71 +621,215 @@ def test_nonexistent_replan_obligation_fails_closed(tmp_path: Path) -> None:
     assert _journal_rows(paths) == []
 
 
-def test_closed_replan_obligation_is_not_admissible(tmp_path: Path) -> None:
+def test_settlement_ack_run_closes_the_derived_obligation(
+    tmp_path: Path,
+) -> None:
+    # The real close path: refresh-state appends an autonomous_replan_ack
+    # run into the same ledger. Derivation stops at the ack, the open
+    # inventory empties, and a proposal naming the previously open id
+    # fails closed with nothing retained.
     paths = _write_fixture(tmp_path, events=_default_events())
-    settled = _fixture_obligation("agent-a", required=False)
-    status_item = _status_item({"agent-a": settled})
+    proposal = _proposal(paths)
+    obligation_id = _derived_obligation(paths)["obligation_id"]
 
-    with pytest.raises(
-        ValueError, match="does not match an open replan obligation"
-    ):
-        _admit(paths, _proposal(paths), status_item=status_item)
+    _append_runs(paths, [_ack_run(obligation_id)])
+    assert (
+        autonomous_replan_obligation_from_runs(
+            _newest_first_runs(paths), agent_todos=None, agent_id="agent-a"
+        )
+        is None
+    )
+
+    with pytest.raises(ValueError, match="does not match an open replan obligation"):
+        _admit(paths, proposal)
 
     assert _journal_rows(paths) == []
 
 
 def test_cross_goal_replan_obligation_fails_closed(tmp_path: Path) -> None:
-    # The sibling Goal's status projection never contributes to this Goal's
-    # obligation inventory: an id derived on the peer Goal's frontier does
-    # not resolve here, even though its payload would otherwise be valid.
-    paths = _write_fixture(tmp_path, events=_default_events(), with_other_goal=True)
-    peer_goal_obligation = _fixture_obligation(
-        "agent-a", frontier_identity="stage2-peer-goal-obligation"
+    # The sibling Goal's run ledger never contributes to this Goal's
+    # obligation inventory: an id derived on the peer Goal's run history
+    # does not resolve here, even though its payload would otherwise be
+    # valid.
+    paths = _write_fixture(
+        tmp_path,
+        events=_default_events(),
+        with_other_goal=True,
+        other_goal_runs=_stall_runs(
+            goal_id=OTHER_GOAL_ID, hypothesis="hypothesis-stage2-peer"
+        ),
+    )
+    peer_goal_obligation = _derived_obligation(
+        paths, agent_id=None, goal_id=OTHER_GOAL_ID
     )
 
-    with pytest.raises(
-        ValueError, match="does not match an open replan obligation"
-    ):
+    with pytest.raises(ValueError, match="does not match an open replan obligation"):
         _admit(
             paths,
             _proposal(
                 paths,
                 {"replan_obligation_id": peer_goal_obligation["obligation_id"]},
             ),
-            status_item=_status_item(),
         )
 
     assert _journal_rows(paths) == []
 
 
 def test_mismatched_agent_lane_fails_closed(tmp_path: Path) -> None:
-    paths = _write_fixture(tmp_path, events=_default_events())
-    peer_lane = _fixture_obligation("agent-b")
+    # The run history stalls on agent-b's lane, so the derived obligation
+    # is agent-scoped to agent-b and agent-a's proposal fails closed.
+    paths = _write_fixture(
+        tmp_path,
+        events=_default_events(),
+        runs=_stall_runs(agent_id="agent-b"),
+    )
 
+    peer_lane_id = _derived_obligation(paths, agent_id="agent-b")["obligation_id"]
     with pytest.raises(ValueError, match="bound to another agent lane"):
         _admit(
             paths,
-            _proposal(
-                paths,
-                {"replan_obligation_id": peer_lane["obligation_id"]},
-            ),
-            status_item=_status_item({"agent-b": peer_lane}),
+            _proposal(paths, {"replan_obligation_id": peer_lane_id}),
         )
 
     assert _journal_rows(paths) == []
 
 
-def test_missing_obligation_authority_fails_closed(tmp_path: Path) -> None:
-    # No status projection supplied: the obligation inventory is empty and
+def test_missing_run_history_fails_closed(tmp_path: Path) -> None:
+    # No run ledger at all: the obligation inventory is empty and
     # admission must not trust a causal chain on string shape alone.
-    paths = _write_fixture(tmp_path, events=_default_events())
+    paths = _write_fixture(tmp_path, events=_default_events(), runs=[])
 
-    with pytest.raises(
-        ValueError, match="does not match an open replan obligation"
-    ):
-        _admit(paths, _proposal(paths), status_item={})
+    with pytest.raises(ValueError, match="does not match an open replan obligation"):
+        _admit(
+            paths,
+            _proposal(paths, {"replan_obligation_id": "replan-0123456789abcdef"}),
+        )
 
     assert _journal_rows(paths) == []
+
+
+def test_incomplete_run_rows_derive_no_obligation(tmp_path: Path) -> None:
+    # Forging authority by appending plain rows fails: rows without a
+    # typed progress observation (and without the structured monitor
+    # fields the monitor state machine requires) derive no obligation, so
+    # a proposal naming any well-shaped replan id fails closed.
+    forged_rows = [
+        {
+            "generated_at": "2026-09-01T00:00:00+00:00",
+            "goal_id": GOAL_ID,
+            "agent_id": "agent-a",
+            "classification": "bounded_replan_progress",
+            "turn_instance_id": "turn_stage2_forged_0",
+        },
+        {
+            "generated_at": "2026-09-01T00:01:00+00:00",
+            "goal_id": GOAL_ID,
+            "agent_id": "agent-a",
+            "classification": "quota_monitor_poll",
+            "turn_instance_id": "turn_stage2_forged_1",
+            "progress_observation": {"result_class": "blocked"},
+        },
+    ]
+    paths = _write_fixture(tmp_path, events=_default_events(), runs=forged_rows)
+
+    assert (
+        autonomous_replan_obligation_from_runs(
+            _newest_first_runs(paths), agent_todos=None, agent_id="agent-a"
+        )
+        is None
+    )
+    with pytest.raises(ValueError, match="does not match an open replan obligation"):
+        _admit(
+            paths,
+            _proposal(paths, {"replan_obligation_id": "replan-0123456789abcdef"}),
+        )
+
+    assert _journal_rows(paths) == []
+
+
+def test_untyped_run_row_interrupting_the_streak_derives_no_obligation(
+    tmp_path: Path,
+) -> None:
+    # The typed repeat trigger requires consecutive equivalent typed rows:
+    # one untyped row between the two blocked observations breaks the
+    # streak and derives nothing.
+    interrupted = [
+        _stall_runs()[0],
+        {
+            "generated_at": "2026-09-01T00:00:30+00:00",
+            "goal_id": GOAL_ID,
+            "agent_id": "agent-a",
+            "classification": "bounded_replan_progress",
+            "turn_instance_id": "turn_stage2_gap",
+        },
+        _stall_runs()[1],
+    ]
+    paths = _write_fixture(tmp_path, events=_default_events(), runs=interrupted)
+
+    assert (
+        autonomous_replan_obligation_from_runs(
+            _newest_first_runs(paths), agent_todos=None, agent_id="agent-a"
+        )
+        is None
+    )
+    with pytest.raises(ValueError, match="does not match an open replan obligation"):
+        _admit(
+            paths,
+            _proposal(paths, {"replan_obligation_id": "replan-0123456789abcdef"}),
+        )
+
+    assert _journal_rows(paths) == []
+
+
+def test_module_exposes_no_obligation_writer_api() -> None:
+    # Protocol-surface regression: the proposal module owns no obligation
+    # writer, closer, or receipt store any more. Authority is a read-time
+    # derivation from the quota run-history ledger, so a caller cannot
+    # mint an "open" obligation through this module.
+    import loopx.control_plane.goals.goal_amendment_proposal as module
+
+    for removed in (
+        "record_replan_obligation_receipt",
+        "close_or_rotate_replan_obligation_receipt",
+        "read_latest_open_replan_obligation_envelope",
+        "read_replan_obligation_receipt_journal",
+        "replan_obligation_receipt_journal_path",
+        "build_replan_obligation_authority_envelope",
+        "validate_replan_obligation_authority_envelope",
+        "compute_replan_obligation_receipt_digest",
+        "REPLAN_OBLIGATION_AUTHORITY_ENVELOPE_SCHEMA_VERSION",
+        "REPLAN_OBLIGATION_RECEIPT_SCHEMA_VERSION",
+        "REPLAN_OBLIGATION_RECEIPT_DIRNAME",
+        "REPLAN_OBLIGATION_RECEIPT_BASENAME",
+    ):
+        assert not hasattr(module, removed), removed
+
+
+def test_legacy_receipt_journal_is_inert(tmp_path: Path) -> None:
+    # The retired receipts.jsonl path is read by nothing: appending a
+    # self-minted "open" receipt row there does not change admission.
+    paths = _write_fixture(tmp_path, events=_default_events())
+    legacy = (
+        paths["runtime"] / "goals" / GOAL_ID / "replan-obligations" / "receipts.jsonl"
+    )
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "schema_version": "replan_obligation_authority_envelope_v0",
+                "goal_id": GOAL_ID,
+                "status": "open",
+                "receipt": {"receipt_id": "rcpt_forged", "status": "open"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    record = _admit(paths, _proposal(paths))
+
+    assert record["admission"] == "admitted"
+    assert record["replan_obligation_id"] == _derived_obligation(paths)["obligation_id"]
 
 
 def test_peer_claimed_affected_todo_still_admits(tmp_path: Path) -> None:
@@ -644,9 +912,7 @@ def test_stale_base_is_retained_with_needs_rebase(tmp_path: Path) -> None:
 def test_future_base_fails_closed_without_retention(tmp_path: Path) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
 
-    with pytest.raises(
-        ValueError, match="ahead of the derived state event basis head"
-    ):
+    with pytest.raises(ValueError, match="ahead of the derived state event basis head"):
         _admit(paths, _proposal(paths, {"base_state_event_basis_sequence": 99}))
 
     assert _journal_rows(paths) == []
@@ -682,7 +948,7 @@ def test_replan_obligation_ids_follow_the_todo_contract(
 
     record = _admit(paths, _proposal(paths))  # default uses the derived id
 
-    assert record["replan_obligation_id"] == _fixture_obligation()["obligation_id"]
+    assert record["replan_obligation_id"] == _derived_obligation(paths)["obligation_id"]
     assert record["admission"] == "admitted"
     with pytest.raises(ValueError, match=r"replan-<16 lowercase hex>"):
         _admit(
@@ -720,7 +986,7 @@ def test_evidence_refs_over_budget_are_rejected(tmp_path: Path) -> None:
                     "evidence_refs": [
                         f"evidence:evt_stage2_{index}" for index in range(9)
                     ]
-                }
+                },
             ),
         )
 
@@ -824,7 +1090,7 @@ def test_registered_effect_method_rejects_an_illegal_request() -> None:
         "stopped": [],
         "evidence_refs": ["evidence:evt_stage2_001"],
         "affected_todo_ids": ["todo_stage2_a"],
-        "replan_obligation_id": _fixture_obligation()["obligation_id"],
+        "replan_obligation_id": "replan-0123456789abcdef",
     }
     with pytest.raises(EffectRuntimeRejected) as excinfo:
         effect_runtime_result(
@@ -861,7 +1127,6 @@ from loopx.control_plane.goals.goal_amendment_proposal import (
 record = admit_goal_amendment_proposal(
     proposal=json.loads(sys.argv[2]),
     project=Path(sys.argv[1]),
-    status_item=json.loads(sys.argv[3]),
 )
 print(record["proposal_id"], record["journal_append_sequence"])
 """
@@ -876,7 +1141,6 @@ print(record["proposal_id"], record["journal_append_sequence"])
         {"proposal_id": "gap_stage2_p1"},
         {"proposal_id": "gap_stage2_p2"},
     )
-    status_item_json = json.dumps(_status_item())
     children = [
         subprocess.Popen(
             [
@@ -885,7 +1149,6 @@ print(record["proposal_id"], record["journal_append_sequence"])
                 child_code,
                 str(paths["project"]),
                 json.dumps(_proposal(paths, proposal_overrides)),
-                status_item_json,
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

@@ -5,7 +5,10 @@ amendment-proposal`` alias end to end: a proposal submitted through the CLI
 lands in ``runtime/goals/<goal>/amendment-proposals/journal.jsonl`` and the
 ``--list`` readback returns the same retained row (the Stage 2 production
 consumer loop), plus markdown output, idempotent resubmission, and the
-fail-closed negative paths.
+fail-closed negative paths. The causal replan obligation is never a CLI
+input: every positive path derives it from the fixture quota run ledger
+(the same read-time projection production uses), and every negative path
+proves a forged or missing history cannot produce authority.
 """
 
 from __future__ import annotations
@@ -17,18 +20,15 @@ from typing import Any
 import pytest
 
 from loopx.cli import main as cli_main
-from loopx.control_plane.goals.goal_amendment_proposal import (
-    build_replan_obligation_authority_envelope,
-    close_or_rotate_replan_obligation_receipt,
-    record_replan_obligation_receipt,
-)
 from tests.control_plane.test_goal_amendment_proposal import (
     GOAL_ID,
+    OTHER_GOAL_ID,
+    _ack_run,
+    _append_runs,
     _default_events,
-    _derived_source_basis,
-    _fixture_obligation,
+    _derived_obligation,
     _proposal,
-    _status_item,
+    _stall_runs,
     _write_fixture,
 )
 
@@ -50,73 +50,23 @@ def _run_amendment_cli(
     return exit_code, payload, captured.out
 
 
-def _obligation_envelope(
-    paths: dict[str, Path],
-    *,
-    goal_id: str = GOAL_ID,
-    obligations_by_agent: dict[str, dict[str, object]] | None = None,
-    derived_basis: dict[str, object] | None = None,
-    receipt_id: str | None = None,
-    record_in_authority: bool = True,
-) -> dict[str, Any]:
-    basis = (
-        derived_basis
-        if derived_basis is not None
-        else _derived_source_basis(paths)
-    )
-    by_agent = (
-        obligations_by_agent
-        if obligations_by_agent is not None
-        else {"agent-a": _fixture_obligation("agent-a")}
-    )
-    if record_in_authority:
-        return record_replan_obligation_receipt(
-            runtime_root=paths["runtime"],
-            goal_id=goal_id,
-            derived_basis=basis,
-            obligations_by_agent=by_agent,
-            receipt_id=receipt_id,
-        )
-    return build_replan_obligation_authority_envelope(
-        goal_id=goal_id,
-        derived_basis=basis,
-        obligations_by_agent=by_agent,
-        receipt_id=receipt_id,
-    )
-
-
 def _write_submit_inputs(
     tmp_path: Path,
-    paths: dict[str, Path],
     proposal: dict[str, object],
-    *,
-    envelope: dict[str, object] | None = None,
-) -> tuple[Path, Path]:
+) -> Path:
     proposal_json = tmp_path / "proposal.json"
     proposal_json.write_text(json.dumps(proposal), encoding="utf-8")
-    obligations_json = tmp_path / "obligations.json"
-    payload = (
-        envelope
-        if envelope is not None
-        else _obligation_envelope(
-            paths, goal_id=str(proposal.get("goal_id") or GOAL_ID)
-        )
-    )
-    obligations_json.write_text(json.dumps(payload), encoding="utf-8")
-    return proposal_json, obligations_json
+    return proposal_json
 
 
 def _submit_argv(
     paths: dict[str, Path],
     proposal_json: Path,
-    obligations_json: Path,
     *extra: str,
 ) -> tuple[str, ...]:
     return (
         "--proposal-json",
         str(proposal_json),
-        "--obligations-json",
-        str(obligations_json),
         "--project",
         str(paths["project"]),
         *extra,
@@ -129,15 +79,13 @@ def test_cli_submits_proposal_and_lists_journal_json(
 ) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
     proposal = _proposal(paths)
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal
-    )
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
 
     exit_code, payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
@@ -148,13 +96,14 @@ def test_cli_submits_proposal_and_lists_journal_json(
     assert payload["canonical_effect"] == "none"
     assert payload["proposal_id"] == "gap_stage2_001"
     assert payload["journal_append_sequence"] == 1
+    # The retained causal id is the one derived from the run ledger — no
+    # authority payload was passed through the CLI at all.
+    assert (
+        payload["replan_obligation_id"] == _derived_obligation(paths)["obligation_id"]
+    )
 
     journal = (
-        paths["runtime"]
-        / "goals"
-        / GOAL_ID
-        / "amendment-proposals"
-        / "journal.jsonl"
+        paths["runtime"] / "goals" / GOAL_ID / "amendment-proposals" / "journal.jsonl"
     )
     assert journal.is_file()
     lines = journal.read_text(encoding="utf-8").splitlines()
@@ -189,15 +138,13 @@ def test_cli_submits_proposal_markdown(
 ) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
     proposal = _proposal(paths)
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal
-    )
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
 
     exit_code, _, stdout = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "markdown",
     )
@@ -231,15 +178,13 @@ def test_cli_alias_amendment_proposal_matches(
 ) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
     proposal = _proposal(paths)
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal
-    )
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
 
     exit_code, payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
@@ -255,15 +200,13 @@ def test_cli_resubmission_is_idempotent(
 ) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
     proposal = _proposal(paths)
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal
-    )
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
 
     first_code, first_payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
@@ -271,7 +214,7 @@ def test_cli_resubmission_is_idempotent(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
@@ -301,15 +244,13 @@ def test_cli_nonexistent_obligation_fails_closed(
 ) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
     proposal = _proposal(paths, {"replan_obligation_id": "replan-deadbeefdeadbeef"})
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal
-    )
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
 
     exit_code, payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
@@ -318,11 +259,7 @@ def test_cli_nonexistent_obligation_fails_closed(
     assert payload["ok"] is False
     assert "does not match an open replan obligation" in payload["error"]
     journal = (
-        paths["runtime"]
-        / "goals"
-        / GOAL_ID
-        / "amendment-proposals"
-        / "journal.jsonl"
+        paths["runtime"] / "goals" / GOAL_ID / "amendment-proposals" / "journal.jsonl"
     )
     assert not journal.exists()
 
@@ -333,15 +270,13 @@ def test_cli_unregistered_proposer_fails_closed(
 ) -> None:
     paths = _write_fixture(tmp_path, events=_default_events())
     proposal = _proposal(paths, {"proposer_agent_id": "agent-z"})
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal
-    )
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
 
     exit_code, payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
@@ -396,24 +331,22 @@ def test_cli_malformed_proposal_json_fails_closed(
     assert "error" in payload
 
 
-def test_cli_submit_without_obligations_fails_closed(
+def test_cli_submit_without_run_history_fails_closed(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # No authority payload supplied: the obligation inventory is empty and
-    # the causal chain cannot be verified from string shape alone.
-    paths = _write_fixture(tmp_path, events=_default_events())
-    proposal = _proposal(paths)
-    proposal_json, _ = _write_submit_inputs(tmp_path, paths, proposal)
+    # No run ledger at all: the obligation inventory is empty and the
+    # causal chain cannot be verified from string shape alone. There is no
+    # CLI flag that could supply an authority payload instead.
+    paths = _write_fixture(tmp_path, events=_default_events(), runs=[])
+    proposal = _proposal(paths, {"replan_obligation_id": "replan-0123456789abcdef"})
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
 
     exit_code, payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        "--proposal-json",
-        str(proposal_json),
-        "--project",
-        str(paths["project"]),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
@@ -430,17 +363,11 @@ def test_cli_list_path_traversal_sibling_fails_closed(
     paths = _write_fixture(tmp_path, events=_default_events())
     # Place a sibling journal under runtime/goals/victim/amendment-proposals/journal.jsonl
     sibling_journal = (
-        paths["runtime"]
-        / "goals"
-        / "victim"
-        / "amendment-proposals"
-        / "journal.jsonl"
+        paths["runtime"] / "goals" / "victim" / "amendment-proposals" / "journal.jsonl"
     )
     sibling_journal.parent.mkdir(parents=True, exist_ok=True)
     sibling_journal.write_text(
-        json.dumps(
-            {"proposal_id": "gap_victim_001", "journal_append_sequence": 1}
-        )
+        json.dumps({"proposal_id": "gap_victim_001", "journal_append_sequence": 1})
         + "\n",
         encoding="utf-8",
     )
@@ -551,203 +478,155 @@ def test_cli_list_unknown_goal_fails_closed(
     assert "goal is not registered" in payload["error"]
 
 
-def test_cli_submit_fabricated_obligation_fails_closed(
+def test_cli_submit_forged_run_rows_fails_closed(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    paths = _write_fixture(tmp_path, events=_default_events())
-    proposal = _proposal(paths)
-
-    # 1. Raw unverified JSON dictionary without envelope/receipt
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=_status_item()
-    )
-    exit_code, payload, _ = _run_amendment_cli(
-        capsys,
-        paths["registry"],
-        "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
-        "--format",
-        "json",
-    )
-    assert exit_code == 1
-    assert payload["ok"] is False
-    assert "verified envelope" in payload["error"]
-
-    # 2. Tampered receipt digest
-    tampered_envelope = _obligation_envelope(paths)
-    tampered_envelope["receipt"]["receipt_digest"] = "sha256:deadbeef" * 8
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=tampered_envelope
-    )
-    exit_code, payload, _ = _run_amendment_cli(
-        capsys,
-        paths["registry"],
-        "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
-        "--format",
-        "json",
-    )
-    assert exit_code == 1
-    assert payload["ok"] is False
-    assert "fabricated or tampered" in payload["error"]
-
-    # 3. Caller self-minted envelope using public helper without authority recording
-    unrecorded_envelope = _obligation_envelope(paths, record_in_authority=False)
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=unrecorded_envelope
-    )
-    exit_code, payload, _ = _run_amendment_cli(
-        capsys,
-        paths["registry"],
-        "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
-        "--format",
-        "json",
-    )
-    assert exit_code == 1
-    assert payload["ok"] is False
-    assert "not authoritative" in payload["error"]
-
-
-def test_cli_submit_closed_or_rotated_obligation_fails_closed(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    paths = _write_fixture(tmp_path, events=_default_events())
-    proposal = _proposal(paths)
-
-    # Authority emits and records the initial obligation receipt
-    recorded_envelope = _obligation_envelope(paths)
-    receipt_id = recorded_envelope["receipt"]["receipt_id"]
-
-    # Authority later marks the obligation closed/rotated in the durable receipt
-    # store, while the state event log and Stage 1 source basis remain unchanged.
-    close_or_rotate_replan_obligation_receipt(
-        runtime_root=paths["runtime"],
-        goal_id=GOAL_ID,
-        receipt_id=receipt_id,
-        status="closed",
-        reason="obligation_settled_by_quota_monitor",
-    )
-
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=recorded_envelope
-    )
-    exit_code, payload, _ = _run_amendment_cli(
-        capsys,
-        paths["registry"],
-        "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
-        "--format",
-        "json",
-    )
-    assert exit_code == 1
-    assert payload["ok"] is False
-    assert "stale" in payload["error"]
-    assert "closed (not open)" in payload["error"]
-
-
-def test_cli_submit_stale_obligation_fails_closed(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    paths = _write_fixture(tmp_path, events=_default_events())
-    proposal = _proposal(paths)
-
-    # Stale sequence
-    stale_seq_envelope = _obligation_envelope(
-        paths,
-        derived_basis={
-            **_derived_source_basis(paths),
-            "state_event_basis_sequence": 999,
+    # Appending plain rows into the quota ledger cannot mint authority:
+    # rows without a typed progress observation (or with an unattributable
+    # one) derive no obligation, so the causal chain fails closed.
+    forged_rows = [
+        {
+            "generated_at": "2026-09-01T00:00:00+00:00",
+            "goal_id": GOAL_ID,
+            "agent_id": "agent-a",
+            "classification": "bounded_replan_progress",
+            "turn_instance_id": "turn_stage2_forged_0",
         },
-    )
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=stale_seq_envelope
-    )
-    exit_code, payload, _ = _run_amendment_cli(
-        capsys,
-        paths["registry"],
-        "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
-        "--format",
-        "json",
-    )
-    assert exit_code == 1
-    assert payload["ok"] is False
-    assert "stale" in payload["error"]
-    assert "sequence mismatch" in payload["error"]
-
-    # Stale digest
-    stale_digest_envelope = _obligation_envelope(
-        paths,
-        derived_basis={
-            **_derived_source_basis(paths),
-            "source_basis_digest": "sha256:0123456789abcdef" * 4,
+        {
+            "generated_at": "2026-09-01T00:01:00+00:00",
+            "goal_id": GOAL_ID,
+            "agent_id": "agent-a",
+            "classification": "quota_monitor_poll",
+            "turn_instance_id": "turn_stage2_forged_1",
+            "progress_observation": {"result_class": "blocked"},
         },
-    )
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=stale_digest_envelope
-    )
+    ]
+    paths = _write_fixture(tmp_path, events=_default_events(), runs=forged_rows)
+    proposal = _proposal(paths, {"replan_obligation_id": "replan-0123456789abcdef"})
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
+
     exit_code, payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
+        "--format",
+        "json",
+    )
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert "does not match an open replan obligation" in payload["error"]
+    journal = (
+        paths["runtime"] / "goals" / GOAL_ID / "amendment-proposals" / "journal.jsonl"
+    )
+    assert not journal.exists()
+
+
+def test_cli_legacy_receipt_journal_is_inert(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The retired receipts.jsonl path is read by nothing: appending a
+    # self-minted "open" receipt row there neither admits a proposal nor
+    # changes the derived causal id.
+    paths = _write_fixture(tmp_path, events=_default_events())
+    legacy = (
+        paths["runtime"] / "goals" / GOAL_ID / "replan-obligations" / "receipts.jsonl"
+    )
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "schema_version": "replan_obligation_authority_envelope_v0",
+                "goal_id": GOAL_ID,
+                "status": "open",
+                "receipt": {"receipt_id": "rcpt_forged", "status": "open"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    proposal = _proposal(paths)
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
+
+    exit_code, payload, _ = _run_amendment_cli(
+        capsys,
+        paths["registry"],
+        "goal-amendment-proposal",
+        *_submit_argv(paths, proposal_json),
+        "--format",
+        "json",
+    )
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["admission"] == "admitted"
+    assert (
+        payload["replan_obligation_id"] == _derived_obligation(paths)["obligation_id"]
+    )
+    assert payload["replan_obligation_id"] != "rcpt_forged"
+
+
+def test_cli_submit_after_settlement_ack_run_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The real close path: refresh-state appends an autonomous_replan_ack
+    # run into the quota ledger, derivation stops there, and a proposal
+    # naming the previously open obligation fails closed.
+    paths = _write_fixture(tmp_path, events=_default_events())
+    proposal = _proposal(paths)
+    obligation_id = _derived_obligation(paths)["obligation_id"]
+
+    _append_runs(paths, [_ack_run(obligation_id)])
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
+
+    exit_code, payload, _ = _run_amendment_cli(
+        capsys,
+        paths["registry"],
+        "goal-amendment-proposal",
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
     assert exit_code == 1
     assert payload["ok"] is False
-    assert "stale" in payload["error"]
-    assert "source_basis_digest mismatch" in payload["error"]
+    assert "does not match an open replan obligation" in payload["error"]
+    journal = (
+        paths["runtime"] / "goals" / GOAL_ID / "amendment-proposals" / "journal.jsonl"
+    )
+    assert not journal.exists()
 
 
 def test_cli_submit_wrong_goal_obligation_fails_closed(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    paths = _write_fixture(tmp_path, events=_default_events())
-    proposal = _proposal(paths)
-
-    wrong_goal_envelope = _obligation_envelope(paths, goal_id="goal_sibling")
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=wrong_goal_envelope
+    paths = _write_fixture(
+        tmp_path,
+        events=_default_events(),
+        with_other_goal=True,
+        other_goal_runs=_stall_runs(
+            goal_id=OTHER_GOAL_ID, hypothesis="hypothesis-stage2-peer"
+        ),
     )
+    peer_obligation_id = _derived_obligation(
+        paths, agent_id=None, goal_id=OTHER_GOAL_ID
+    )["obligation_id"]
+    proposal = _proposal(paths, {"replan_obligation_id": peer_obligation_id})
+    proposal_json = _write_submit_inputs(tmp_path, proposal)
+
     exit_code, payload, _ = _run_amendment_cli(
         capsys,
         paths["registry"],
         "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
+        *_submit_argv(paths, proposal_json),
         "--format",
         "json",
     )
+
     assert exit_code == 1
     assert payload["ok"] is False
-    assert "goal_id mismatch" in payload["error"]
-
-
-def test_cli_submit_valid_receipt_bound_obligation_admitted(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    paths = _write_fixture(tmp_path, events=_default_events())
-    proposal = _proposal(paths)
-
-    valid_envelope = _obligation_envelope(paths, goal_id=GOAL_ID)
-    proposal_json, obligations_json = _write_submit_inputs(
-        tmp_path, paths, proposal, envelope=valid_envelope
-    )
-    exit_code, payload, _ = _run_amendment_cli(
-        capsys,
-        paths["registry"],
-        "goal-amendment-proposal",
-        *_submit_argv(paths, proposal_json, obligations_json),
-        "--format",
-        "json",
-    )
-    assert exit_code == 0
-    assert payload["ok"] is True
-    assert payload["admission"] == "admitted"
-    assert payload["canonical_effect"] == "none"
+    assert "does not match an open replan obligation" in payload["error"]
