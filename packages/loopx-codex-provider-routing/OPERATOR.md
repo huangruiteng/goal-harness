@@ -34,7 +34,9 @@ binding from keeping those routes on DeepSeek.
 
 The four-route operator requires a CPA build with
 [custom-tool namespace recovery](https://github.com/router-for-me/CLIProxyAPI/pull/5558). Chat Completions encodes custom tools as functions
-with an `input` string. CPA must restore `custom_tool_call`, the original input,
+with an `input` string. Upstream adoption is tracked in
+[the maintainer issue](https://github.com/router-for-me/CLIProxyAPI/issues/5560)
+because the repository restricts direct translator PRs. CPA must restore `custom_tool_call`, the original input,
 namespace and call id in streamed and non-streamed responses. Historical custom
 calls must replay under the same qualified name as the current declaration.
 An omitted namespace can be recovered only from a unique current declaration;
