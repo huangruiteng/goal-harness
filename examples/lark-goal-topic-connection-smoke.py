@@ -17,9 +17,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
-from loopx.extensions.lark.goal_channel_contracts import binding_for_goal, read_goal_channel_binding
-from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets
+# Standalone smoke imports follow the repository-path bootstrap above.
+from loopx.chat_server import ChatHTTPServer, ChatRequestHandler  # noqa: E402
+from loopx.extensions.lark.goal_channel_contracts import binding_for_goal, read_goal_channel_binding  # noqa: E402
+from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets  # noqa: E402
 
 
 APP_ID = "cli_public_fixture"
