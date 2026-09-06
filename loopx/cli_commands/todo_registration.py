@@ -278,18 +278,18 @@ def register_todo_command(
     todo_parser.add_argument(
         "--task-lease-idempotency-key",
         help=(
-            "For todo complete and todo supersede, prove the execution instance "
-            "that owns an active hard task lease. Required when that todo has an "
-            "effective lease."
+            "For todo claim on promoted hard-lease authority, atomically acquire "
+            "the canonical lease and claim; for complete and supersede, prove the "
+            "execution instance that owns the active lease."
         ),
     )
     todo_parser.add_argument(
         "--task-lease-expected-version",
         type=int,
         help=(
-            "For todo complete and todo supersede, supply the active hard task "
-            "lease version. Required with --task-lease-idempotency-key when the "
-            "lease is effective."
+            "For promoted todo claim, optionally compare-and-set the canonical "
+            "lease version; for complete and supersede, supply the active lease "
+            "version when it is effective."
         ),
     )
     todo_parser.add_argument(

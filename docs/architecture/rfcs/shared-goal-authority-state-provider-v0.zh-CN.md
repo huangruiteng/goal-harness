@@ -1140,6 +1140,15 @@ conformance suite，覆盖 projection-plus-receipt 原子提交、CAS contention
 replay、operation fencing、有序 cursor scan、返回值隔离，以及 malformed JSON 在写前
 被拒绝。
 
+已晋升的 `hard_lease` authority 也通过既有 Todo claim caller contract 提供一条可选的
+ownership transaction。Caller 传入 task-lease idempotency key 和可选 expected version
+后，TypeScript owner 从 canonical head 读取 Todo 及其 required write scopes，复用 typed
+lease-acquire decision，并在一次 provider CAS 中共同提交 lease、claim 与 receipt。省略
+这些字段会保持既有 claim 行为；未晋升 Goal 则拒绝 atomic-only 参数，不尝试 legacy 写入。
+File、NoKV 与真实 PostgreSQL conformance 都覆盖了竞争 owner：只能有一个完整的
+claim-plus-lease tuple 获胜，失败方不会得到 receipt，获胜方按精确 operation identity
+重放。这是既有合同的一次内聚晋升，不是第二套 `claim_work` 抽象。
+
 PostgreSQL adapter 还会在打开连接之前执行一项 provider-local 资源门禁：canonical commit
 envelope 超过配置的 `max_commit_bytes` 时，写入以 typed
 `store_capacity_exhausted` 被拒绝。默认值为 16 MiB，部署可以调低。它只是单笔原子操作的
@@ -1533,6 +1542,23 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
 - distributed quota reservation/accounting；
 - provider promotion、authentication、service recovery、HA 与 multi-tenancy；
 - `retain_all_v0` 之后的 receipt retention 或 segmentation。
+
+#### TypeScript 优先的减负顺序
+
+如果一项前置 TypeScript 工作能消除下一阶段 shared authority 在 provider 压力下还要
+迁移的重复权威，就应优先做，但顺序必须保持收敛：
+
+1. 先刻画 Python 路径对 caller 可观察的行为与非法 transition；
+2. 每次只把一个已交付的 ownership transaction 移入既有 TypeScript boundary，先做
+   atomic claim-plus-lease，再做 completion-plus-successor，最后收敛剩余 lease
+   lifecycle decision；
+3. 改变 provider selection 之前，让该精确 transaction 同时通过 file、NoKV 与真实隔离
+   PostgreSQL server 的 qualification；
+4. 最后才推进 binding、migration、canary 与 production promotion。
+
+这不是 broad framework rewrite 的许可。只有下一阶段 RFC 会直接消费、能够移除重复
+decision authority，并且 caller-visible parity 与 rollback 能在同一有界切片内完成 review
+的前置重构，才进入这条顺序。
 
 ## 12. 还需要 Owner 决定什么
 

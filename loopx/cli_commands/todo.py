@@ -509,6 +509,8 @@ def handle_todo_command(
                 agent_id=args.agent_id,
                 claim_only=True,
                 claim_operation_id=args.claim_operation_id,
+                task_lease_idempotency_key=args.task_lease_idempotency_key,
+                task_lease_expected_version=args.task_lease_expected_version,
                 **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )

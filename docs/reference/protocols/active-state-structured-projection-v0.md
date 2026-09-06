@@ -138,7 +138,11 @@ The cutover is deliberately section-sized, not document-sized:
 
 The first write using this boundary is Todo claim. It exercises a complete
 provider-neutral TypeScript transaction while leaving the default local path
-unchanged. After promotion, `loopx todo project-markdown` can explicitly
+unchanged. On promoted `hard_lease` authority, the same claim command may
+supply a task-lease idempotency key and optional expected version so the claim,
+canonical lease, and durable receipt commit in one provider transaction; the
+write scopes come from the canonical Todo rather than caller input. After
+promotion, `loopx todo project-markdown` can explicitly
 regenerate the two active Todo sections from the exact provider revision. It
 never runs before promotion and never turns Markdown back into authority.
 
