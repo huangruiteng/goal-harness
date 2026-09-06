@@ -253,7 +253,7 @@ def main() -> None:
 
             disconnected = request(
                 base,
-                "/api/chat/lark/connections?goal_id=goal-alpha",
+                "/api/chat/lark/connections?goal_id=goal-alpha&connection_id=" + bindings["goal-alpha"]["connection_id"],
                 method="DELETE",
             )
             assert disconnected["status"] == "disconnected", disconnected
