@@ -976,7 +976,7 @@ class ChatRuntimeController:
             if current is None:
                 raise KeyError("chat turn was not found")
             if current.get("status") == "completing":
-                return self.store.finalize_managed_turn_completion(
+                return self.store.finalize_turn_completion(
                     session_id,
                     turn_id,
                 ) or current
