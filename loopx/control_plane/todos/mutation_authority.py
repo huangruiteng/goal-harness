@@ -19,6 +19,7 @@ from ..coordination.authority_core import (
 from ..coordination.local_snapshot import todo_snapshot_from_mapping
 from ..effect_runtime import effect_runtime_result
 from .contract import (
+    normalize_removed_todo_continuation_policy,
     normalize_todo_claimed_by,
     normalize_todo_decision_outcome,
     normalize_todo_decision_scope,
@@ -181,6 +182,37 @@ def _raise_core_authority_rejection(
     )
 
 
+def _raise_claim_ineligible_rejection(
+    *,
+    code: str,
+    todo: Mapping[str, Any],
+    core_todo: TodoSnapshot,
+) -> None:
+    """Preserve legacy claim messages for ineligible-Todo TypeScript codes."""
+
+    if code == "todo_not_open":
+        raise ValueError(
+            f"todo claim requires status=open; todo_id {core_todo.todo_id!r} "
+            f"is status={core_todo.status!r}"
+        )
+    if code == "todo_not_agent":
+        raise ValueError(
+            "claimed_by is execution ownership for agent todos, not a user-todo "
+            "binding; use --bound-agent or --goal-bound"
+        )
+    if code == "removed_continuation_policy":
+        raw_policy = str(todo.get("removed_continuation_policy") or "").strip()
+        policy = normalize_removed_todo_continuation_policy(raw_policy) or raw_policy
+        raise ValueError(
+            f"todo_id {core_todo.todo_id!r} uses removed continuation_policy="
+            f"{policy}; repair it before claiming"
+        )
+    if code in {"todo_archived", "todo_role_mismatch"}:
+        raise ValueError(
+            f"todo_id {core_todo.todo_id!r} was not found in active user or agent todos"
+        )
+
+
 def _authorize_typescript_claim(
     *,
     goal_id: str,
@@ -233,6 +265,7 @@ def _authorize_typescript_claim(
                 todo=core_todo,
                 action="claim",
             )
+        _raise_claim_ineligible_rejection(code=code, todo=todo, core_todo=core_todo)
         raise ValueError(str(payload.get("reason") or "Todo claim was rejected"))
     mutation_authority = payload.get("mutation_authority")
     if not isinstance(mutation_authority, Mapping):
