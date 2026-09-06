@@ -138,6 +138,7 @@ Progress   = 与验收相关的持久状态迁移</code></pre>
 </section>
 <section id="effects">
 <h2>5. Effect Program：恢复实际发生过的事</h2>
+<p>这一节的函数式编程视角，可结合齐梦星空的 <a href="#agent-loop-reading">Agent Loop、Kleisli Arrow 与函数组合系列</a>阅读。</p>
 <p>普通函数可以写成 <code>A → B</code>；Agent 操作更接近 <code>A → F[B]</code>，其中包含权限、持久化、时间、预算、外部调用和失败。模型提出动作，与真实世界发生变化，是两个不同事实。</p>
 <pre><code>Goal 状态 → Effect 请求 → 权限 / Quota 解释
   → 外部操作 → Observation / Readback → Receipt
@@ -273,6 +274,13 @@ loopx status</code></pre>
 <li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/docs/architecture.md">LoopX 架构</a>：目标、状态与执行边界的整体设计。实际使用可从<a href="../../../docs/book/">开发者手册</a>开始。</li>
 <li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/loopx/control_plane/effect_program.ts">Effect Program 实现</a>与<a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/tests/control_plane_ts/effect_program.test.ts">对应测试</a>：核对结算顺序、Receipt、重放与中断恢复。</li>
 <li><a href="../../../benchmarks/swe-marathon/?lang=zh">SWE-Marathon 双语研究简报</a>与<a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/benchmark/swe-marathon/data.json">固定版本的聚合数据</a>：阅读五种模式的实验设置、结果、成本和局限。</li>
+</ul>
+<h3 id="agent-loop-reading">Agent Loop 与函数式编程</h3>
+<p>齐梦星空的小红书系列（2026 年 5 月），从带 Effect 的计算出发讨论工具调用与组合：</p>
+<ul>
+<li><a href="https://www.xiaohongshu.com/discovery/item/6a01d501000000003700c5de?source=webshare&amp;xhsshare=pc_web&amp;xsec_token=ABqpNuladcxhev099wLKw8M3ilhKBua0BQXNpxnBZEGkc=&amp;xsec_source=pc_share">主线一:Agent Loop是effectful program(1)</a><br><time datetime="2026-05-11">2026-05-11</time></li>
+<li><a href="https://www.xiaohongshu.com/discovery/item/6a02f388000000003502b2d6?source=webshare&amp;xhsshare=pc_web&amp;xsec_token=ABHcIpzpd2RlhAaRr9sZZ-q1OIfRgt7rvG2jn7GUO3tNo=&amp;xsec_source=pc_share">主线一:Tool Calling是Kleisli arrow (2)</a><br><time datetime="2026-05-12">2026-05-12</time></li>
+<li><a href="https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&amp;xhsshare=pc_web&amp;xsec_token=AB43lNCJ5ULmfTrGfeTLWd2-jQ6q8nFMGyNAd-tlXJ1uw=&amp;xsec_source=pc_share">主线一: Agent Loop里的小魔法:函数组合(3)</a><br><time datetime="2026-05-14">2026-05-14</time></li>
 </ul>
 <h3>相关公开材料</h3>
 <ul>
