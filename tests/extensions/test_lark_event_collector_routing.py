@@ -730,6 +730,7 @@ def test_cli_send_resolves_route_and_forwards_safe_delivery_flags(
     assert str(calls[0]["config_path"]).endswith("requirements-beta.json")
     assert calls[0]["provider_preflight"] is True
     assert calls[0]["execute"] is False
+    assert calls[0]["before_send"] is None
     assert rendered[0]["status"] == "preview_ready"
     assert rendered[0]["extension_activation"] == {"enabled": True}
 
