@@ -12,7 +12,6 @@ from ...todos.deferred_resume import todo_summary_blocked_successor_items
 from ..goal_vision_state import goal_vision_state_is_closed
 
 VISION_FALLBACK_GAP_TRIGGER = "vision_fallback_unresolved"
-VISION_FALLBACK_GAP_SCHEMA_VERSION = "goal_fallback_gap_v0"
 VISION_FALLBACK_GAP_REASON_CODE = "declared_fallback_without_runnable_or_terminal"
 DECLARED_FALLBACK_PATTERN = re.compile(r"\bfallback\b", re.IGNORECASE)
 VISION_FALLBACK_TERMINAL_PATH_OUTCOME = "stop"
@@ -180,7 +179,6 @@ def declared_fallback_gap_from_agent_vision(
     if {action for action, _ in todo_delta} & VISION_FALLBACK_SUCCESSOR_DELTA_ACTIONS:
         return None
     gap: dict[str, Any] = {
-        "schema_version": VISION_FALLBACK_GAP_SCHEMA_VERSION,
         "kind": VISION_FALLBACK_GAP_TRIGGER,
         "source": "latest_agent_vision",
         "agent_id": agent_vision.get("agent_id"),
