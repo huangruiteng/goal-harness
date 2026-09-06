@@ -1087,6 +1087,7 @@ def update_goal_todo(
     enforce_monitor_boundedness: bool = True,
     clear_claim: bool = False,
     claim_only: bool = False,
+    claim_operation_id: str | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -1104,9 +1105,15 @@ def update_goal_todo(
         raise ValueError(
             "todo update accepts either resume_when or clear_resume_when, not both"
         )
-    if claim_only and local_authority_is_promoted(
+    promoted_claim = claim_only and local_authority_is_promoted(
         runtime_root=shadow_runtime_root, goal_id=goal_id
-    ):
+    )
+    if claim_operation_id is not None:
+        if not claim_only:
+            raise ValueError("claim_operation_id is supported only by todo claim")
+        if not promoted_claim:
+            raise ValueError("--claim-operation-id requires promoted canonical authority; no legacy write attempted")
+    if promoted_claim:
         unsupported_claim_values = (
             text, status, note, evidence, reason, task_class, action_kind,
             task_domain, task_repository, continuation_policy,
@@ -1138,6 +1145,7 @@ def update_goal_todo(
             claimed_by=claimed_by or "",
             actor_agent_id=agent_id,
             dry_run=dry_run,
+            operation_id=claim_operation_id,
         )
         if canonical_claim is not None:
             return canonical_claim

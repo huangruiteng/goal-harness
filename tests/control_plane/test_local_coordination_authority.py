@@ -524,6 +524,37 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
     )
     assert claimed_item["claimed_by"] == "agent-a"
 
+    # Separate CLI processes must replay one durable operation, not mint a
+    # fresh receipt for every retry. Preview does not consume that identity.
+    claim_command = [
+        sys.executable, "-m", "loopx.cli", "--format", "json",
+        "--registry", str(registry_path), "todo", "claim", "--goal-id", "goal-a",
+        "--todo-id", "todo_claimable", "--claimed-by", "agent-a", "--agent-id", "agent-a",
+        "--claim-operation-id", "retryable-cli-claim",
+    ]
+    preview = json.loads(subprocess.run(
+        [*claim_command, "--dry-run"], capture_output=True, text=True, check=True,
+    ).stdout)
+    assert preview["dry_run"] is True
+    original = json.loads(subprocess.run(
+        claim_command, capture_output=True, text=True, check=True,
+    ).stdout)
+    replay = json.loads(subprocess.run(
+        claim_command, capture_output=True, text=True, check=True,
+    ).stdout)
+    assert original["status"] == "no_change"
+    assert replay["status"] == "replayed"
+    assert replay["original_receipt"] == original["original_receipt"]
+    assert replay["provider_revision"] == original["provider_revision"]
+    changed_intent = ["agent-b" if part == "agent-a" else part for part in claim_command]
+    rejected = subprocess.run(changed_intent, capture_output=True, text=True)
+    assert rejected.returncode != 0
+    assert json.loads(rejected.stdout)["error"] == "operation id already names a different coordination request"
+    for invalid_key in ("", " padded-operation "):
+        invalid = subprocess.run([*claim_command[:-1], invalid_key], capture_output=True, text=True)
+        assert invalid.returncode != 0
+    assert not state_file.exists()
+
     create_command = [
         sys.executable, "-m", "loopx.cli", "--format", "json",
         "--registry", str(registry_path), "todo", "add", "--goal-id", "goal-a",

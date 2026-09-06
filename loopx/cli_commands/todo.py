@@ -378,6 +378,15 @@ def register_todo_command(
     )
     todo_parser.add_argument("--todo-id", help="Structured todo id from status/quota, such as todo_ab12cd34ef56.")
     todo_parser.add_argument(
+        "--claim-operation-id",
+        help=(
+            "For todo claim on promoted canonical authority only, reuse this public-safe "
+            "operation id across retries. Changed intent with the same id is rejected; "
+            "receipt replay proves historical acceptance, not current lease ownership. "
+            "Omit to retain a fresh operation id per invocation."
+        ),
+    )
+    todo_parser.add_argument(
         "--turn-instance-id",
         help=(
             "For todo complete, bind the lifecycle receipt to the original "
@@ -964,6 +973,7 @@ def handle_todo_command(
                 claimed_by=args.claimed_by,
                 agent_id=args.agent_id,
                 claim_only=True,
+                claim_operation_id=args.claim_operation_id,
                 **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
