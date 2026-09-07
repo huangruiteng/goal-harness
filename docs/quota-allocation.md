@@ -52,6 +52,56 @@ depending on the executor:
 - a shared controller loop can use the same number as a weighted selection
   ratio between eligible goals.
 
+## Completed-Todo Review Cadence
+
+`execution_profile.replan_after_completed_todos` is a Goal-level integer
+hyperparameter, default **5** in both standard and fine-grained Turn modes.
+Set it to 2 or 3 for earlier review. Supported values are 1–5: the current
+agent projection retains five recent completions, so larger values are rejected.
+Restoring 5 removes the override and preserves the existing default behavior.
+
+```bash
+# Preview, apply, and read back the Goal setting.
+loopx configure-goal --goal-id example --execution-replan-after-todos 3
+loopx configure-goal --goal-id example --execution-replan-after-todos 3 --execute
+loopx configure-goal --goal-id example
+
+# Restore the default cadence.
+loopx configure-goal --goal-id example --execution-replan-after-todos 5 --execute
+```
+
+The Dashboard's Goal configuration catalog exposes **Goal review cadence** as
+an integer field through the existing preview/apply flow. This is a setting of
+the built-in goal control plane, with no provider or plugin installation.
+
+The count includes completed advancement Todos claimed by the same Agent, with
+valid completion timestamps, after the latest qualifying outcome checkpoint.
+Open Todos, other Agents' work, and protocol steps do not count. A checkpoint
+must satisfy the existing material-outcome and acceptance-evidence rules;
+a generic refresh or an unqualified replan ACK does not reset the window.
+A closed Agent vision is excluded by the existing terminal-state rule.
+
+At the threshold, the next `quota should-run --goal-id example --agent-id agent-a`
+evaluation contributes a `vision_outcome_checkpoint_required` acceptance gap
+with `completed_todo_count` and `completed_todo_threshold`, through the existing
+replan obligation path. This is a machine-evaluated review obligation, subject
+to existing lane arbitration. The review can retain the current path with
+`continue` or `no_change`, or choose `replan`; reaching the threshold does not
+require changing a correct plan. No permission or quota boundary changes, and
+no external data is published by this setting.
+
+This counter does not interrupt the host or schedule a continuation turn.
+For review during a long turn, the executor must write completion state as
+work finishes and re-enter quota before starting the next Todo. Completing all
+Todos in one batch at closeout or never re-entering quota can defer review until
+after implementation. Lowering the threshold alone cannot repair that gap.
+
+Other cadences are independent: the standard profile's two-small-delivery
+streak suggests widening work; fine mode's five-small-delivery streak suggests
+direction review. Neither is this completed-Todo counter. The periodic review
+window of 20 material run records and long-open-Todo-chain triggers also retain
+their existing thresholds.
+
 ## Minimal Contract
 
 The compact status shape can start with a small object:

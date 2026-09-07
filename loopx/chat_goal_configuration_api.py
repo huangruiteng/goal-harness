@@ -5,12 +5,6 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
 
-from .configuration_transaction import (
-    build_configuration_update_plan,
-    configuration_payload_revision,
-    goal_capability_configuration_revision,
-    require_expected_configuration_plan_revision,
-)
 from .capabilities.configuration_ui import (
     build_capability_configuration_catalog,
 )
@@ -18,9 +12,17 @@ from .capabilities.machine_configuration.builtins import (
     build_builtin_machine_configuration_registry,
 )
 from .capabilities.machine_configuration.store import inspect_machine_configuration
+from .configuration_transaction import (
+    build_configuration_update_plan,
+    configuration_payload_revision,
+    goal_capability_configuration_revision,
+    require_expected_configuration_plan_revision,
+)
 from .configure_goal import configure_goal
 from .control_plane.goals.configure_goal_service import configure_goal_with_global_sync
-
+from .control_plane.goals.goal_vision_policy import (
+    normalize_completed_todo_replan_threshold,
+)
 
 CHAT_GOAL_CONFIGURATION_PATH = "/api/chat/goal-configuration"
 CHAT_GOAL_CONFIGURATION_PREVIEW_PATH = f"{CHAT_GOAL_CONFIGURATION_PATH}/preview"
@@ -112,6 +114,7 @@ def _goal_capability_options(
         raise ValueError(f"Goal capability cannot be cleared: {capability_id}")
     config = dict(configuration)
     allowed: dict[str, set[str]] = {
+        "todo_replan_cadence": {"completed_todos"},
         "multi_subagent": {"enabled", "max_children", "allowed_domains"},
         "peer_task_coordination": {"coordinator_agent_id"},
         "explore_graph": {"enabled"},
@@ -131,6 +134,12 @@ def _goal_capability_options(
 
     if capability_id == "multi_subagent":
         return _multi_subagent_options(config)
+    if capability_id == "todo_replan_cadence":
+        return {
+            "execution_replan_after_todos": normalize_completed_todo_replan_threshold(
+                config.get("completed_todos")
+            ),
+        }
     if capability_id == "periodic_report":
         return {"periodic_report_configuration": config}
     if capability_id == "peer_task_coordination":

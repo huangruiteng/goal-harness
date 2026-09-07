@@ -30,8 +30,18 @@ def register_configure_goal_command(subparsers: argparse._SubParsersAction) -> N
         "--execution-turn-granularity",
         choices=TURN_GRANULARITY_CHOICES,
         help=(
-            "Set sticky goal turn granularity. fine runs one small checkpoint Todo "
-            "per turn and replans from fresh evidence before its successor."
+            "Set sticky goal turn granularity. fine plans small checkpoints within "
+            "a coherent work slice; completed-Todo review cadence defaults to 5 in both modes."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--execution-replan-after-todos",
+        type=int,
+        choices=range(1, 6),
+        help=(
+            "Require goal review after this many same-agent advancement Todo completions "
+            "without a covering outcome checkpoint. Default 5; use 2 or 3 for earlier "
+            "review, or 5 to restore the default. Applies to standard and fine modes."
         ),
     )
     configure_goal_parser.add_argument(

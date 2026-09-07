@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .capabilities.configuration_ui import build_capability_configuration_catalog
+from .control_plane.goals.goal_vision_policy import completed_todo_replan_threshold
 
 DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
 
@@ -125,6 +126,49 @@ def build_goal_configuration_catalog(
             ),
         },
         "features": [
+            {
+                "feature_id": "todo_replan_cadence",
+                "display_name": "Goal review cadence",
+                "availability": "supported_opt_in",
+                "default": {"completed_todos": 5},
+                "current": {
+                    "completed_todos": completed_todo_replan_threshold(
+                        settings.get("execution_profile")
+                    ),
+                },
+                "consider_when": "A short Todo chain needs earlier review against the Goal.",
+                "effect": (
+                    "Requires review after 1–5 same-agent advancement Todo completions "
+                    "without a covering outcome checkpoint; default 5 in standard and fine modes."
+                ),
+                "does_not": [
+                    "create host continuation turns or interrupt running work",
+                    "count open Todos, protocol steps, or another Agent's completions",
+                    "bypass quota, permissions, or outcome evidence requirements",
+                ],
+                "commands": {
+                    "preview_enable": _configure_command(
+                        goal_id, "--execution-replan-after-todos", "3"
+                    ),
+                    "apply_enable": _configure_command(
+                        goal_id, "--execution-replan-after-todos", "3", execute=True
+                    ),
+                    "preview_disable": _configure_command(
+                        goal_id, "--execution-replan-after-todos", "5"
+                    ),
+                    "apply_disable": _configure_command(
+                        goal_id, "--execution-replan-after-todos", "5", execute=True
+                    ),
+                    "verify": [inspect_command],
+                },
+                "documentation": {
+                    "path": "docs/quota-allocation.md#completed-todo-review-cadence",
+                    "url": (
+                        "https://github.com/huangruiteng/loopx/blob/main/"
+                        "docs/quota-allocation.md#completed-todo-review-cadence"
+                    ),
+                },
+            },
             {
                 "feature_id": "local_authority_shadow",
                 "display_name": "Local post-commit authority observation",

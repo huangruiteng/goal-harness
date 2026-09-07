@@ -11,7 +11,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .agent_registry import normalize_registered_agents
-from .capabilities.periodic_report import goal_configuration as periodic_report_config
 from .boundary_authority import (
     build_checkpointed_boundary_authority_entry,
     checkpointed_boundary_authority_summary,
@@ -20,7 +19,11 @@ from .capabilities.change_quality.policy import (
     CHANGE_QUALITY_POLICY_SCHEMA_VERSION,
     change_quality_goal_policy_summary,
 )
-from .configuration_catalog import DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN, build_goal_configuration_catalog
+from .capabilities.periodic_report import goal_configuration as periodic_report_config
+from .configuration_catalog import (
+    DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN,
+    build_goal_configuration_catalog,
+)
 from .control_plane import compact_control_plane_policy, control_plane_policy_summary
 from .control_plane.agents.legacy_migration import (
     completed_peer_agent_runtime_migration,
@@ -49,8 +52,7 @@ from .control_plane.todos.mutation_authority import (
 )
 from .execution_profile import (
     compact_execution_profile,
-    execution_profile_with_turn_granularity,
-    normalize_turn_granularity,
+    configure_execution_profile,
 )
 from .explore_graph import compact_explore_graph_policy
 from .orchestration import (
@@ -421,6 +423,7 @@ def configure_goal(
     quota_compute: float | None = None,
     quota_window_hours: float | None = None,
     execution_turn_granularity: str | None = None,
+    execution_replan_after_todos: int | None = None,
     self_repair_enabled: bool | None = None,
     self_repair_health: bool | None = None,
     self_repair_waiting_projection: bool | None = None,
@@ -479,10 +482,6 @@ def configure_goal(
 ) -> dict[str, Any]:
     if not registry_path.exists():
         raise FileNotFoundError(f"registry file does not exist: {registry_path}")
-    if execution_turn_granularity is not None:
-        execution_turn_granularity = normalize_turn_granularity(
-            execution_turn_granularity
-        )
     if clear_allowed_domains and allowed_domains:
         raise ValueError(
             "--clear-allowed-domains cannot be combined with --allowed-domain"
@@ -765,10 +764,11 @@ def configure_goal(
 
     before_goal = deepcopy(goal)
     before = _settings_summary(before_goal)
-    if execution_turn_granularity is not None:
-        goal["execution_profile"] = execution_profile_with_turn_granularity(
+    if execution_turn_granularity is not None or execution_replan_after_todos is not None:
+        goal["execution_profile"] = configure_execution_profile(
             goal.get("execution_profile"),
-            execution_turn_granularity,
+            turn_granularity=execution_turn_granularity,
+            replan_after_completed_todos=execution_replan_after_todos,
         )
     legacy_hierarchy_before = legacy_agent_hierarchy_present(before_goal)
     expected_migration_id = peer_agent_runtime_migration_id(goal_id, before_goal)

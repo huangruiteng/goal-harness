@@ -18,6 +18,20 @@ GOAL_VISION_ADVANCEMENT_POLICY_CHOICES = tuple(
 COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD = 5
 
 
+def normalize_completed_todo_replan_threshold(value: Any) -> int:
+    # The durable agent projection retains five completions. Larger thresholds
+    # would be unreachable without widening that evidence window.
+    if type(value) is not int or not 1 <= value <= COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD:
+        raise ValueError("replan_after_completed_todos must be an integer from 1 to 5")
+    return value
+
+
+def completed_todo_replan_threshold(profile: Any) -> int:
+    if not isinstance(profile, dict) or "replan_after_completed_todos" not in profile:
+        return COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD
+    return normalize_completed_todo_replan_threshold(profile["replan_after_completed_todos"])
+
+
 def normalize_goal_vision_advancement_policy(value: Any) -> str:
     candidate = str(value or "").strip().lower().replace("-", "_")
     try:

@@ -34,7 +34,7 @@ from ...work_items.autonomous_replan_obligation import (
 )
 from ...work_items.progress_observation import build_replan_context
 from ..goal_vision_policy import (
-    COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
+    completed_todo_replan_threshold,
     goal_vision_repeats_advancement_until_closed,
 )
 from ..goal_vision_state import (
@@ -1565,7 +1565,9 @@ def build_goal_frontier_projection_context_from_status(
             latest_vision_checkpoint,
             agent_todo_summary=agent_todo_summary,
             agent_id=agent_id,
-            completed_todo_threshold=COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
+            completed_todo_threshold=completed_todo_replan_threshold(
+                project_asset.get("execution_profile")
+            ),
         )
     )
     if _terminal_no_followup_resolves_vision_checkpoint(

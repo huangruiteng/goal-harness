@@ -58,6 +58,24 @@ def capability_configuration_editor(
     """Return the provider-neutral editor contract consumed by every UI scope."""
 
     definitions: dict[str, dict[str, Any]] = {
+        "todo_replan_cadence": {
+            "supported_scopes": ["goal"],
+            "writable_scopes": ["goal"],
+            "fields": [
+                _field(
+                    "completed_todos",
+                    "Completed Todos between Goal reviews",
+                    "number",
+                    minimum=1,
+                    maximum=5,
+                    required=True,
+                    description=(
+                        "Default 5 in both turn modes. Use 2 or 3 for earlier review; "
+                        "5 restores the default. Counts this Agent's advancement work."
+                    ),
+                ),
+            ],
+        },
         "periodic_report": {
             "supported_scopes": ["machine", "goal"],
             "writable_scopes": ["machine", "goal"],

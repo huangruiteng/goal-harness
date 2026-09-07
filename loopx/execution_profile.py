@@ -3,8 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .control_plane.goals.goal_vision_policy import (
+    COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
+    completed_todo_replan_threshold,
+    normalize_completed_todo_replan_threshold,
+)
 from .control_plane.work_items.delivery_outcome import DeliveryOutcome
-
 
 DEFAULT_EXECUTION_PROFILE: dict[str, Any] = {
     "cadence": "bounded_progress_segment",
@@ -150,6 +154,10 @@ def compact_execution_profile(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return profile
 
+    threshold = completed_todo_replan_threshold(value)
+    if threshold != COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD:
+        profile["replan_after_completed_todos"] = threshold
+
     if "turn_granularity" in value:
         turn_granularity = normalize_turn_granularity(value.get("turn_granularity"))
         if turn_granularity == TURN_GRANULARITY_FINE:
@@ -188,6 +196,22 @@ def compact_execution_profile(value: Any) -> dict[str, Any]:
     if execution_profile_is_fine_grained(profile):
         _apply_fine_grained_contract(profile)
     return profile
+
+
+def configure_execution_profile(
+    profile: Any,
+    *,
+    turn_granularity: str | None = None,
+    replan_after_completed_todos: int | None = None,
+) -> dict[str, Any]:
+    normalized = compact_execution_profile(profile)
+    if turn_granularity is not None:
+        normalized = execution_profile_with_turn_granularity(normalized, turn_granularity)
+    if replan_after_completed_todos is not None:
+        normalized["replan_after_completed_todos"] = normalize_completed_todo_replan_threshold(
+            replan_after_completed_todos
+        )
+    return compact_execution_profile(normalized)
 
 
 def normalize_turn_granularity(value: Any) -> str:
@@ -283,4 +307,8 @@ def execution_profile_summary(profile: dict[str, Any] | None) -> str:
         f"small_streak_threshold={policy.get('small_scale_streak_threshold')}"
         f"{floor_suffix}"
         f"{turn_suffix}"
+        + (
+            f" replan_after_completed_todos={normalized['replan_after_completed_todos']}"
+            if "replan_after_completed_todos" in normalized else ""
+        )
     )
