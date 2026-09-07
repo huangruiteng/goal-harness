@@ -616,12 +616,14 @@ class LarkGoalTopicRuntimeService:
             return
         snapshot = self.snapshot_provider()
         desired = set(_active_profile_configs(snapshot))
+        if self._closed.is_set():
+            return
+        self._resume_session_queues(snapshot)
         # A filesystem read may outlive server shutdown (for example, while
         # waiting for OS directory consent). Never start effects after close.
         with self._lock:
             if self._closed.is_set():
                 return
-            self._resume_session_queues(snapshot)
             stale = set(self._workers) - desired
             missing = desired - set(self._workers)
             for profile in stale:
@@ -655,6 +657,8 @@ class LarkGoalTopicRuntimeService:
                 if not isinstance(payload, Mapping):
                     continue
                 for binding in bindings_for_goal(payload, str(goal_id)):
+                    if self._closed.is_set():
+                        return
                     raw_routing = binding.get("routing")
                     routing: Mapping[str, Any] = (
                         raw_routing if isinstance(raw_routing, Mapping) else {}
@@ -673,19 +677,25 @@ class LarkGoalTopicRuntimeService:
                     except KeyError:
                         has_queued_turns = False
                     if has_queued_turns and work_dir:
-                        self.runtime_controller.resume_session_queue(
-                            session_id=session_id,
-                            work_dir=Path(work_dir).expanduser().resolve(),
-                            objective=str(context.get("objective") or goal_id),
-                        )
+                        resolved_work_dir = Path(work_dir).expanduser().resolve()
+                        # Discovery is slow I/O; only cancellation and the
+                        # controller's I/O-free worker admission belong here.
+                        with self._lock:
+                            if self._closed.is_set():
+                                return
+                            self.runtime_controller.resume_session_queue(
+                                session_id=session_id,
+                                work_dir=resolved_work_dir,
+                                objective=str(context.get("objective") or goal_id),
+                            )
 
     def active_profiles(self) -> list[str]:
         with self._lock:
             return sorted(self._workers)
 
     def close(self) -> None:
+        self._closed.set()
         with self._lock:
-            self._closed.set()
             workers = list(self._workers.values())
             self._workers.clear()
         for stop, _thread in workers:
