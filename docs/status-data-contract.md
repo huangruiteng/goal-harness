@@ -2250,10 +2250,14 @@ into `write_reserved_run_artifacts` and into the `refresh-state` run-write
 path. The first shipped measurement source is the Codex CLI session rollout:
 `loopx refresh-state --usage-codex-session <rollout.jsonl>` reads only the
 newest aggregate `token_count` totals, the model id, the session id, and event
-timestamps — never prompts, completions, or tool output. The session must be
-bound explicitly; there is no automatic session discovery, because guessing a
-concurrent session risks attributing one session's spend to another run. A
-host that measures usage itself can instead pass one finished per-run
+timestamps — never prompts, completions, or tool output. The model label is
+bound to the context observed before the selected token snapshot; a later
+context without new usage cannot relabel that snapshot. A snapshot without a
+preceding model context is rejected. This binding does not allocate cumulative
+session usage across models. The session must be bound explicitly; there is no
+automatic session discovery, because guessing a concurrent session risks
+attributing one session's spend to another run. A host that measures usage
+itself can instead pass one finished per-run
 measurement with `--usage-json`. Without either flag, usage stays unknown.
 
 Cumulative host snapshots are converted to non-negative deltas at that
@@ -2269,8 +2273,25 @@ usage booking lock, so concurrent refreshes cannot fund two deltas from one
 stale basis. Replaying the same snapshot identity with an identical
 observation is an idempotent zero delta; the same identity carrying any
 different counter or binding label fails closed instead of silently zeroing
-real usage. A new session starts a fresh absolute observation rather than a
-bogus reset error. Missing optional measurements stay omitted (unknown)
+real usage. The Codex adapter has one bounded legacy-label exception: an
+unmarked same-snapshot baseline can be reconciled only when its old model is
+the final post-snapshot context observed by the first durable booking time.
+The rollout must provide ordered, timezone-aware timestamps, and every
+cumulative metric (including optional-field presence) must still match the
+strict collector. Missing or inconsistent evidence remains a conflict. A
+context appended after first booking cannot justify a historical correction.
+
+The correction appends a zero delta with the same snapshot ID and corrected
+model; it never rewrites old records or totals. New Codex bookings carry a
+`codex_usage_binding` record/index field with schema `codex_usage_binding_v1`,
+`source_snapshot_id`, and `model`; a correction also records `legacy_model`.
+Any existing binding metadata excludes that snapshot from this legacy path.
+Subsequent replays use the corrected baseline and ordinary strict validation.
+Old records contain no producer-version attestation: this exception proves
+consistency with the historical reader's source semantics, not which binary
+wrote the row, and is not a general model-conflict migration mechanism.
+
+A new session starts a fresh absolute observation rather than a bogus reset error. Missing optional measurements stay omitted (unknown)
 rather than zero-filled. Malformed, negative, non-finite (`NaN`/`Infinity`,
 rejected at the typed builder, at the strict-JSON `--usage-json` boundary,
 and again at durable serialization, which forbids non-standard JSON
@@ -2318,6 +2339,12 @@ The summary currently reports:
   measured.
 - `project_share_24h`: per-goal share of observed 24h runs, rounded to three
   decimals.
+
+The Personal Workspace preserves absent measurements through parsing and
+active/stopped Goal merging. Goal details show “Not measured” / “未采集” for
+an absent metric; an observed zero remains `0`, `$0.00`, or `0ms`. Token totals
+require both measured input and output counts. The compact Goal header shows
+only observed metrics, without inferring a cost from token counts.
 
 Because `status --limit` can bound the recent run sample, consumers should
 display `sample_run_count` and treat these values as operational signals for

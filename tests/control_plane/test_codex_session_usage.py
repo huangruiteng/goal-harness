@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,10 @@ from loopx.control_plane.quota.codex_session_usage import (
     read_codex_session_usage,
     session_usage_baseline,
 )
-from loopx.control_plane.quota.usage_collector import UsageRowError
+from loopx.control_plane.quota.usage_collector import (
+    UsageRowError,
+    ingest_usage_into_run_record,
+)
 from loopx.control_plane.quota.usage_summary import build_usage_summary
 from loopx.control_plane.runtime.time import parse_timestamp
 from loopx.state_refresh import refresh_state_run
@@ -88,6 +92,16 @@ def _rollout_header(session_id: str = SESSION_ID) -> list[str]:
     ]
 
 
+def _rollout_model_context(model: str, *, turn_id: str = "turn-2") -> str:
+    return json.dumps(
+        {
+            "timestamp": "2026-08-26T01:06:00.000Z",
+            "type": "turn_context",
+            "payload": {"turn_id": turn_id, "model": model},
+        }
+    )
+
+
 def _write_rollout(path: Path, lines: list[str]) -> Path:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
@@ -120,6 +134,82 @@ def test_read_codex_session_usage_extracts_cumulative_totals(tmp_path: Path) -> 
     assert observation["measurement_kind"] == "absolute"
     assert observation["duration_ms"] == 300_000
     assert "cost_usd" not in observation  # unmeasured stays unknown, not zero
+
+
+def test_read_codex_session_usage_binds_model_when_token_snapshot_is_observed(
+    tmp_path: Path,
+) -> None:
+    lines = [
+        *_rollout_header(),
+        _rollout_event(
+            "2026-08-26T01:05:00.000Z",
+            input_tokens=1200,
+            cached_input_tokens=200,
+            output_tokens=300,
+        ),
+        _rollout_model_context("gpt-fixture-2"),
+    ]
+    rollout = _write_rollout(tmp_path / "rollout-model-switch.jsonl", lines)
+
+    first = read_codex_session_usage(rollout)
+    second = read_codex_session_usage(rollout)
+
+    assert first["model"] == MODEL
+    assert second == first
+
+
+def test_read_codex_session_usage_updates_model_with_new_token_snapshot(
+    tmp_path: Path,
+) -> None:
+    lines = [
+        *_rollout_header(),
+        _rollout_event(
+            "2026-08-26T01:05:00.000Z",
+            input_tokens=1200,
+            cached_input_tokens=200,
+            output_tokens=300,
+        ),
+        _rollout_model_context("gpt-fixture-2"),
+        _rollout_event(
+            "2026-08-26T01:10:00.000Z",
+            input_tokens=2000,
+            cached_input_tokens=350,
+            output_tokens=450,
+        ),
+    ]
+    rollout = _write_rollout(
+        tmp_path / "rollout-model-switch-new-usage.jsonl", lines
+    )
+
+    observation = read_codex_session_usage(rollout)
+
+    assert observation["model"] == "gpt-fixture-2"
+    assert observation["input_tokens"] == 2000
+
+
+def test_read_codex_session_usage_requires_model_before_token_snapshot(
+    tmp_path: Path,
+) -> None:
+    lines = [
+        json.dumps(
+            {
+                "timestamp": "2026-08-26T01:00:00.000Z",
+                "type": "session_meta",
+                "payload": {"session_id": SESSION_ID},
+            }
+        ),
+        _rollout_event(
+            "2026-08-26T01:05:00.000Z",
+            input_tokens=1200,
+            cached_input_tokens=200,
+            output_tokens=300,
+        ),
+        _rollout_model_context("gpt-fixture-2"),
+    ]
+    rollout = _write_rollout(tmp_path / "rollout-late-model.jsonl", lines)
+
+    with pytest.raises(CodexSessionUsageError, match="no turn_context model"):
+        read_codex_session_usage(rollout)
 
 
 def test_read_codex_session_usage_tolerates_torn_trailing_line(tmp_path: Path) -> None:
@@ -480,6 +570,75 @@ def test_refresh_state_replaying_same_snapshot_does_not_double_count(
     assert not (runs_dir / "usage_snapshot.json").exists()
 
 
+def test_refresh_state_replays_snapshot_after_model_context_change(
+    tmp_path: Path,
+) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    rollout = _fixture_rollout(tmp_path)
+    _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+    with rollout.open("a", encoding="utf-8") as handle:
+        handle.write(_rollout_model_context("gpt-fixture-2") + "\n")
+
+    payload = _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+
+    assert payload["usage"]["model"] == MODEL
+    runs = _index_runs(runtime_root)
+    assert runs[1]["usage"]["measurement_kind"] == "delta"
+    assert runs[1]["usage"]["input_tokens"] == 0
+    assert runs[1]["usage"]["model"] == MODEL
+
+    with rollout.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _rollout_event(
+                "2026-08-26T01:10:00.000Z",
+                input_tokens=2000,
+                cached_input_tokens=350,
+                output_tokens=450,
+            )
+            + "\n"
+        )
+    payload = _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+
+    assert payload["usage"]["model"] == "gpt-fixture-2"
+    runs = _index_runs(runtime_root)
+    increment = runs[2]["usage"]
+    assert increment["measurement_kind"] == "delta"
+    assert increment["input_tokens"] == 800
+    assert increment["output_tokens"] == 150
+    assert increment["cache_tokens"] == 150
+    assert increment["model"] == "gpt-fixture-2"
+
+    payload = _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+
+    assert payload["usage"]["model"] == "gpt-fixture-2"
+    runs = _index_runs(runtime_root)
+    replay = runs[3]["usage"]
+    assert replay["measurement_kind"] == "delta"
+    assert replay["input_tokens"] == 0
+    assert replay["output_tokens"] == 0
+    assert replay["model"] == "gpt-fixture-2"
+
+
 def test_refresh_state_books_only_the_cumulative_increment(tmp_path: Path) -> None:
     registry_path, project, runtime_root = _goal_fixture(tmp_path)
     rollout = _fixture_rollout(tmp_path)
@@ -749,3 +908,261 @@ def test_refresh_state_fails_closed_on_malformed_rollout_without_appending(
         )
     index_path = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
     assert not index_path.exists()
+
+
+def _legacy_book_codex_usage(record, rollout_path, index_path, *, index_record=None):
+    """Frozen pre-fix producer semantics for valid upgrade fixtures.
+
+    The old reader selected cumulative totals independently of the last model
+    context in the entire file. Keep this independent of the current reader.
+    """
+    for event in map(json.loads, rollout_path.read_text().splitlines()):
+        payload = event["payload"]
+        if event["type"] == "session_meta":
+            session_id = payload["session_id"]
+            started = datetime.fromisoformat(payload["timestamp"])
+        elif event["type"] == "turn_context":
+            model = payload["model"]
+        elif payload.get("type") == "token_count":
+            totals = payload["info"]["total_token_usage"]
+            observed = event["timestamp"]
+    ingest_usage_into_run_record(
+        record,
+        {
+            "input_tokens": totals["input_tokens"],
+            "output_tokens": totals["output_tokens"],
+            "cache_tokens": totals["cached_input_tokens"],
+            "duration_ms": int(
+                (datetime.fromisoformat(observed) - started).total_seconds() * 1000
+            ),
+            "provider": "codex",
+            "model": model,
+            "source_snapshot_id": f"codex:{session_id}:{observed}",
+            "measurement_kind": "absolute",
+        },
+        previous_snapshot=session_usage_baseline(index_path, session_id),
+        index_record=index_record,
+    )
+
+
+def test_refresh_state_upgrades_legacy_model_binding_without_rebooking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    rollout = _fixture_rollout(tmp_path)
+    with rollout.open("a") as handle:
+        handle.write(_rollout_model_context("gpt-fixture-2") + "\n")
+    kwargs = dict(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+    with monkeypatch.context() as legacy:
+        legacy.setattr(
+            state_refresh_module, "book_codex_session_usage", _legacy_book_codex_usage
+        )
+        _refresh(**kwargs)
+    index = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    original_bytes = index.read_bytes()
+    original = _index_runs(runtime_root)[0]
+    original_record = Path(original["json_path"]).read_bytes()
+    assert original["usage"]["model"] == "gpt-fixture-2"
+    assert "codex_usage_binding" not in original
+    before = _summary_totals(runtime_root)
+
+    for _ in range(2):
+        payload = _refresh(**kwargs)
+        assert payload["usage"]["model"] == MODEL
+        assert (
+            payload["usage"]["source_snapshot_id"]
+            == original["usage"]["source_snapshot_id"]
+        )
+        assert payload["usage"]["measurement_kind"] == "delta"
+        for field in ("input_tokens", "output_tokens", "cache_tokens", "duration_ms"):
+            assert payload["usage"][field] == 0
+        assert "cost_usd" not in payload["usage"]
+    rows = _index_runs(runtime_root)
+    assert index.read_bytes().startswith(original_bytes)
+    assert Path(original["json_path"]).read_bytes() == original_record
+    assert rows[1]["codex_usage_binding"]["legacy_model"] == "gpt-fixture-2"
+    assert rows[1]["codex_usage_binding"]["model"] == MODEL
+    assert "legacy_model" not in rows[2]["codex_usage_binding"]
+    assert (
+        json.loads(Path(rows[1]["json_path"]).read_text())["codex_usage_binding"]
+        == rows[1]["codex_usage_binding"]
+    )
+    after = _summary_totals(runtime_root)
+    for window in ("24h", "7d"):
+        for metric in (
+            "input_tokens",
+            "output_tokens",
+            "cache_tokens",
+            "duration_ms",
+            "cost_usd",
+        ):
+            key = f"{metric}_{window}"
+            assert after.get(key) == before.get(key)
+
+    with rollout.open("a") as handle:
+        handle.write(
+            _rollout_event(
+                "2026-08-26T01:10:00.000Z",
+                input_tokens=2000,
+                cached_input_tokens=350,
+                output_tokens=450,
+            )
+            + "\n"
+        )
+    increment = _refresh(**kwargs)["usage"]
+    assert (
+        increment["input_tokens"],
+        increment["output_tokens"],
+        increment["cache_tokens"],
+    ) == (800, 150, 150)
+    assert increment["model"] == "gpt-fixture-2"
+    assert _refresh(**kwargs)["usage"]["input_tokens"] == 0
+    assert _summary_totals(runtime_root)["input_tokens_7d"] == 2000
+
+
+@pytest.mark.parametrize(
+    "conflict",
+    [
+        "model",
+        "input_tokens",
+        "cache_tokens",
+        "duration_ms",
+        "cost_usd",
+        "provider",
+        "modern_binding",
+    ],
+)
+def test_legacy_binding_reconciliation_rejects_other_conflicts(
+    tmp_path: Path,
+    conflict: str,
+) -> None:
+    rollout = _fixture_rollout(tmp_path)
+    with rollout.open("a") as handle:
+        handle.write(_rollout_model_context("gpt-fixture-2") + "\n")
+    index = tmp_path / "index.jsonl"
+    record: dict[str, Any] = {"generated_at": "2026-08-26T01:07:00.000Z"}
+    _legacy_book_codex_usage(record, rollout, index)
+    if conflict == "modern_binding":
+        record["codex_usage_binding"] = {"schema_version": "codex_usage_binding_v1"}
+    elif conflict in ("model", "provider"):
+        record["usage"][conflict] = "unrelated"
+    elif conflict == "cache_tokens":
+        record["usage"].pop(conflict)
+    else:
+        record["usage"][conflict] = record["usage"].get(conflict, 0) + 1
+    index.write_text(json.dumps(record) + "\n")
+    before = index.read_bytes()
+    target: dict[str, Any] = {}
+    target_index: dict[str, Any] = {}
+    with pytest.raises(UsageRowError):
+        book_codex_session_usage(target, rollout, index, index_record=target_index)
+    assert target == target_index == {}
+    assert index.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "missing_booking",
+        "invalid_booking",
+        "naive_booking",
+        "late_context",
+        "missing_context_time",
+        "nonmonotonic",
+        "different_final_model",
+        "no_trailing_context",
+    ],
+)
+def test_legacy_binding_requires_historical_context_evidence(
+    tmp_path: Path, evidence: str
+) -> None:
+    rollout = _fixture_rollout(tmp_path)
+    with rollout.open("a") as handle:
+        handle.write(_rollout_model_context("gpt-fixture-2") + "\n")
+    index = tmp_path / "index.jsonl"
+    record: dict[str, Any] = {"generated_at": "2026-08-26T01:07:00.000Z"}
+    _legacy_book_codex_usage(record, rollout, index)
+    events = list(map(json.loads, rollout.read_text().splitlines()))
+    if evidence == "missing_booking":
+        record.pop("generated_at")
+    elif evidence == "invalid_booking":
+        record["generated_at"] = "not-a-timestamp"
+    elif evidence == "naive_booking":
+        record["generated_at"] = "2026-08-26T01:07:00"
+    elif evidence == "late_context":
+        record["generated_at"] = "2026-08-26T01:05:30.000Z"
+    elif evidence == "missing_context_time":
+        events[-1].pop("timestamp")
+    elif evidence == "nonmonotonic":
+        events[-1]["timestamp"] = "2026-08-26T01:04:00.000Z"
+    elif evidence == "different_final_model":
+        events.append(json.loads(_rollout_model_context("gpt-fixture-3")))
+        events[-1]["timestamp"] = "2026-08-26T01:06:30.000Z"
+    else:
+        events.pop()
+    _write_rollout(rollout, list(map(json.dumps, events)))
+    index.write_text(json.dumps(record) + "\n")
+    with pytest.raises(UsageRowError, match="model"):
+        book_codex_session_usage({}, rollout, index)
+
+
+def test_legacy_binding_uses_first_booking_not_later_replay_time(
+    tmp_path: Path,
+) -> None:
+    rollout = _fixture_rollout(tmp_path)
+    with rollout.open("a") as handle:
+        handle.write(_rollout_model_context("gpt-fixture-2") + "\n")
+    index = tmp_path / "index.jsonl"
+    first: dict[str, Any] = {"generated_at": "2026-08-26T01:05:30.000Z"}
+    _legacy_book_codex_usage(first, rollout, index)
+    index.write_text(json.dumps(first) + "\n")
+    replay: dict[str, Any] = {"generated_at": "2026-08-26T01:07:00.000Z"}
+    _legacy_book_codex_usage(replay, rollout, index)
+    with index.open("a") as handle:
+        handle.write(json.dumps(replay) + "\n")
+    with pytest.raises(UsageRowError, match="model"):
+        book_codex_session_usage({}, rollout, index)
+
+
+def test_legacy_binding_uses_selected_snapshot_booking_bound(tmp_path: Path) -> None:
+    rollout = _fixture_rollout(tmp_path)
+    index = tmp_path / "index.jsonl"
+    first: dict[str, Any] = {"generated_at": "2026-08-26T01:05:30.000Z"}
+    _legacy_book_codex_usage(first, rollout, index)
+    index.write_text(json.dumps(first) + "\n")
+    with rollout.open("a") as handle:
+        handle.write(
+            _rollout_event(
+                "2026-08-26T01:06:00.000Z",
+                input_tokens=2000,
+                cached_input_tokens=350,
+                output_tokens=450,
+            )
+            + "\n"
+        )
+        context = json.loads(_rollout_model_context("gpt-fixture-2"))
+        context["timestamp"] = "2026-08-26T01:06:30.000Z"
+        handle.write(json.dumps(context) + "\n")
+    second: dict[str, Any] = {"generated_at": "2026-08-26T01:07:00.000Z"}
+    _legacy_book_codex_usage(second, rollout, index)
+    with index.open("a") as handle:
+        handle.write(json.dumps(second) + "\n")
+    with rollout.open("a") as handle:
+        context = json.loads(_rollout_model_context("gpt-fixture-3"))
+        context["timestamp"] = "2026-08-26T01:08:00.000Z"
+        handle.write(json.dumps(context) + "\n")
+    corrected: dict[str, Any] = {}
+    book_codex_session_usage(corrected, rollout, index)
+    assert corrected["usage"]["input_tokens"] == 0
+    assert corrected["usage"]["model"] == MODEL
+    assert (
+        corrected["usage"]["source_snapshot_id"]
+        == second["usage"]["source_snapshot_id"]
+    )
+    assert corrected["codex_usage_binding"]["legacy_model"] == "gpt-fixture-2"
