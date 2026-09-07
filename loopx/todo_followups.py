@@ -7,11 +7,10 @@ from typing import Any
 from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
 from .control_plane.coordination.local_authority_shadow_adapter import effective_runtime_root
 from .control_plane.coordination.runtime_shadow_writer_adapter import (
-    require_runtime_shadow_capture_prepared,
+    write_captured_todo_state,
     begin_todo_runtime_shadow_capture,
     settle_todo_runtime_shadow_capture,
 )
-from .control_plane.todos.active_state_editing import atomic_write_state_text
 from .state_refresh import now_local
 from .control_plane.todos.contract import TODO_TASK_CLASS_ADVANCEMENT
 from .control_plane.todos.todo_summary import normalize_todo_text
@@ -164,10 +163,8 @@ def capture_followup_todos(
             new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
             new_text = replace_updated_at(new_text, updated_at)
             if not dry_run:
-                capture.prepare(new_text)
-                require_runtime_shadow_capture_prepared(capture, runtime_root=runtime_root, goal_id=goal_id)
-                atomic_write_state_text(resolved_state_file, new_text)
-                capture.committed()
+                write_captured_todo_state(capture, runtime_root=runtime_root, goal_id=goal_id,
+                    state_path=resolved_state_file, text=new_text)
 
     result = {
         "ok": True,

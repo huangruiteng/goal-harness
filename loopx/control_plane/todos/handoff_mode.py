@@ -423,11 +423,10 @@ def set_goal_handoff_mode(
     )
     from ..coordination.legacy_writer_fence import legacy_todo_write_transaction
     from ..coordination.runtime_shadow_writer_adapter import (
-        require_runtime_shadow_capture_prepared,
-    begin_todo_runtime_shadow_capture,
+        write_captured_todo_state,
+        begin_todo_runtime_shadow_capture,
         settle_todo_runtime_shadow_capture,
     )
-    from .active_state_editing import atomic_write_state_text
 
     requested = normalize_handoff_mode(mode)
     if not str(mode or "").strip():
@@ -533,10 +532,8 @@ def set_goal_handoff_mode(
             lines = original.splitlines()
             _write_handoff_mode_frontmatter(lines, requested)
             new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
-            capture.prepare(new_text)
-            require_runtime_shadow_capture_prepared(capture, runtime_root=runtime_root, goal_id=goal_id)
-            atomic_write_state_text(resolved_state_file, new_text)
-            capture.committed()
+            write_captured_todo_state(capture, runtime_root=runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
     payload["changed"] = True
     from ..coordination.local_authority_shadow_observation import observe_local_authority_commit
 

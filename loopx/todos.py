@@ -119,7 +119,6 @@ from .control_plane.todos.write_policy import (
     resolve_user_gate_global_gate_update,
 )
 from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
-from .control_plane.todos.active_state_editing import atomic_write_state_text
 from .control_plane.coordination.local_authority import (
     canonical_todo_summary_fields,
     claim_canonical_todo_if_promoted,
@@ -135,7 +134,7 @@ from .control_plane.todos.handoff_mode import (
 )
 from .control_plane.coordination.local_authority_shadow_adapter import effective_runtime_root
 from .control_plane.coordination.runtime_shadow_writer_adapter import (
-    require_runtime_shadow_capture_prepared,
+    write_captured_todo_state,
     begin_todo_runtime_shadow_capture,
     settle_todo_runtime_shadow_capture,
 )
@@ -970,10 +969,8 @@ def add_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
-            atomic_write_state_text(resolved_state_file, new_text)
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
 
     payload = {
         "ok": True,
@@ -1540,10 +1537,8 @@ def update_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
-            atomic_write_state_text(resolved_state_file, new_text)
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
     write_class = "todo_claim" if claim_only else "todo_update"
     payload = {
         "ok": True,
@@ -1958,10 +1953,8 @@ def complete_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
-            atomic_write_state_text(resolved_state_file, new_text)
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
         release_verified_task_lease_fence(
             task_lease_fence,
             committed=changed and not dry_run,
@@ -2194,10 +2187,8 @@ def supersede_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
-            atomic_write_state_text(resolved_state_file, new_text)
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
         release_verified_task_lease_fence(task_lease_fence, committed=changed and not dry_run)
     result = {
         "ok": True,
@@ -2266,10 +2257,8 @@ def archive_completed_todos(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id)
-            atomic_write_state_text(resolved_state_file, new_text)
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
 
     result = {
         "ok": True,

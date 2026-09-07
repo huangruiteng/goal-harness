@@ -306,13 +306,13 @@ def test_real_writer_commits_before_a_later_fence_is_published(tmp_path: Path, o
     registry, state, root = fixture(tmp_path)
     writer_code = """
 import sys
-from loopx import todo_followups
-original = todo_followups.atomic_write_state_text
+from loopx.control_plane.todos import active_state_editing
+original = active_state_editing.atomic_write_state_text
 def paused(*args):
     print('primary-write-cut', flush=True)
     sys.stdin.readline()
     return original(*args)
-todo_followups.atomic_write_state_text = paused
+active_state_editing.atomic_write_state_text = paused
 from loopx.entrypoint import main
 raise SystemExit(main(sys.argv[1:]))
 """

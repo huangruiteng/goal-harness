@@ -114,6 +114,20 @@ def require_runtime_shadow_capture_prepared(
         )
 
 
+def write_captured_todo_state(
+    capture: outbox.TodoPartitionCapture, *, runtime_root: Path, goal_id: str,
+    state_path: Path, text: str,
+) -> None:
+    """Under the primary lock, prepare before replacement and mark only after durability."""
+
+    from ..todos.active_state_editing import atomic_write_state_text
+
+    capture.prepare(text)
+    require_runtime_shadow_capture_prepared(capture, runtime_root=runtime_root, goal_id=goal_id)
+    atomic_write_state_text(state_path, text)
+    capture.committed()
+
+
 def settle_todo_runtime_shadow_capture(
     payload: dict[str, Any],
     *,
