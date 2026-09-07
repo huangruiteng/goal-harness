@@ -7,7 +7,11 @@ import test from "node:test";
 
 import { FileAuthorityStore } from "../../loopx/control_plane/coordination/file_authority_store.ts";
 import type { AuthorityStoreCommit } from "../../loopx/control_plane/coordination/authority_store.ts";
-import { canonicalAuthorityBytes } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import {
+  AuthorityStoreProtocolError,
+  canonicalAuthorityBytes,
+} from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import { normalizeTodoAgent } from "../../loopx/control_plane/coordination/todo_agents.ts";
 import {
   TODO_DOMAIN_ITEM_SCHEMA,
   TODO_DOMAIN_READ_RECORD_SCHEMA,
@@ -512,6 +516,73 @@ test("provider-first Todo claim preserves the complete record and is replay-safe
   assert.equal(repeated.changed, false);
 });
 
+test("agent id normalization folds any whitespace run like the Python kernel", async () => {
+  // Parity with loopx/control_plane/todos/contract.py normalize_todo_claimed_by:
+  // compact_todo_text collapses every Python-recognized whitespace run (including
+  // U+0085 NEL, U+001C..U+001F information separators, tabs, and NBSP) into
+  // one space before mapping it to "-", so the same claim command keeps working
+  // before and after promotion.
+  const whitespaceVariants = [
+    "Agent A",
+    "Agent\tA",
+    "Agent\u0085A",
+    "Agent\u001cA",
+    "Agent\u001dA",
+    "Agent\u001eA",
+    "Agent\u001fA",
+    "Agent\u00a0A",
+    "\u0085 Agent \t A \u001c ",
+  ];
+  for (const variant of whitespaceVariants) {
+    assert.equal(normalizeTodoAgent(variant, "claimed_by"), "agent-a");
+  }
+  // BOM (U+FEFF) is not Python whitespace and must not be accepted
+  assert.throws(
+    () => normalizeTodoAgent("\ufeffAgent A", "claimed_by"),
+    AuthorityStoreProtocolError,
+  );
+
+  const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-claim-tab-"));
+  const store = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
+  const seeded = await store.commitAuthority({
+    expected_provider_revision: null,
+    operation_id: "promote:claim-tab-test",
+    events: [{ schema_version: "promotion_v0" }],
+    next_projection: withTodoReadModel({
+      goal_id: "goal-a",
+      handoff_mode: "soft_claim",
+      todos: [todoRecord()],
+      leases: [],
+    }),
+    receipts: [],
+  });
+  assert.equal(seeded.status, "applied");
+
+  const applied = await claimLocalCoordinationTodo({
+    schema_version: LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    todo_id: "todo_a",
+    role: "agent",
+    claimed_by: "Agent\u0085A",
+    actor_agent_id: "\u0085 Agent \t A \u001c ",
+    registered_agents: ["agent-a"],
+    operation_id: "todo-claim:goal-a:todo_a:tab",
+    observed_at: "2026-09-05T04:30:00Z",
+    dry_run: false,
+  });
+  assert.equal(applied.status, "applied", JSON.stringify(applied));
+
+  const read = await readLocalCoordinationTodo({
+    schema_version: LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    todo_id: "todo_a",
+  });
+  assert.equal(read.status, "found");
+  assert.equal((read.todo as Record<string, unknown>).claimed_by, "agent-a");
+});
+
 test("one TypeScript decision owns promoted and legacy Todo claims", () => {
   const input = {
     goal_id: "goal-a",
@@ -855,6 +926,22 @@ test("provider-first Todo claim validates authority and hard-lease ownership", a
     claimed_by: "agent-a",
   });
   assert.equal(missingLease.reason_code, "handoff_mode_requires_lease");
+  assert.match(
+    String(missingLease.reason),
+    /loopx todo claim --task-lease-idempotency-key/,
+  );
+  assert.match(
+    String(missingLease.reason),
+    /--task-lease-expected-version/,
+  );
+  assert.equal(
+    (missingLease.recovery as Record<string, unknown> | undefined)?.command,
+    "loopx todo claim",
+  );
+  assert.deepEqual(
+    (missingLease.recovery as Record<string, unknown> | undefined)?.requires_flags,
+    ["--task-lease-idempotency-key"],
+  );
 
   const dryRun = await claimLocalCoordinationTodo({
     ...base,

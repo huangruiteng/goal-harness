@@ -97,11 +97,21 @@ function normalizeExcludedAgents(value: unknown): string[] {
   return normalized;
 }
 
-function failure(code: string, reason: string, detail: JsonObject = {}): CoordinationTodoClaimResult {
+type CoordinationTodoClaimFailureKind =
+  | "decision_rejection"
+  | "protocol_failure";
+
+function failure(
+  code: string,
+  reason: string,
+  detail: JsonObject = {},
+  kind: CoordinationTodoClaimFailureKind = "protocol_failure",
+): CoordinationTodoClaimResult {
   return {
     ...detail,
     schema_version: COORDINATION_TODO_CLAIM_RESULT_SCHEMA,
     status: "failed",
+    failure_kind: kind,
     reason_code: code,
     reason,
   };
@@ -422,9 +432,12 @@ export async function executeCoordinationTodoClaim(
   }
   const todo = projection.todos.get(input.todo_id);
   if (todo === undefined) {
-    return failure("todo_not_found", "Todo is missing from the canonical provider head", {
-      todo_id: input.todo_id,
-    });
+    return failure(
+      "todo_not_found",
+      "Todo is missing from the canonical provider head",
+      { todo_id: input.todo_id },
+      "decision_rejection",
+    );
   }
 
   let authority: ReturnType<typeof evaluateCoordinationTodoClaimDecision>;
@@ -441,6 +454,7 @@ export async function executeCoordinationTodoClaim(
       typeof authority.reason_code === "string" ? authority.reason_code : "invalid_coordination_todo_claim",
       typeof authority.reason === "string" ? authority.reason : "Todo claim was rejected",
       authority,
+      "decision_rejection",
     );
   }
 
@@ -455,6 +469,7 @@ export async function executeCoordinationTodoClaim(
       "claim_lease_requires_hard_lease",
       "atomic Todo claim and lease acquire requires handoff_mode=hard_lease",
       { todo_id: input.todo_id, handoff_mode: handoffMode },
+      "decision_rejection",
     );
   }
 
@@ -557,14 +572,34 @@ export async function executeCoordinationTodoClaim(
             actor_agent_id: authority.owner,
             lease_decision: decision,
           },
+          "decision_rejection",
         );
       }
     } else if (handoffMode === "hard_lease" &&
         !activeLeaseForOwner(currentLease, authority.owner, input.now)) {
+      const existingVersion = currentLease !== undefined
+        ? (leaseInteger(currentLease, "version") ?? 0)
+        : null;
+      const expectedVersionGuidance = existingVersion !== null
+        ? `; specify --task-lease-expected-version ${existingVersion} to match the existing canonical lease version`
+        : "; provide --task-lease-expected-version if a canonical lease already exists";
       return failure(
         "handoff_mode_requires_lease",
-        "hard_lease Todo claim requires an active canonical lease held by the claiming agent",
-        { todo_id: input.todo_id, actor_agent_id: authority.owner },
+        `hard_lease Todo claim requires an active canonical lease held by the claiming agent; ` +
+          `retry with \`loopx todo claim --task-lease-idempotency-key <key>\`${expectedVersionGuidance}`,
+        {
+          todo_id: input.todo_id,
+          actor_agent_id: authority.owner,
+          handoff_mode: handoffMode,
+          recovery: {
+            command: "loopx todo claim",
+            requires_flags: ["--task-lease-idempotency-key"],
+            optional_flags: ["--task-lease-expected-version"],
+            expected_version: existingVersion,
+            expected_version_required: existingVersion !== null,
+          },
+        },
+        "decision_rejection",
       );
     }
   } catch (error) {

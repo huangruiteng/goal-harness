@@ -43,6 +43,25 @@ class LocalCoordinationAuthorityUnavailable(RuntimeError):
         self.payload = dict(payload)
 
 
+class LocalCoordinationAuthorityRejection(
+    LocalCoordinationAuthorityUnavailable, ValueError
+):
+    """The TypeScript coordination owner definitively rejected a claim.
+
+    The legacy Python kernel raised ``ValueError`` for every claim rejection
+    (todo_not_open, claim_owner_mismatch, unregistered actor, ...).  After
+    promotion those rejections surface as ``status="failed"`` results from the
+    TypeScript transaction owner; re-raising them through this class keeps the
+    legacy ``except ValueError`` contract intact for Python API callers while
+    remaining catchable as an authority outage.  Infrastructure and protocol
+    failures keep raising :class:`LocalCoordinationAuthorityUnavailable`, which
+    is not a ``ValueError``.
+    """
+
+    def __init__(self, message: str, *, code: str, payload: Mapping[str, Any]) -> None:
+        super().__init__(message, code=code, payload=payload)
+
+
 def local_authority_is_promoted(*, runtime_root: Path, goal_id: str) -> bool:
     fence_path = legacy_coordination_writer_fence_path(
         runtime_root=runtime_root,
@@ -94,7 +113,11 @@ def claim_canonical_todo_if_promoted(
             "registered_agents": registered_agent_ids_from_registry(
                 registry_path, goal_id
             ),
-            "operation_id": operation_id if operation_id is not None else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}",
+            "operation_id": (
+                operation_id
+                if operation_id is not None
+                else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}"
+            ),
             "lease_request": (
                 {
                     "idempotency_key": task_lease_idempotency_key,
@@ -116,6 +139,19 @@ def claim_canonical_todo_if_promoted(
         )
     payload = dict(result)
     accepted = {"applied", "recovered", "replayed", "no_change", "planned"}
+    if (
+        payload.get("status") == "failed"
+        and payload.get("failure_kind") == "decision_rejection"
+    ):
+        # The TypeScript owner classifies this failure as a definitive claim
+        # decision. The legacy kernel raised ValueError for the same
+        # rejections, so keep that caller-observable contract; protocol and
+        # storage-integrity failures stay infrastructure outages.
+        raise LocalCoordinationAuthorityRejection(
+            str(payload.get("reason") or "canonical Todo claim was rejected"),
+            code=str(payload.get("reason_code") or "claim_rejected"),
+            payload=payload,
+        )
     if (
         payload.get("status") not in accepted
         or payload.get("source_authority") != "file_v0"
@@ -188,7 +224,9 @@ def read_canonical_todos_if_promoted(
     ):
         raise LocalCoordinationAuthorityUnavailable(
             str(payload.get("reason") or "canonical Todo authority is unavailable"),
-            code=str(payload.get("reason_code") or "local_authority_todo_list_unavailable"),
+            code=str(
+                payload.get("reason_code") or "local_authority_todo_list_unavailable"
+            ),
             payload=payload,
         )
     payload["todos"] = [dict(item) for item in todos]
@@ -206,7 +244,8 @@ def canonical_todo_summary_fields(
     from ..todos.todo_summary import compact_todo_group, count_advancement_todos
 
     native_archived = {
-        item["todo_id"] for item in todos
+        item["todo_id"]
+        for item in todos
         if item.get("schema_version") == TODO_DOMAIN_ITEM_SCHEMA_VERSION
         and item.get("archive_state") == "archive"
     }
@@ -217,12 +256,14 @@ def canonical_todo_summary_fields(
             **item,
             "schema_version": TODO_ITEM_SCHEMA_VERSION,
             "source_section": (
-                "Completed Work Archive" if item["archive_state"] == "archive"
+                "Completed Work Archive"
+                if item["archive_state"] == "archive"
                 else TODO_SECTION_HEADINGS[item["role"]]
             ),
             "index": index,
         }
-        if item.get("schema_version") == TODO_DOMAIN_ITEM_SCHEMA_VERSION else item
+        if item.get("schema_version") == TODO_DOMAIN_ITEM_SCHEMA_VERSION
+        else item
         for index, item in enumerate(todos, 1)
     ]
     fields: dict[str, Any] = {}
@@ -243,10 +284,14 @@ def canonical_todo_summary_fields(
         )
         if summary:
             if role == "agent":
-                archived_done = count_advancement_todos([
-                    item for item in todos
-                    if item.get("todo_id") in native_archived and item.get("done") is True
-                ])
+                archived_done = count_advancement_todos(
+                    [
+                        item
+                        for item in todos
+                        if item.get("todo_id") in native_archived
+                        and item.get("done") is True
+                    ]
+                )
                 if archived_done:
                     summary["archived_advancement_done_count"] = archived_done
                     summary["advancement_done_count"] = (
