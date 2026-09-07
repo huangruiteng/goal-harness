@@ -508,6 +508,7 @@ def test_async_inbox_requires_one_registered_agent(tmp_path: Path) -> None:
 
     assert preview["details"]["capture_scope"] == "configured_chat_all"
     assert preview["details"]["incoming_mode"] == "all"
+    assert preview["details"]["topic_name"] == "Alpha delivery · agent-alpha"
 
 
 @pytest.mark.parametrize("ingress_mode", ["live_steering", "session_queue"])
@@ -531,6 +532,7 @@ def test_session_ingress_modes_require_and_persist_exact_session(
             execute=False,
         )
 
+    state: dict[str, Any] = {}
     connected = connect_lark_goal_topic(
         registry=registry,
         goal_id="goal-alpha",
@@ -542,7 +544,7 @@ def test_session_ingress_modes_require_and_persist_exact_session(
         chat_id=CHAT_ID,
         chat_name="Product group",
         ingress_mode=ingress_mode,
-        runner=_runner({}),
+        runner=_runner(state),
         cli_bin="fake-lark",
     )
 
@@ -552,6 +554,8 @@ def test_session_ingress_modes_require_and_persist_exact_session(
     )
     assert binding is not None
     assert binding["agent_id"] == "agent-alpha"
+    assert binding["topic"]["name"] == "Alpha delivery · agent-alpha"
+    assert "Agent ID: agent-alpha" in state["sent"]["om_topic_alpha"]
     assert binding["session_id"] == "session-alpha"
     assert binding["routing"]["ingress_mode"] == ingress_mode
     assert binding["connector"]["schema_version"] == "agent_external_connector_v0"
@@ -745,6 +749,47 @@ def test_listening_connection_without_received_events_is_not_reply_ready(
     assert rows[0]["listener_status"] == "listening"
     assert rows[0]["reply_ready"] is False
     assert rows[0]["health_error_code"] == "lark_event_delivery_unverified"
+
+
+def test_starting_listener_is_not_presented_as_reply_ready(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    runner = _runner(state)
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connected = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+    assert connected["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=runner,
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "starting",
+                "error_code": None,
+                "event_count": 0,
+                "replied_count": 0,
+                "last_event_status": None,
+            }
+        },
+    )
+
+    assert rows[0]["listener_status"] == "starting"
+    assert rows[0]["reply_ready"] is False
+    assert rows[0]["health_error_code"] == "lark_event_listener_starting"
 
 
 def test_connect_preview_uses_verified_bot_identity_without_user_oauth(

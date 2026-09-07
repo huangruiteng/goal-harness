@@ -132,6 +132,14 @@ the reply relation through message readback before scheduling a reply. Full-chat
 capture is not full-chat activation; unrelated conversation remains available
 to domain interpretation without being treated as addressed to the bot.
 
+Goal Channel connections do not treat a spawned `lark-cli` child as listener
+readiness. The runtime waits for the provider event bus `ready` marker (or a
+real typed event) before projecting `listening`; startup without that handshake
+remains non-ready and retryable. Multi-Agent onboarding creates an
+Agent-labelled Topic for each route. Users send requests inside the matching
+Topic. A group-level message with more than one eligible Agent route is
+deliberately rejected as ambiguous instead of guessing an Agent from prose.
+
 For a periodic-report request, semantic activation belongs to the Agent. After
 reading an exact item, the Agent calls `loopx periodic-report request` with its
 `message_id`. The Lark adapter validates binding and addressing evidence only;

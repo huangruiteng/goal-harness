@@ -7,6 +7,7 @@ import re
 from collections.abc import Mapping
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from enum import Enum
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, ParamSpec, TypeVar
@@ -40,6 +41,32 @@ PRIVATE_PACKET_KEYS = {
 GATE_ACTION_PREFIX = re.compile(
     r"^(?:(?:[-*•]|\d+[.)])\s*)?(?:\[[ xX]\]\s*)?(?:\[P\d+\]\s*)?"
 )
+
+
+class LarkTopicEventDecisionReason(str, Enum):
+    """Typed, content-free outcome of Goal Topic routing."""
+
+    MATCHED = "matched"
+    INVALID_EVENT = "invalid_event"
+    BINDING_UNAVAILABLE = "binding_unavailable"
+    CHAT_MISMATCH = "chat_mismatch"
+    TOPIC_MISMATCH = "topic_mismatch"
+    ROUTE_AMBIGUOUS = "route_ambiguous"
+    SELF_MESSAGE = "self_message"
+    INVALID_ROUTING_STATE = "invalid_routing_state"
+    NOT_ADDRESSED = "not_addressed"
+
+
+LARK_TOPIC_EVENT_REJECTION_REASONS = {
+    item.value
+    for item in LarkTopicEventDecisionReason
+    if item is not LarkTopicEventDecisionReason.MATCHED
+}
+
+
+def normalize_lark_topic_event_rejection_reason(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized if normalized in LARK_TOPIC_EVENT_REJECTION_REASONS else None
 
 
 _P = ParamSpec("_P")

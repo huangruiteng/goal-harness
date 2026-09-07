@@ -37,9 +37,11 @@ from .goal_channel_contracts import (
     bindings_for_goal,
     goal_channel_connection_id,
     GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION,
+    LarkTopicEventDecisionReason,
     goal_from_registry,
     goal_objective,
     now_iso,
+    normalize_lark_topic_event_rejection_reason,
     operation_packet,
     provider_idempotency_key,
     read_goal_channel_binding,
@@ -97,33 +99,9 @@ class ReplyMode(str, Enum):
     TOPIC_REPLY = "topic_reply"
 
 
-class LarkTopicEventDecisionReason(str, Enum):
-    """Typed, content-free outcome of Goal Topic routing."""
-
-    MATCHED = "matched"
-    INVALID_EVENT = "invalid_event"
-    BINDING_UNAVAILABLE = "binding_unavailable"
-    CHAT_MISMATCH = "chat_mismatch"
-    TOPIC_MISMATCH = "topic_mismatch"
-    ROUTE_AMBIGUOUS = "route_ambiguous"
-    SELF_MESSAGE = "self_message"
-    INVALID_ROUTING_STATE = "invalid_routing_state"
-    NOT_ADDRESSED = "not_addressed"
-
-
 CAPTURE_SCOPES = {item.value for item in CaptureScope}
 INGRESS_MODES = {item.value for item in IngressMode}
 REPLY_MODES = {item.value for item in ReplyMode}
-LARK_TOPIC_EVENT_REJECTION_REASONS = {
-    item.value
-    for item in LarkTopicEventDecisionReason
-    if item is not LarkTopicEventDecisionReason.MATCHED
-}
-
-
-def normalize_lark_topic_event_rejection_reason(value: Any) -> str | None:
-    normalized = str(value or "").strip()
-    return normalized if normalized in LARK_TOPIC_EVENT_REJECTION_REASONS else None
 
 
 def _routing_value(
@@ -482,7 +460,14 @@ def connect_lark_goal_topic(
             details={
                 "app_ref": profile,
                 "chat_name": public_safe_compact_text(chat_name, limit=60),
-                "topic_name": goal_objective(goal),
+                "topic_name": public_safe_compact_text(
+                    (
+                        f"{goal_objective(goal)} · {normalized_agent_id}"
+                        if normalized_agent_id
+                        else goal_objective(goal)
+                    ),
+                    limit=120,
+                ),
                 "incoming_mode": effective_incoming_mode,
                 "capture_scope": effective_capture_scope,
                 "ingress_mode": ingress_mode,
@@ -564,7 +549,17 @@ def connect_lark_goal_topic(
         return added
 
     objective = goal_objective(goal)
-    topic_text = f"LoopX Goal Topic: {objective}\nGoal ID: {goal_id}"
+    topic_name = public_safe_compact_text(
+        f"{objective} · {normalized_agent_id}" if normalized_agent_id else objective,
+        limit=120,
+    )
+    topic_text = (
+        f"LoopX Agent Topic: {topic_name}\n"
+        f"Goal ID: {goal_id}\n"
+        f"Agent ID: {normalized_agent_id}"
+        if normalized_agent_id
+        else f"LoopX Goal Topic: {objective}\nGoal ID: {goal_id}"
+    )
     reusable_root = reusable_goal_topic_root(
         read_goal_channel_binding(binding_path),
         goal_id,
@@ -727,7 +722,7 @@ def connect_lark_goal_topic(
             "target_ref": target_name,
             "channel": {"pinned_message_id": root_message_id},
             "topic": {
-                "name": objective,
+                "name": topic_name,
                 "root_message_id": root_message_id,
                 "created_automatically": True,
             },
@@ -757,7 +752,7 @@ def connect_lark_goal_topic(
             "app_ref": profile,
             "chat_name": public_safe_compact_text(chat_name, limit=60),
             "target_ref": target_name,
-            "topic_name": objective,
+            "topic_name": topic_name,
             "incoming_mode": effective_incoming_mode,
             "capture_scope": effective_capture_scope,
             "ingress_mode": ingress_mode,
@@ -833,10 +828,7 @@ def list_lark_connections(
                 else {}
             )
             listener_status = str(listener.get("status") or "")
-            listener_ready = runtime_health is None or listener_status in {
-                "starting",
-                "listening",
-            }
+            listener_ready = runtime_health is None or listener_status == "listening"
             last_event_status = str(listener.get("last_event_status") or "")
             last_event_reason = (
                 normalize_lark_topic_event_rejection_reason(
@@ -888,7 +880,12 @@ def list_lark_connections(
             health_error_code = health.get("error_code")
             if health_error_code is None and not listener_ready:
                 health_error_code = str(
-                    listener.get("error_code") or "lark_event_listener_inactive"
+                    listener.get("error_code")
+                    or (
+                        "lark_event_listener_starting"
+                        if listener_status == "starting"
+                        else "lark_event_listener_inactive"
+                    )
                 )
             if health_error_code is None and event_blocker is not None:
                 health_error_code = event_blocker
