@@ -819,7 +819,7 @@ def test_promoted_hard_lease_claim_cli_atomically_acquires_ownership(
     )
     state_file.unlink()
 
-    command = [
+    base_command = [
         sys.executable,
         "-m",
         "loopx.cli",
@@ -839,6 +839,27 @@ def test_promoted_hard_lease_claim_cli_atomically_acquires_ownership(
         "agent-a",
         "--claim-operation-id",
         "atomic-cli-claim",
+    ]
+    initial_failure = subprocess.run(
+        base_command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert initial_failure.returncode == 1
+    failure_payload = json.loads(initial_failure.stdout)
+    assert failure_payload["ok"] is False
+    assert failure_payload["error_code"] == "handoff_mode_requires_lease"
+    assert failure_payload["handoff_mode"] == "hard_lease"
+    assert "loopx todo claim --task-lease-idempotency-key" in failure_payload["error"]
+    assert "--task-lease-expected-version" in failure_payload["error"]
+    recovery = failure_payload.get("recovery") or {}
+    assert recovery.get("command") == "loopx todo claim"
+    assert recovery.get("requires_flags") == ["--task-lease-idempotency-key"]
+    assert "--task-lease-expected-version" in (recovery.get("optional_flags") or [])
+
+    command = [
+        *base_command,
         "--task-lease-idempotency-key",
         "turn:atomic-cli-claim",
         "--task-lease-expected-version",
@@ -1398,8 +1419,14 @@ def test_hard_lease_eligibility_rejection_is_valueerror(
     assert isinstance(exc_info.value, LocalCoordinationAuthorityRejection)
     assert exc_info.value.code == "handoff_mode_requires_lease"
     assert (
-        str(exc_info.value)
-        == "hard_lease Todo claim requires an active canonical lease held by the claiming agent"
+        "hard_lease Todo claim requires an active canonical lease held by the claiming agent"
+        in str(exc_info.value)
+    )
+    assert "loopx todo claim --task-lease-idempotency-key" in str(exc_info.value)
+    assert "--task-lease-expected-version" in str(exc_info.value)
+    assert (
+        exc_info.value.payload.get("recovery", {}).get("requires_flags")
+        == ["--task-lease-idempotency-key"]
     )
     store_after = json.loads(
         (

@@ -4,6 +4,9 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from ..control_plane.coordination.local_authority import (
+    LocalCoordinationAuthorityRejection,
+)
 from ..control_plane.todos.external_wait_contract import TodoExternalWaitAuthoringError
 from ..control_plane.todos.handoff_mode import HandoffModeError
 from ..control_plane.todos.contract import decision_scope_metadata_value
@@ -43,11 +46,24 @@ def todo_error_payload(args: argparse.Namespace, exc: Exception) -> dict[str, ob
     if isinstance(exc, (TaskLeaseError, HandoffModeError)):
         payload["error_code"] = exc.code
         payload.update(exc.payload)
+    elif isinstance(exc, LocalCoordinationAuthorityRejection):
+        payload["error_code"] = exc.code
+        payload["code"] = exc.code
+        for key, value in exc.payload.items():
+            if key not in {
+                "schema_version",
+                "status",
+                "failure_kind",
+                "reason_code",
+                "reason",
+            }:
+                payload[key] = value
     elif isinstance(exc, TodoExternalWaitAuthoringError):
         payload["error_code"] = exc.code
         if exc.authoring_contract is not None:
             payload["authoring_contract"] = exc.authoring_contract
     return payload
+
 
 def append_todo_rollout_event(
     payload: dict[str, object],

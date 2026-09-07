@@ -926,6 +926,22 @@ test("provider-first Todo claim validates authority and hard-lease ownership", a
     claimed_by: "agent-a",
   });
   assert.equal(missingLease.reason_code, "handoff_mode_requires_lease");
+  assert.match(
+    String(missingLease.reason),
+    /loopx todo claim --task-lease-idempotency-key/,
+  );
+  assert.match(
+    String(missingLease.reason),
+    /--task-lease-expected-version/,
+  );
+  assert.equal(
+    (missingLease.recovery as Record<string, unknown> | undefined)?.command,
+    "loopx todo claim",
+  );
+  assert.deepEqual(
+    (missingLease.recovery as Record<string, unknown> | undefined)?.requires_flags,
+    ["--task-lease-idempotency-key"],
+  );
 
   const dryRun = await claimLocalCoordinationTodo({
     ...base,

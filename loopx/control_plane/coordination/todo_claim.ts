@@ -577,10 +577,28 @@ export async function executeCoordinationTodoClaim(
       }
     } else if (handoffMode === "hard_lease" &&
         !activeLeaseForOwner(currentLease, authority.owner, input.now)) {
+      const existingVersion = currentLease !== undefined
+        ? (leaseInteger(currentLease, "version") ?? 0)
+        : null;
+      const expectedVersionGuidance = existingVersion !== null
+        ? `; specify --task-lease-expected-version ${existingVersion} to match the existing canonical lease version`
+        : "; provide --task-lease-expected-version if a canonical lease already exists";
       return failure(
         "handoff_mode_requires_lease",
-        "hard_lease Todo claim requires an active canonical lease held by the claiming agent",
-        { todo_id: input.todo_id, actor_agent_id: authority.owner },
+        `hard_lease Todo claim requires an active canonical lease held by the claiming agent; ` +
+          `retry with \`loopx todo claim --task-lease-idempotency-key <key>\`${expectedVersionGuidance}`,
+        {
+          todo_id: input.todo_id,
+          actor_agent_id: authority.owner,
+          handoff_mode: handoffMode,
+          recovery: {
+            command: "loopx todo claim",
+            requires_flags: ["--task-lease-idempotency-key"],
+            optional_flags: ["--task-lease-expected-version"],
+            expected_version: existingVersion,
+            expected_version_required: existingVersion !== null,
+          },
+        },
         "decision_rejection",
       );
     }
