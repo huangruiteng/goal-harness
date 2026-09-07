@@ -2273,8 +2273,25 @@ usage booking lock, so concurrent refreshes cannot fund two deltas from one
 stale basis. Replaying the same snapshot identity with an identical
 observation is an idempotent zero delta; the same identity carrying any
 different counter or binding label fails closed instead of silently zeroing
-real usage. A new session starts a fresh absolute observation rather than a
-bogus reset error. Missing optional measurements stay omitted (unknown)
+real usage. The Codex adapter has one bounded legacy-label exception: an
+unmarked same-snapshot baseline can be reconciled only when its old model is
+the final post-snapshot context observed by the first durable booking time.
+The rollout must provide ordered, timezone-aware timestamps, and every
+cumulative metric (including optional-field presence) must still match the
+strict collector. Missing or inconsistent evidence remains a conflict. A
+context appended after first booking cannot justify a historical correction.
+
+The correction appends a zero delta with the same snapshot ID and corrected
+model; it never rewrites old records or totals. New Codex bookings carry a
+`codex_usage_binding` record/index field with schema `codex_usage_binding_v1`,
+`source_snapshot_id`, and `model`; a correction also records `legacy_model`.
+Any existing binding metadata excludes that snapshot from this legacy path.
+Subsequent replays use the corrected baseline and ordinary strict validation.
+Old records contain no producer-version attestation: this exception proves
+consistency with the historical reader's source semantics, not which binary
+wrote the row, and is not a general model-conflict migration mechanism.
+
+A new session starts a fresh absolute observation rather than a bogus reset error. Missing optional measurements stay omitted (unknown)
 rather than zero-filled. Malformed, negative, non-finite (`NaN`/`Infinity`,
 rejected at the typed builder, at the strict-JSON `--usage-json` boundary,
 and again at durable serialization, which forbids non-standard JSON

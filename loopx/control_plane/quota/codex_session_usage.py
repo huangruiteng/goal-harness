@@ -71,6 +71,12 @@ def read_codex_session_usage(rollout_path: Path) -> dict[str, Any]:
     identity (idempotent zero delta) while a grown rollout produces a new
     identity whose delta is taken against the stored previous observation.
     """
+    return _read_codex_session_usage(rollout_path)[0]
+
+
+def _read_codex_session_usage(
+    rollout_path: Path,
+) -> tuple[dict[str, Any], list[tuple[str, str]]]:
     path = Path(rollout_path).expanduser()
     try:
         raw_text = path.read_text(encoding="utf-8")
@@ -85,6 +91,7 @@ def read_codex_session_usage(rollout_path: Path) -> dict[str, Any]:
     last_totals: Mapping[str, Any] | None = None
     last_totals_at = ""
     last_totals_model = ""
+    trailing_models: list[tuple[str, str]] = []
     lines = [
         (number, text)
         for number, text in enumerate(raw_text.splitlines(), start=1)
@@ -119,6 +126,8 @@ def read_codex_session_usage(rollout_path: Path) -> dict[str, Any]:
             model_text = str(payload.get("model") or "").strip()
             if model_text:
                 model = model_text
+                if last_totals is not None:
+                    trailing_models.append((str(item.get("timestamp") or ""), model))
         elif kind == "event_msg" and str(payload.get("type") or "") == "token_count":
             raw_info = payload.get("info")
             info = raw_info if isinstance(raw_info, dict) else {}
@@ -130,6 +139,7 @@ def read_codex_session_usage(rollout_path: Path) -> dict[str, Any]:
                 # observed before the token_count event. A later turn_context
                 # must not relabel an unchanged snapshot on replay.
                 last_totals_model = model
+                trailing_models.clear()
 
     if not session_id:
         raise CodexSessionUsageError(
@@ -163,7 +173,7 @@ def read_codex_session_usage(rollout_path: Path) -> dict[str, Any]:
     }
     if duration_ms is not None:
         observation["duration_ms"] = duration_ms
-    return observation
+    return observation, trailing_models
 
 
 def usage_booking_lock_target(runs_dir: Path) -> Path:
@@ -184,15 +194,60 @@ def book_codex_session_usage(
     Callers must hold the usage booking lock across this call and the run row
     append it funds, so concurrent bookings serialize on one basis.
     """
-    observation = read_codex_session_usage(rollout_path)
+    observation, trailing_models = _read_codex_session_usage(rollout_path)
+    baseline = session_usage_baseline(index_path, str(observation["session_id"]))
+    binding = {
+        "schema_version": "codex_usage_binding_v1",
+        "source_snapshot_id": observation["source_snapshot_id"],
+        "model": observation["model"],
+    }
+    if (
+        baseline is not None
+        and baseline["source_snapshot_id"] == observation["source_snapshot_id"]
+        and not baseline["binding_recorded"]
+        and baseline["model"] != observation["model"]
+        and baseline["model"] == _legacy_model_at_booking(
+            trailing_models, baseline["snapshot_first_booked_at"],
+            observation["source_snapshot_id"].removeprefix(
+                f"codex:{observation['session_id']}:"
+            ),
+        )
+    ):
+        # Reconcile only a label reproduced by the old reader at first booking.
+        # The shared collector still validates every counter and optional field.
+        binding["legacy_model"] = baseline["model"]
+        baseline = {**baseline, "model": observation["model"]}
     ingest_usage_into_run_record(
         record,
         {key: value for key, value in observation.items() if key != "session_id"},
-        previous_snapshot=session_usage_baseline(
-            index_path, str(observation.get("session_id") or "")
-        ),
+        previous_snapshot=baseline,
         index_record=index_record,
     )
+    record["codex_usage_binding"] = binding
+    if index_record is not None:
+        index_record["codex_usage_binding"] = dict(binding)
+
+
+def _legacy_model_at_booking(
+    trailing_models: list[tuple[str, str]], booked_at: Any, snapshot_at: str,
+) -> str | None:
+    """Reproduce the old final-context label using only pre-booking evidence."""
+    booked = _parse_timestamp(booked_at)
+    snapshot = _parse_timestamp(snapshot_at)
+    if booked is None or snapshot is None or booked.tzinfo is None or snapshot.tzinfo is None:
+        return None
+    if booked < snapshot:
+        return None
+    model = None
+    previous = snapshot
+    for timestamp, label in trailing_models:
+        observed = _parse_timestamp(timestamp)
+        if observed is None or observed.tzinfo is None or observed <= previous:
+            return None
+        previous = observed
+        if observed <= booked:
+            model = label
+    return model
 
 
 def session_usage_baseline(
@@ -225,6 +280,8 @@ def session_usage_baseline(
     int_totals: dict[str, int | None] = {field: None for field in _BASELINE_INT_FIELDS}
     cost_total: float | None = None
     last_usage: Mapping[str, Any] | None = None
+    snapshot_first_booked_at: Any = None
+    binding_recorded = False
     seen_rows: set[tuple[str, str, str]] = set()
     for line_number, line in enumerate(raw.splitlines(), start=1):
         line = line.strip()
@@ -269,11 +326,19 @@ def session_usage_baseline(
         cost = usage.get("cost_usd")
         if cost is not None:
             cost_total = (cost_total or 0.0) + cast(float, cost)
+        if last_usage is None or last_usage["source_snapshot_id"] != usage["source_snapshot_id"]:
+            snapshot_first_booked_at = row.get("generated_at")
+            binding_recorded = False
+        # Unknown or malformed binding metadata is not evidence of an old
+        # producer either; any marker keeps this snapshot on the strict path.
+        binding_recorded = binding_recorded or "codex_usage_binding" in row
         last_usage = usage
     if last_usage is None:
         return None
     return {
         "session_id": sid,
+        "snapshot_first_booked_at": snapshot_first_booked_at,
+        "binding_recorded": binding_recorded,
         "source_snapshot_id": str(last_usage.get("source_snapshot_id") or ""),
         "input_tokens": int_totals["input_tokens"],
         "output_tokens": int_totals["output_tokens"],
