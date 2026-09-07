@@ -8,11 +8,19 @@
   </head>
   <body>
     <main aria-busy="true" aria-live="polite" data-state="loading" role="status">
-      <header><span aria-hidden="true" class="mark">L</span><h1>LoopX</h1></header>
-      <p id="status">正在启动本地控制面…</p>
-      <div aria-hidden="true" class="progress"></div>
-      <p>启动较慢时仍会自动重试；不会自动升级安装包。</p>
-      <details>
+      <section class="startup-stage" aria-labelledby="startup-title">
+        <header>
+          <span aria-hidden="true" class="mark">L</span>
+          <h1 id="startup-title">LoopX</h1>
+        </header>
+        <p class="status-line">
+          <span id="status">正在启动本地控制面</span>
+          <span aria-hidden="true" class="status-dots"><i></i><i></i><i></i></span>
+        </p>
+        <div aria-hidden="true" class="progress"></div>
+        <p class="boot-note">启动较慢时仍会自动重试；不会自动升级安装包。</p>
+      </section>
+      <details class="recovery">
         <summary>恢复与更新 / Recovery & updates</summary>
         <p>重新连接不会执行任务。更新 App 与匹配的运行时可能短暂重启服务。</p>
         <button id="retry" type="button">重新加载 / Reload</button>
