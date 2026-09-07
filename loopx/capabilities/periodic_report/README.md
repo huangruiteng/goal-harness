@@ -113,6 +113,11 @@ validated stage boundaries. The selected extension, runtime capability,
 configured route, sender identity, and exact readback must still pass their
 own fail-closed gates.
 
+An explicit Goal override is authoritative and must be complete; LoopX never
+fills its missing fields from machine defaults. `plan-goal-delivery` reports an
+invalid override with a typed field list, its configuration source, and the
+choice to complete or clear the override. This diagnostic path is read-only.
+
 The capability is intentionally effect-free. It first evaluates scheduled or
 material progress facts into a deterministic trigger receipt, then composes a
 run with stable run and sink idempotency, typed source snapshots, artifact and
