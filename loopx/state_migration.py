@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import copy
+from contextlib import ExitStack
 import json
+import hashlib
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .global_registry import write_json
+from .registry import atomic_write_json as write_json, find_registry_goal
+from .file_lock import exclusive_cross_runtime_file_lock
+from .paths import resolve_runtime_root
+from .control_plane.todos.active_state_editing import atomic_write_state_text
+from .control_plane.coordination.legacy_writer_fence import legacy_coordination_todo_lock_path, require_legacy_state_replacement_allowed
+from .control_plane.work_items.task_lease import task_lease_lock_path
 from .registry import registry_goals
 from .control_plane.coordination.coordination_state_contract_generated import (
     LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA as AUTHORITY_SHADOW_CONFIG_SCHEMA,
@@ -129,7 +136,7 @@ def copy_rewritten_text_file(source: Path, target: Path, *, goal_id_map: dict[st
     except UnicodeDecodeError:
         shutil.copy2(source, target)
         return
-    target.write_text(rewrite_text(text, goal_id_map=goal_id_map, path_map=path_map), encoding="utf-8")
+    atomic_write_state_text(target, rewrite_text(text, goal_id_map=goal_id_map, path_map=path_map))
 
 
 def copy_active_state_files(
@@ -293,9 +300,7 @@ def seed_migrated_authority_shadows(
             )
             continue
         try:
-            from .control_plane.coordination.local_authority_shadow_adapter import (
-                observe_local_authority_commit,
-            )
+            from .control_plane.coordination.local_authority_shadow_observation import observe_local_authority_commit
 
             result = observe_local_authority_commit(
                 registry_path=target_registry_path,
@@ -339,85 +344,114 @@ def migrate_legacy_state(
     if not legacy_registry_path.exists():
         raise FileNotFoundError(f"legacy registry does not exist: {legacy_registry_path}")
 
-    source_registry = read_json_object(legacy_registry_path)
-    source_by_id = {str(goal.get("id")): goal for goal in registry_goals(source_registry)}
-    missing = [goal_id for goal_id in goal_ids if goal_id not in source_by_id]
-    if missing:
-        raise ValueError(f"goal id not found in legacy registry: {', '.join(missing)}")
+    with ExitStack() as locks:
+        if execute:
+            for path in sorted({legacy_registry_path.resolve(), target_registry_path.resolve()}, key=str):
+                locks.enter_context(exclusive_cross_runtime_file_lock(path, operation="state_migration_registry"))
+        source_registry = read_json_object(legacy_registry_path)
+        source_by_id = {str(goal.get("id")): goal for goal in registry_goals(source_registry)}
+        missing = [goal_id for goal_id in goal_ids if goal_id not in source_by_id]
+        if missing:
+            raise ValueError(f"goal id not found in legacy registry: {', '.join(missing)}")
 
-    selected_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    for old_goal_id in goal_ids:
-        source_goal = source_by_id[old_goal_id]
-        migrated = rewrite_value(source_goal, goal_id_map=goal_id_map, path_map=path_map)
-        if not isinstance(migrated, dict):
-            raise ValueError(f"migrated goal is not an object: {old_goal_id}")
-        migrated["id"] = goal_id_map.get(old_goal_id, str(migrated.get("id") or old_goal_id))
-        selected_pairs.append((source_goal, project_local_goal(migrated)))
+        selected_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for old_goal_id in goal_ids:
+            source_goal = source_by_id[old_goal_id]
+            migrated = rewrite_value(source_goal, goal_id_map=goal_id_map, path_map=path_map)
+            if not isinstance(migrated, dict):
+                raise ValueError(f"migrated goal is not an object: {old_goal_id}")
+            migrated["id"] = goal_id_map.get(old_goal_id, str(migrated.get("id") or old_goal_id))
+            selected_pairs.append((source_goal, project_local_goal(migrated)))
 
-    existing_registry = read_json_object(target_registry_path) if target_registry_path.exists() else {}
-    existing_goals = existing_registry.get("goals")
-    if not isinstance(existing_goals, list):
-        existing_goals = []
-    incoming_goals = [target for _, target in selected_pairs]
-    target_payload = dict(existing_registry)
-    target_payload["schema_version"] = str(target_payload.get("schema_version") or source_registry.get("schema_version") or "0.1")
-    target_payload["updated_at"] = now_local()
-    target_payload["common_runtime_root"] = str(target_runtime_root)
-    target_payload.pop("registry_role", None)
-    target_payload["goals"] = merge_goals(existing_goals, incoming_goals)
+        existing_registry = read_json_object(target_registry_path) if target_registry_path.exists() else {}
+        existing_goals = existing_registry.get("goals")
+        if not isinstance(existing_goals, list):
+            existing_goals = []
+        incoming_goals = [target for _, target in selected_pairs]
+        target_payload = dict(existing_registry)
+        target_payload["schema_version"] = str(target_payload.get("schema_version") or source_registry.get("schema_version") or "0.1")
+        target_payload["updated_at"] = now_local()
+        target_payload["common_runtime_root"] = str(target_runtime_root)
+        target_payload.pop("registry_role", None)
+        target_payload["goals"] = merge_goals(existing_goals, incoming_goals)
 
-    active_state_results = (
-        copy_active_state_files(
-            selected_pairs,
-            goal_id_map=goal_id_map,
-            path_map=path_map,
-            execute=execute,
+        if execute:
+            endpoints: dict[tuple[str, str], tuple[Path, str, dict[str, Any] | None, Path | None]] = {}
+            for source_goal, target_goal in selected_pairs:
+                old_id, new_id = str(source_goal["id"]), str(target_goal["id"])
+                endpoints[(str(legacy_runtime_root.resolve()), old_id)] = (legacy_runtime_root, old_id, source_goal, resolve_goal_state(source_goal.get("repo"), source_goal.get("state_file")))
+                endpoints[(str(target_runtime_root.resolve()), new_id)] = (target_runtime_root, new_id, find_registry_goal(existing_registry, new_id), resolve_goal_state(target_goal.get("repo"), target_goal.get("state_file")))
+            ordered = [endpoints[key] for key in sorted(endpoints)]
+            for root, identity, _goal, _state in ordered:
+                locks.enter_context(exclusive_cross_runtime_file_lock(legacy_coordination_todo_lock_path(runtime_root=root, goal_id=identity), operation="state_migration_todo"))
+            for state_path in sorted({entry[3].resolve() for entry in ordered if entry[3] is not None}, key=str):
+                locks.enter_context(exclusive_cross_runtime_file_lock(state_path, operation="state_migration_state"))
+            if copy_runtime:
+                for root, identity, _goal, _state in ordered:
+                    digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
+                    target = root / "authority-transition" / "file-v0" / f"legacy-task-lease-writer-{digest}"
+                    locks.enter_context(exclusive_cross_runtime_file_lock(target, operation="state_migration_leases"))
+                for root, identity, _goal, _state in ordered:
+                    locks.enter_context(exclusive_cross_runtime_file_lock(task_lease_lock_path(runtime_root=root, goal_id=identity), operation="state_migration_leases"))
+            for root, identity, goal, _state in ordered:
+                require_legacy_state_replacement_allowed(runtime_root=root, goal_id=identity, goal=goal)
+            previous_root = resolve_runtime_root(existing_registry, None, registry_path=target_registry_path)
+            if previous_root != target_runtime_root:
+                for previous_goal in registry_goals(existing_registry):
+                    require_legacy_state_replacement_allowed(runtime_root=previous_root, goal_id=str(previous_goal["id"]), goal=previous_goal)
+
+        active_state_results = (
+            copy_active_state_files(
+                selected_pairs,
+                goal_id_map=goal_id_map,
+                path_map=path_map,
+                execute=execute,
+            )
+            if copy_active_state
+            else []
         )
-        if copy_active_state
-        else []
-    )
-    runtime_results = (
-        copy_runtime_goal_dirs(
-            legacy_runtime_root=legacy_runtime_root,
+        runtime_results = (
+            copy_runtime_goal_dirs(
+                legacy_runtime_root=legacy_runtime_root,
+                target_runtime_root=target_runtime_root,
+                goal_id_map=goal_id_map,
+                selected_old_goal_ids=goal_ids,
+                path_map=path_map,
+                execute=execute,
+            )
+            if copy_runtime
+            else []
+        )
+
+        if execute:
+            write_json(target_registry_path, target_payload)
+
+        authority_shadow_seeds = seed_migrated_authority_shadows(
+            goals=incoming_goals,
+            target_registry_path=target_registry_path,
             target_runtime_root=target_runtime_root,
-            goal_id_map=goal_id_map,
-            selected_old_goal_ids=goal_ids,
-            path_map=path_map,
             execute=execute,
         )
-        if copy_runtime
-        else []
-    )
 
-    if execute:
-        write_json(target_registry_path, target_payload)
-
-    authority_shadow_seeds = seed_migrated_authority_shadows(
-        goals=incoming_goals,
-        target_registry_path=target_registry_path,
-        target_runtime_root=target_runtime_root,
-        execute=execute,
-    )
-
-    return {
-        "ok": True,
-        "schema_version": "loopx_state_migration_v0",
-        "dry_run": not execute,
-        "execute": execute,
-        "legacy_registry": str(legacy_registry_path),
-        "target_registry": str(target_registry_path),
-        "legacy_runtime_root": str(legacy_runtime_root),
-        "target_runtime_root": str(target_runtime_root),
-        "selected_goal_ids": goal_ids,
-        "migrated_goal_ids": [goal.get("id") for goal in incoming_goals],
-        "goal_id_map": goal_id_map,
-        "path_map": path_map,
-        "wrote_project_registry": execute,
-        "project_registry_goal_count": len(target_payload.get("goals", [])),
-        "active_state": active_state_results,
-        "runtime_goals": runtime_results,
-        "authority_shadow_seeds": authority_shadow_seeds,
-    }
+        return {
+            "ok": True,
+            "schema_version": "loopx_state_migration_v0",
+            "dry_run": not execute,
+            "execute": execute,
+            "legacy_registry": str(legacy_registry_path),
+            "target_registry": str(target_registry_path),
+            "legacy_runtime_root": str(legacy_runtime_root),
+            "target_runtime_root": str(target_runtime_root),
+            "selected_goal_ids": goal_ids,
+            "migrated_goal_ids": [goal.get("id") for goal in incoming_goals],
+            "goal_id_map": goal_id_map,
+            "path_map": path_map,
+            "wrote_project_registry": execute,
+            "project_registry_goal_count": len(target_payload.get("goals", [])),
+            "active_state": active_state_results,
+            "runtime_goals": runtime_results,
+            "authority_shadow_seeds": authority_shadow_seeds,
+        }
 
 
 def render_state_migration_markdown(payload: dict[str, Any]) -> str:

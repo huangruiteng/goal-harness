@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 
 import type { JsonObject } from "../effect_program.ts";
 import { atomicWriteJson, withFileMutationLock } from "../effect_runtime_io.ts";
 import { requireJsonObject } from "../runtime_decode.ts";
+import { readShadowBootstrapSourcePath, requireShadowPrimaryWriteAllowed, ShadowManagementError, shadowMaintenanceLockPath } from "./shadow_management.ts";
+import { legacyCoordinationTodoLockPath, legacyCoordinationLeaseLockPath, taskLeaseLockPath } from "./legacy_writer_lock_paths.ts";
+export { legacyCoordinationTodoLockPath, legacyCoordinationLeaseLockPath,
+  LEGACY_COORDINATION_TODO_LOCK_KEY, LEGACY_COORDINATION_LEASE_LOCK_KEY } from "./legacy_writer_lock_paths.ts";
+
 import {
   canonicalAuthorityBytes,
   canonicalAuthorityObject,
@@ -25,8 +30,28 @@ export {
   LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
   LEGACY_COORDINATION_WRITE_CHECK_RESULT_SCHEMA,
 };
-export const LEGACY_COORDINATION_TODO_LOCK_KEY = "legacy-todo-writer";
-export const LEGACY_COORDINATION_LEASE_LOCK_KEY = "legacy-task-lease-writer";
+
+export class LegacyCoordinationWriteError extends Error {
+  code: string;
+  payload: JsonObject;
+  constructor(code: string, payload: JsonObject) {
+    super(String(payload.reason ?? "legacy coordination writer is fenced"));
+    this.code = code;
+    this.payload = payload;
+  }
+}
+
+/** Call under the existing primary lock, before receipts, capture or bytes. */
+export async function requireLegacyCoordinationPrimaryWriteAllowed(root: string, goalId: string): Promise<void> {
+  await requireShadowPrimaryWriteAllowed(root, goalId);
+  const guard = await checkLegacyCoordinationWriteAllowed({
+    schema_version: LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+    runtime_root: root, goal_id: goalId,
+  });
+  if (guard.status !== "allowed") {
+    throw new LegacyCoordinationWriteError(String(guard.reason_code ?? "legacy_writer_fence_check_failed"), guard);
+  }
+}
 
 function runtimeRoot(value: unknown): string {
   if (typeof value !== "string" || value.trim() !== value || !isAbsolute(value)) {
@@ -38,16 +63,6 @@ function runtimeRoot(value: unknown): string {
 export function legacyCoordinationWriterFencePath(root: string, goalId: string): string {
   const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
   return join(root, "authority-transition", "file-v0", `legacy-writer-fence-${digest}.json`);
-}
-
-export function legacyCoordinationTodoLockPath(root: string, goalId: string): string {
-  const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
-  return join(root, "authority-transition", "file-v0", `legacy-todo-writer-${digest}`);
-}
-
-export function legacyCoordinationLeaseLockPath(root: string, goalId: string): string {
-  const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
-  return join(root, "authority-transition", "file-v0", `legacy-task-lease-writer-${digest}`);
 }
 
 export function decodeLegacyCoordinationWriterFence(value: unknown): JsonObject {
@@ -108,45 +123,65 @@ export async function engageLegacyCoordinationWriterFence(value: unknown): Promi
     }
     const root = runtimeRoot(input.runtime_root);
     const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    if (typeof input.state_path !== "string" || input.state_path.trim() !== input.state_path
+        || !isAbsolute(input.state_path) || input.state_path.includes("\0")) {
+      throw new Error("state_path must be the absolute source state file path");
+    }
+    const statePath = await realpath(input.state_path);
+    if (!(await stat(statePath)).isFile()) throw new Error("state_path must identify an existing source state file");
     const fence = decodeLegacyCoordinationWriterFence(input.fence);
     if (fence.goal_id !== goalId) throw new Error("legacy writer fence goal mismatch");
     const path = legacyCoordinationWriterFencePath(root, goalId);
-    return await withFileMutationLock(path, async () => {
-      const existing = await loadLegacyCoordinationWriterFence(root, goalId);
-      if (existing.status === "loaded") {
-        const matched = canonicalAuthorityBytes(existing.fence).equals(
-          canonicalAuthorityBytes(fence),
-        );
-        return {
-          schema_version: LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
-          status: matched ? "replayed" : "conflict",
-          ...(matched ? { fence } : {
-            reason_code: "legacy_writer_fence_identity_mismatch",
-            reason: "a different legacy writer fence is already engaged",
-          }),
-        };
+    return await withFileMutationLock(shadowMaintenanceLockPath(root, goalId), async () => {
+      const binding = await requireShadowPrimaryWriteAllowed(root, goalId);
+      if (binding !== null && await realpath(await readShadowBootstrapSourcePath(root, goalId, binding)) !== statePath) {
+        throw new ShadowManagementError("shadow_source_state_path_mismatch");
       }
-      if (existing.status === "failed") return {
-        schema_version: LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
-        ...existing,
-      };
-      await atomicWriteJson(path, fence);
-      const readback = await loadLegacyCoordinationWriterFence(root, goalId);
-      if (
-        readback.status !== "loaded" ||
-        !canonicalAuthorityBytes(readback.fence).equals(canonicalAuthorityBytes(fence))
-      ) throw new Error("legacy writer fence readback mismatch");
-      return {
-        schema_version: LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
-        status: "applied",
-        fence,
-      };
+      return withFileMutationLock(legacyCoordinationTodoLockPath(root, goalId), () =>
+        withFileMutationLock(statePath, () =>
+          withFileMutationLock(legacyCoordinationLeaseLockPath(root, goalId), () =>
+            withFileMutationLock(taskLeaseLockPath({runtime_root: root, goal_id: goalId}), () =>
+              withFileMutationLock(path, async () => {
+                const existing = await loadLegacyCoordinationWriterFence(root, goalId);
+                if (existing.status === "loaded") {
+                  const matched = canonicalAuthorityBytes(existing.fence).equals(
+                    canonicalAuthorityBytes(fence),
+                  );
+                  return {
+                    schema_version: LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
+                    status: matched ? "replayed" : "conflict",
+                    ...(matched ? { fence } : {
+                      reason_code: "legacy_writer_fence_identity_mismatch",
+                      reason: "a different legacy writer fence is already engaged",
+                  }),
+                };
+              }
+              if (existing.status === "failed") return {
+                schema_version: LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
+                ...existing,
+              };
+              await atomicWriteJson(path, fence);
+              const readback = await loadLegacyCoordinationWriterFence(root, goalId);
+              if (
+                readback.status !== "loaded" ||
+                !canonicalAuthorityBytes(readback.fence).equals(canonicalAuthorityBytes(fence))
+              ) throw new Error("legacy writer fence readback mismatch");
+              return {
+                schema_version: LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
+                status: "applied",
+                fence,
+              };
+              }),
+            ),
+          ),
+        ),
+      );
     });
   } catch (error) {
     return {
       schema_version: LEGACY_COORDINATION_WRITER_FENCE_RESULT_SCHEMA,
       status: "failed",
-      reason_code: "invalid_legacy_writer_fence_request",
+      reason_code: error instanceof ShadowManagementError ? error.reason_code : "invalid_legacy_writer_fence_request",
       reason: error instanceof Error ? error.message : "invalid writer fence request",
     };
   }

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
 from loopx.cli_commands import todo as todo_command
 from loopx.cli_commands import task_lease as task_lease_command
-from loopx.control_plane import effect_runtime
 from loopx.control_plane.coordination.runtime_shadow import (
     RUNTIME_SHADOW_BOOTSTRAP_METHOD,
     RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION,
@@ -506,319 +504,24 @@ def test_todo_projection_rejects_unversioned_machine_owned_fields() -> None:
         )
 
 
-def test_committed_todo_hook_has_no_default_output_or_runtime_call(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(
-        todo_command,
-        "load_registry",
-        lambda _path: {"goals": [{"id": "goal-a"}]},
-    )
-
-    def unexpected(*_args, **_kwargs):
-        raise AssertionError("default-off hook must not build or dispatch")
-
-    monkeypatch.setattr(todo_command, "list_goal_todos", unexpected)
-    monkeypatch.setattr(
-        todo_command, "dispatch_coordination_runtime_shadow", unexpected
-    )
-    result = todo_command._mirror_committed_todo_runtime_shadow(
-        {
-            "ok": True,
-            "dry_run": False,
-            "changed": True,
-            "updated_at": "2026-09-03T07:00:00+08:00",
-            "rollout_event": {"event_id": "event-a"},
-        },
-        args=Namespace(
-            goal_id="goal-a",
-            todo_command="update",
-            project=None,
-            state_file=None,
-        ),
-        registry_path=tmp_path / "registry.json",
-        runtime_root_arg=None,
-    )
-
-    assert result is None
 
 
-def test_committed_todo_hook_dispatches_after_explicit_opt_in(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    goal = {
-        "id": "goal-a",
-        "coordination": {
-            "runtime_shadow": {
-                "enabled": True,
-                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
-                "provider": "file_v0",
-            }
-        },
-    }
-    monkeypatch.setattr(
-        todo_command,
-        "load_registry",
-        lambda _path: {"goals": [goal]},
-    )
-    monkeypatch.setattr(todo_command, "resolve_runtime_root", lambda *_args: tmp_path)
-    monkeypatch.setattr(
-        todo_command,
-        "list_goal_todos",
-        lambda **_kwargs: {"todos": [_canonical_todo(status="done")]},
-    )
-    captured: dict[str, object] = {}
-
-    def dispatch(**kwargs):
-        captured.update(kwargs)
-        return {"status": "applied"}
-
-    monkeypatch.setattr(todo_command, "dispatch_coordination_runtime_shadow", dispatch)
-    result = todo_command._mirror_committed_todo_runtime_shadow(
-        {
-            "ok": True,
-            "dry_run": False,
-            "changed": True,
-            "updated_at": "2026-09-03T07:00:00+08:00",
-            "rollout_event": {"event_id": "event-a"},
-        },
-        args=Namespace(
-            goal_id="goal-a",
-            todo_command="complete",
-            project=None,
-            state_file=None,
-        ),
-        registry_path=tmp_path / "registry.json",
-        runtime_root_arg=None,
-    )
-
-    assert result == {"status": "applied"}
-    assert captured["operation_id"] == "todo-shadow:event-a"
-    assert captured["event_kind"] == "todo_complete"
-    assert captured["projection"]["todos"] == [_canonical_todo(status="done")]
 
 
-def test_committed_todo_hook_reaches_the_file_shadow_through_typescript(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    goal = {
-        "id": "goal-a",
-        "coordination": {
-            "runtime_shadow": {
-                "enabled": True,
-                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
-                "provider": "file_v0",
-            }
-        },
-    }
-    monkeypatch.setattr(
-        todo_command,
-        "load_registry",
-        lambda _path: {"goals": [goal]},
-    )
-    monkeypatch.setattr(
-        todo_command,
-        "resolve_runtime_root",
-        lambda *_args: tmp_path / "state",
-    )
-    monkeypatch.setattr(
-        todo_command,
-        "list_goal_todos",
-        lambda **_kwargs: {
-            "todos": [_canonical_todo(claimed_by="agent-a")]
-        },
-    )
-    monkeypatch.setattr(
-        effect_runtime,
-        "_runtime_dir",
-        lambda: tmp_path / "effect-runtime",
-    )
-
-    try:
-        result = todo_command._mirror_committed_todo_runtime_shadow(
-            {
-                "ok": True,
-                "dry_run": False,
-                "changed": True,
-                "updated_at": "2026-09-03T07:30:00+08:00",
-                "rollout_event": {"event_id": "event-real-runtime"},
-            },
-            args=Namespace(
-                goal_id="goal-a",
-                todo_command="claim",
-                project=None,
-                state_file=None,
-            ),
-            registry_path=tmp_path / "registry.json",
-            runtime_root_arg=None,
-        )
-    finally:
-        effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
-
-    assert result is not None
-    assert result["status"] == "applied"
-    assert result["decision_read_from_shadow"] is False
-    assert result["parity"]["receipt_matches"] is True
-    assert result["parity"]["projection_readback"]["verified"] is True
 
 
-def test_runtime_shadow_inspection_reaches_file_store_through_typescript(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    goal = {
-        "id": "goal-a",
-        "coordination": {
-            "runtime_shadow": {
-                "enabled": True,
-                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
-                "provider": "file_v0",
-            }
-        },
-    }
-    projection = build_todo_runtime_shadow_projection(
-        goal_id="goal-a",
-        todos=[
-            {
-                "schema_version": "todo_item_v0",
-                "todo_id": "todo_one",
-                "role": "agent",
-                "status": "open",
-                "done": False,
-                "text": "qualify",
-                "archive_state": "active",
-                "source_section": "Agent Todo",
-            }
-        ],
-    )
-    runtime_root = tmp_path / "state"
-    monkeypatch.setattr(
-        effect_runtime,
-        "_runtime_dir",
-        lambda: tmp_path / "effect-runtime",
-    )
-
-    try:
-        before = inspect_coordination_runtime_shadow(
-            goal=goal,
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            projection=projection,
-        )
-        applied = dispatch_coordination_runtime_shadow(
-            goal=goal,
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            operation_id="todo-shadow:event-inspect",
-            event_kind="todo_update",
-            source_version="state:1",
-            projection=projection,
-        )
-        after = inspect_coordination_runtime_shadow(
-            goal=goal,
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            projection=projection,
-        )
-    finally:
-        effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
-
-    assert before["status"] == "missing"
-    assert before["bootstrap_required"] is True
-    assert applied["status"] == "applied"
-    assert after["status"] == "matched"
-    assert after["parity_matches"] is True
-    assert after["decision_read_from_shadow"] is False
 
 
-def test_runtime_shadow_qualification_reaches_file_store_through_typescript(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    goal = {
-        "id": "goal-a",
-        "coordination": {
-            "runtime_shadow": {
-                "enabled": True,
-                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
-                "provider": "file_v0",
-            }
-        },
-    }
-    projection = build_todo_runtime_shadow_projection(
-        goal_id="goal-a",
-        todos=[
-            {
-                "schema_version": "todo_item_v0",
-                "todo_id": "todo_one",
-                "role": "agent",
-                "status": "open",
-                "done": False,
-                "text": "qualify",
-                "archive_state": "active",
-                "source_section": "Agent Todo",
-            }
-        ],
-    )
-    runtime_root = tmp_path / "state"
-    monkeypatch.setattr(
-        effect_runtime,
-        "_runtime_dir",
-        lambda: tmp_path / "effect-runtime",
-    )
-
-    try:
-        bootstrap = bootstrap_coordination_runtime_shadow(
-            goal=goal,
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            operation_id="bootstrap:goal-a:state-0",
-            source_version="state:0",
-            projection=projection,
-        )
-        for index, event_kind in enumerate(
-            ("todo_claim", "task_lease_acquire", "todo_complete"),
-            start=1,
-        ):
-            result = dispatch_coordination_runtime_shadow(
-                goal=goal,
-                runtime_root=runtime_root,
-                goal_id="goal-a",
-                operation_id=f"shadow:goal-a:{index}",
-                event_kind=event_kind,
-                source_version=f"state:{index}",
-                projection=projection,
-            )
-            assert result["status"] == "applied"
-        qualified = qualify_coordination_runtime_shadow(
-            goal=goal,
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            projection=projection,
-            minimum_operations=3,
-            required_event_kinds=["todo_claim", "task_lease_acquire"],
-        )
-    finally:
-        effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
-
-    assert bootstrap["status"] == "applied"
-    assert qualified["status"] == "qualified"
-    assert qualified["qualified"] is True
-    assert qualified["evidence"]["operation_count"] == 3
-    assert qualified["decision_read_from_shadow"] is False
 
 
-def test_lease_projection_reads_compact_terminal_records(tmp_path: Path) -> None:
+def test_lease_projection_preserves_complete_terminal_record(tmp_path: Path) -> None:
     lease_dir = tmp_path / "goals" / "goal-a" / "task-leases"
     lease_dir.mkdir(parents=True)
     (lease_dir / "todo_b.json").write_text(
         '{"schema_version":"task_lease_v0","goal_id":"goal-a",'
         '"todo_id":"todo_b","owner":"agent-a","version":2,'
         '"lease_epoch":1,"status":"released","released_at":"later",'
-        '"idempotency_key":"must-not-enter-projection"}',
+        '"idempotency_key":"retained-identity"}',
         encoding="utf-8",
     )
 
@@ -829,6 +532,9 @@ def test_lease_projection_reads_compact_terminal_records(tmp_path: Path) -> None
 
     assert records == [
         {
+            "schema_version": "task_lease_v0",
+            "goal_id": "goal-a",
+            "idempotency_key": "retained-identity",
             "todo_id": "todo_b",
             "owner": "agent-a",
             "version": 2,
@@ -839,151 +545,10 @@ def test_lease_projection_reads_compact_terminal_records(tmp_path: Path) -> None
     ]
 
 
-def test_committed_task_lease_hook_dispatches_full_coordination_snapshot(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    goal = {
-        "id": "goal-a",
-        "coordination": {
-            "runtime_shadow": {
-                "enabled": True,
-                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
-                "provider": "file_v0",
-            }
-        },
-    }
-    monkeypatch.setattr(
-        task_lease_command,
-        "load_registry",
-        lambda _path: {"goals": [goal]},
-    )
-    monkeypatch.setattr(
-        task_lease_command,
-        "list_goal_todos",
-        lambda **_kwargs: {"todos": [_canonical_todo()]},
-    )
-    monkeypatch.setattr(
-        task_lease_command,
-        "load_task_lease_runtime_shadow_records",
-        lambda **_kwargs: [
-            {
-                "todo_id": "todo_one",
-                "owner": "agent-a",
-                "version": 1,
-                "lease_epoch": 1,
-                "status": "active",
-            }
-        ],
-    )
-    captured: dict[str, object] = {}
-
-    def dispatch(**kwargs):
-        captured.update(kwargs)
-        return {"status": "applied"}
-
-    monkeypatch.setattr(
-        task_lease_command,
-        "dispatch_coordination_runtime_shadow",
-        dispatch,
-    )
-    result = task_lease_command._mirror_committed_task_lease_runtime_shadow(
-        {
-            "ok": True,
-            "lease": {
-                "todo_id": "todo_one",
-                "updated_at": "2026-09-03T07:05:00Z",
-            },
-        },
-        args=Namespace(
-            goal_id="goal-a",
-            todo_id="todo_one",
-            task_lease_command="acquire",
-            idempotency_key="acquire-1",
-        ),
-        registry_path=tmp_path / "registry.json",
-        runtime_root_arg=None,
-        runtime_root=tmp_path,
-    )
-
-    assert result == {"status": "applied"}
-    assert captured["operation_id"] == (
-        "task-lease-shadow:acquire:goal-a:todo_one:acquire-1"
-    )
-    assert captured["event_kind"] == "task_lease_acquire"
-    assert captured["projection"]["leases"] == [
-        {
-            "todo_id": "todo_one",
-            "owner": "agent-a",
-            "version": 1,
-            "lease_epoch": 1,
-            "status": "active",
-        }
-    ]
 
 
-def test_committed_task_lease_hook_reaches_file_shadow_through_typescript(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    goal = {
-        "id": "goal-a",
-        "coordination": {
-            "runtime_shadow": {
-                "enabled": True,
-                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
-                "provider": "file_v0",
-            }
-        },
-    }
-    monkeypatch.setattr(
-        task_lease_command,
-        "load_registry",
-        lambda _path: {"goals": [goal]},
-    )
-    monkeypatch.setattr(
-        task_lease_command,
-        "list_goal_todos",
-        lambda **_kwargs: {"todos": [_canonical_todo()]},
-    )
-    lease_dir = tmp_path / "state" / "goals" / "goal-a" / "task-leases"
-    lease_dir.mkdir(parents=True)
-    (lease_dir / "todo_one.json").write_text(
-        '{"todo_id":"todo_one","owner":"agent-a","version":1,'
-        '"lease_epoch":1,"updated_at":"2026-09-03T07:35:00Z",'
-        '"status":"active"}',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        effect_runtime,
-        "_runtime_dir",
-        lambda: tmp_path / "effect-runtime",
-    )
 
-    try:
-        result = task_lease_command._mirror_committed_task_lease_runtime_shadow(
-            {
-                "ok": True,
-                "lease": {
-                    "todo_id": "todo_one",
-                    "updated_at": "2026-09-03T07:35:00Z",
-                },
-            },
-            args=Namespace(
-                goal_id="goal-a",
-                todo_id="todo_one",
-                task_lease_command="acquire",
-                idempotency_key="lease-real-runtime",
-            ),
-            registry_path=tmp_path / "registry.json",
-            runtime_root_arg=None,
-            runtime_root=tmp_path / "state",
-        )
-    finally:
-        effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 
-    assert result is not None
-    assert result["status"] == "applied"
-    assert result["decision_read_from_shadow"] is False
-    assert result["parity"]["receipt_matches"] is True
-    assert result["parity"]["projection_readback"]["verified"] is True
+def test_retired_cli_observers_cannot_overwrite_transaction_evidence() -> None:
+    assert not hasattr(todo_command, "_mirror_committed_todo_runtime_shadow")
+    assert not hasattr(task_lease_command, "_mirror_committed_task_lease_runtime_shadow")

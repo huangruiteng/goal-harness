@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+from ..coordination.legacy_writer_fence import legacy_todo_write_transaction, require_legacy_coordination_write_allowed
+from ..coordination.shadow_management import require_shadow_primary_write_allowed
+from ..coordination.local_authority_shadow_adapter import effective_runtime_root
+
 import hashlib
 import re
 from pathlib import Path
@@ -249,6 +254,8 @@ def event_projection_todo_context(
         "goal": goal,
         "fields": fields,
         "event_log_path": event_log_path,
+        "registry_path": registry_path,
+        "state_path": state_path,
         "role": matched_role,
         "item": matched_item,
         "raw_item": raw_item or matched_item,
@@ -460,253 +467,266 @@ def complete_event_projected_goal_todo(
     completion_fence: dict[str, Any] | None = None,
     completion_state: Mapping[str, Any] | None = None,
     completion_validation_source_authority: dict[str, Any] | None = None,
+    runtime_root: Path | None = None,
+    primary_lock_held: bool = False,
 ) -> dict[str, Any]:
-    item = dict(context["item"])
-    role = str(context["role"])
-    todo_id = normalize_todo_id(item.get("todo_id"))
-    if not todo_id:
-        raise ValueError("event-projected todo has no stable todo_id")
-    if not event_projection_source_matches(
-        context,
-        completion_validation_source_authority,
-    ):
-        return _completion_validation_source_drift_failure(
-            goal_id=goal_id,
-            todo_id=todo_id,
-            dry_run=dry_run,
-        )
-    if clear_claim and item.get("claimed_by"):
-        item.pop("claimed_by", None)
-    effective_claimed_by = claimed_by or normalize_todo_claimed_by(item.get("claimed_by"))
-    store = AppendOnlyStateEventStore(Path(context["event_log_path"]))
-    if completion_fence is None or completion_state is None:
-        transaction = reduce_todo_completion_transaction(
-            todo=item,
-            projection_source="event_log",
-            completion_turn_key=completion_turn_key,
-            no_followup=no_followup,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            completion_identity_source=completion_identity_source,
-            requested_has_successor=bool(
-                normalize_todo_id_list(successor_todo_ids)
-                or normalize_todo_id_list(item.get("successor_todo_ids"))
-                or next_agent_todo
-                or next_user_todo
-            ),
-            dry_run=dry_run,
-        )
-        if transaction["decision"] in {"execute_validation", "reject"}:
-            raise RuntimeError(
-                "event-projected Todo completion validation must run through "
-                "the completion gate"
+    registry_path = Path(context["registry_path"])
+    state_path = Path(context["state_path"])
+    root = runtime_root or effective_runtime_root(registry_path, None)
+    transaction = nullcontext() if primary_lock_held else legacy_todo_write_transaction(
+        registry_path, goal_id, state_path, actor_agent_id, "todo_event_complete",
+        dry_run, runtime_root=root,
+    )
+    with transaction:
+        if not dry_run:
+            require_shadow_primary_write_allowed(root, goal_id)
+            require_legacy_coordination_write_allowed(runtime_root=root, goal_id=goal_id)
+        item = dict(context["item"])
+        role = str(context["role"])
+        todo_id = normalize_todo_id(item.get("todo_id"))
+        if not todo_id:
+            raise ValueError("event-projected todo has no stable todo_id")
+        if not event_projection_source_matches(
+            context,
+            completion_validation_source_authority,
+        ):
+            return _completion_validation_source_drift_failure(
+                goal_id=goal_id,
+                todo_id=todo_id,
+                dry_run=dry_run,
             )
-        completion_fence = dict(transaction["fence"])
-        candidate_state = transaction.get("completion_state")
-        completion_state = (
-            dict(candidate_state)
-            if isinstance(candidate_state, Mapping)
-            else None
+        if clear_claim and item.get("claimed_by"):
+            item.pop("claimed_by", None)
+        effective_claimed_by = claimed_by or normalize_todo_claimed_by(item.get("claimed_by"))
+        store = AppendOnlyStateEventStore(Path(context["event_log_path"]))
+        if completion_fence is None or completion_state is None:
+            transaction = reduce_todo_completion_transaction(
+                todo=item,
+                projection_source="event_log",
+                completion_turn_key=completion_turn_key,
+                no_followup=no_followup,
+                goal_id=goal_id,
+                todo_id=todo_id,
+                completion_identity_source=completion_identity_source,
+                requested_has_successor=bool(
+                    normalize_todo_id_list(successor_todo_ids)
+                    or normalize_todo_id_list(item.get("successor_todo_ids"))
+                    or next_agent_todo
+                    or next_user_todo
+                ),
+                dry_run=dry_run,
+            )
+            if transaction["decision"] in {"execute_validation", "reject"}:
+                raise RuntimeError(
+                    "event-projected Todo completion validation must run through "
+                    "the completion gate"
+                )
+            completion_fence = dict(transaction["fence"])
+            candidate_state = transaction.get("completion_state")
+            completion_state = (
+                dict(candidate_state)
+                if isinstance(candidate_state, Mapping)
+                else None
+            )
+        already_done = bool(completion_fence["terminal_before_request"])
+        terminal_upgrade = completion_fence["reason"] in {
+            "same_turn_terminal_upgrade",
+            "lifecycle_reentry_terminal_upgrade",
+        }
+        untyped_completion_repair = (
+            completion_fence["reason"] == "untyped_completion_repair"
         )
-    already_done = bool(completion_fence["terminal_before_request"])
-    terminal_upgrade = completion_fence["reason"] in {
-        "same_turn_terminal_upgrade",
-        "lifecycle_reentry_terminal_upgrade",
-    }
-    untyped_completion_repair = (
-        completion_fence["reason"] == "untyped_completion_repair"
-    )
-    unscoped_identity_repair = (
-        completion_fence["reason"] == "unscoped_completion_identity_repair"
-    )
-    if completion_fence["outcome"] == "replay":
-        return {
+        unscoped_identity_repair = (
+            completion_fence["reason"] == "unscoped_completion_identity_repair"
+        )
+        if completion_fence["outcome"] == "replay":
+            return {
+                "ok": True,
+                "dry_run": dry_run,
+                "completed": True,
+                "idempotent_replay": True,
+                "changed": False,
+                "goal_id": goal_id,
+                "role": role,
+                "section": TODO_SECTION_HEADINGS[role],
+                "todo": item.get("text") or item.get("title"),
+                "todo_id": todo_id,
+                "status": TODO_STATUS_DONE,
+                "completion_continuation": completion_fence.get(
+                    "completion_continuation"
+                ),
+                "completion_recovery": item.get("completion_recovery"),
+                "status_changed": False,
+                "next_todos": [],
+                "state_file": str(context.get("state_file") or ""),
+                "project": str(context.get("project") or "") or None,
+                "updated_at": item.get("updated_at"),
+                "source": "event_log",
+            }
+        next_unblocks_todo_id = todo_id if next_agent_todo else None
+        next_user_bound_agent = effective_claimed_by
+        if next_user_todo and len(registered_agents) > 1:
+            if not next_user_bound_agent:
+                raise ValueError(
+                    "multi-agent --next-user-todo requires a completing --claimed-by "
+                    "agent so the user todo can be bound"
+                )
+
+        next_results: list[dict[str, Any]] = []
+        if next_agent_todo:
+            next_results.append(
+                _append_event_projected_successor(
+                    store=store,
+                    goal_id=goal_id,
+                    role="agent",
+                    text=inherit_todo_priority(next_agent_todo, str(item.get("text") or "")),
+                    updated_at=updated_at,
+                    fields=context["fields"],
+                    task_class=next_task_class or "advancement_task",
+                    action_kind=next_action_kind,
+                    capability_binding_ref=item.get("capability_binding_ref"),
+                    task_repository=next_task_repository,
+                    required_capabilities=next_required_capabilities,
+                    continuation_policy=next_continuation_policy,
+                    claimed_by=next_claimed_by,
+                    excluded_agents=next_excluded_agents,
+                    unblocks_todo_id=next_unblocks_todo_id,
+                    dry_run=dry_run,
+                    actor_agent_id=actor_agent_id,
+                )
+            )
+        if next_user_todo:
+            next_results.append(
+                _append_event_projected_successor(
+                    store=store,
+                    goal_id=goal_id,
+                    role="user",
+                    text=inherit_todo_priority(next_user_todo, str(item.get("text") or "")),
+                    updated_at=updated_at,
+                    fields=context["fields"],
+                    task_class=next_user_task_class,
+                    action_kind=(
+                        "gate" if next_user_task_class == TODO_TASK_CLASS_USER_GATE else None
+                    ),
+                    capability_binding_ref=None,
+                    task_repository=None,
+                    required_capabilities=None,
+                    continuation_policy=None,
+                    claimed_by=None,
+                    bound_agent=next_user_bound_agent,
+                    blocks_agent=(
+                        next_user_bound_agent
+                        if next_user_task_class == TODO_TASK_CLASS_USER_GATE
+                        else None
+                    ),
+                    unblocks_todo_id=None,
+                    dry_run=dry_run,
+                    actor_agent_id=actor_agent_id,
+                )
+            )
+
+        normalized_successor_todo_ids = merge_todo_id_lists(
+            successor_todo_ids,
+            [item.get("todo_id") for item in next_results],
+            normalize_todo_id_list(item.get("successor_todo_ids")),
+        )
+        if not isinstance(completion_state, Mapping):
+            raise RuntimeError(
+                "event-projected Todo completion requires the TypeScript "
+                "transaction state"
+            )
+        completion_continuation = completion_state.get("continuation")
+        completion_recovery = completion_state.get("recovery")
+        if completion_continuation not in {
+            "active_goal",
+            "successor",
+            "no_followup",
+        } or completion_recovery not in {
+            None,
+            "same_turn_terminal_closeout",
+            "lifecycle_reentry_terminal_closeout",
+        }:
+            raise RuntimeError(
+                "TypeScript Todo completion transaction state shape mismatch"
+            )
+        completion_payload: dict[str, Any] = {"updated_at": updated_at}
+        completion_payload["completion_continuation"] = completion_continuation
+        if completion_recovery:
+            completion_payload["completion_recovery"] = completion_recovery
+        if not already_done:
+            completion_payload["completed_at"] = updated_at
+        if evidence:
+            completion_payload["evidence"] = evidence
+        if completion_turn_key:
+            completion_payload["completion_turn_key"] = completion_turn_key
+        if note:
+            completion_payload["note"] = note
+        if no_followup:
+            completion_payload["no_followup"] = "true"
+        if normalized_successor_todo_ids:
+            completion_payload["successor_todo_ids"] = normalized_successor_todo_ids
+        completion_event = make_state_event(
+            event_id=_todo_write_event_id(
+                goal_id=goal_id,
+                todo_id=todo_id,
+                action="complete",
+                updated_at=updated_at,
+                text=evidence or note,
+            ),
+            goal_id=goal_id,
+            event_type=TODO_COMPLETED,
+            refs={"todo_id": todo_id},
+            payload=completion_payload,
+            recorded_at=updated_at,
+            producer="loopx.todo.complete",
+            actor_agent_id=actor_agent_id,
+        )
+        if (
+            not already_done
+            or terminal_upgrade
+            or untyped_completion_repair
+            or unscoped_identity_repair
+        ) and not dry_run:
+            store.append(completion_event)
+
+        result = {
             "ok": True,
             "dry_run": dry_run,
             "completed": True,
-            "idempotent_replay": True,
-            "changed": False,
             "goal_id": goal_id,
             "role": role,
             "section": TODO_SECTION_HEADINGS[role],
             "todo": item.get("text") or item.get("title"),
             "todo_id": todo_id,
             "status": TODO_STATUS_DONE,
-            "completion_continuation": completion_fence.get(
-                "completion_continuation"
+            "status_changed": not already_done,
+            "text_changed": False,
+            "metadata_updated": (
+                (not already_done)
+                or terminal_upgrade
+                or untyped_completion_repair
+                or unscoped_identity_repair
             ),
-            "completion_recovery": item.get("completion_recovery"),
-            "status_changed": False,
-            "next_todos": [],
+            "changed": (
+                (not already_done)
+                or terminal_upgrade
+                or untyped_completion_repair
+                or unscoped_identity_repair
+                or bool(next_results)
+            ),
+            "claimed_by": normalize_todo_claimed_by(effective_claimed_by),
+            "task_class": item.get("task_class"),
+            "action_kind": item.get("action_kind"),
+            "capability_binding_ref": item.get("capability_binding_ref"),
+            "continuation_policy": item.get("continuation_policy"),
+            "successor_todo_ids": normalized_successor_todo_ids,
+            "completion_continuation": completion_continuation,
+            "completion_recovery": completion_recovery,
+            "next_todos": next_results,
             "state_file": str(context.get("state_file") or ""),
             "project": str(context.get("project") or "") or None,
-            "updated_at": item.get("updated_at"),
+            "updated_at": updated_at,
             "source": "event_log",
         }
-    next_unblocks_todo_id = todo_id if next_agent_todo else None
-    next_user_bound_agent = effective_claimed_by
-    if next_user_todo and len(registered_agents) > 1:
-        if not next_user_bound_agent:
-            raise ValueError(
-                "multi-agent --next-user-todo requires a completing --claimed-by "
-                "agent so the user todo can be bound"
-            )
-
-    next_results: list[dict[str, Any]] = []
-    if next_agent_todo:
-        next_results.append(
-            _append_event_projected_successor(
-                store=store,
-                goal_id=goal_id,
-                role="agent",
-                text=inherit_todo_priority(next_agent_todo, str(item.get("text") or "")),
-                updated_at=updated_at,
-                fields=context["fields"],
-                task_class=next_task_class or "advancement_task",
-                action_kind=next_action_kind,
-                capability_binding_ref=item.get("capability_binding_ref"),
-                task_repository=next_task_repository,
-                required_capabilities=next_required_capabilities,
-                continuation_policy=next_continuation_policy,
-                claimed_by=next_claimed_by,
-                excluded_agents=next_excluded_agents,
-                unblocks_todo_id=next_unblocks_todo_id,
-                dry_run=dry_run,
-                actor_agent_id=actor_agent_id,
-            )
-        )
-    if next_user_todo:
-        next_results.append(
-            _append_event_projected_successor(
-                store=store,
-                goal_id=goal_id,
-                role="user",
-                text=inherit_todo_priority(next_user_todo, str(item.get("text") or "")),
-                updated_at=updated_at,
-                fields=context["fields"],
-                task_class=next_user_task_class,
-                action_kind=(
-                    "gate" if next_user_task_class == TODO_TASK_CLASS_USER_GATE else None
-                ),
-                capability_binding_ref=None,
-                task_repository=None,
-                required_capabilities=None,
-                continuation_policy=None,
-                claimed_by=None,
-                bound_agent=next_user_bound_agent,
-                blocks_agent=(
-                    next_user_bound_agent
-                    if next_user_task_class == TODO_TASK_CLASS_USER_GATE
-                    else None
-                ),
-                unblocks_todo_id=None,
-                dry_run=dry_run,
-                actor_agent_id=actor_agent_id,
-            )
-        )
-
-    normalized_successor_todo_ids = merge_todo_id_lists(
-        successor_todo_ids,
-        [item.get("todo_id") for item in next_results],
-        normalize_todo_id_list(item.get("successor_todo_ids")),
-    )
-    if not isinstance(completion_state, Mapping):
-        raise RuntimeError(
-            "event-projected Todo completion requires the TypeScript "
-            "transaction state"
-        )
-    completion_continuation = completion_state.get("continuation")
-    completion_recovery = completion_state.get("recovery")
-    if completion_continuation not in {
-        "active_goal",
-        "successor",
-        "no_followup",
-    } or completion_recovery not in {
-        None,
-        "same_turn_terminal_closeout",
-        "lifecycle_reentry_terminal_closeout",
-    }:
-        raise RuntimeError(
-            "TypeScript Todo completion transaction state shape mismatch"
-        )
-    completion_payload: dict[str, Any] = {"updated_at": updated_at}
-    completion_payload["completion_continuation"] = completion_continuation
-    if completion_recovery:
-        completion_payload["completion_recovery"] = completion_recovery
-    if not already_done:
-        completion_payload["completed_at"] = updated_at
-    if evidence:
-        completion_payload["evidence"] = evidence
-    if completion_turn_key:
-        completion_payload["completion_turn_key"] = completion_turn_key
-    if note:
-        completion_payload["note"] = note
-    if no_followup:
-        completion_payload["no_followup"] = "true"
-    if normalized_successor_todo_ids:
-        completion_payload["successor_todo_ids"] = normalized_successor_todo_ids
-    completion_event = make_state_event(
-        event_id=_todo_write_event_id(
-            goal_id=goal_id,
-            todo_id=todo_id,
-            action="complete",
-            updated_at=updated_at,
-            text=evidence or note,
-        ),
-        goal_id=goal_id,
-        event_type=TODO_COMPLETED,
-        refs={"todo_id": todo_id},
-        payload=completion_payload,
-        recorded_at=updated_at,
-        producer="loopx.todo.complete",
-        actor_agent_id=actor_agent_id,
-    )
-    if (
-        not already_done
-        or terminal_upgrade
-        or untyped_completion_repair
-        or unscoped_identity_repair
-    ) and not dry_run:
-        store.append(completion_event)
-
-    result = {
-        "ok": True,
-        "dry_run": dry_run,
-        "completed": True,
-        "goal_id": goal_id,
-        "role": role,
-        "section": TODO_SECTION_HEADINGS[role],
-        "todo": item.get("text") or item.get("title"),
-        "todo_id": todo_id,
-        "status": TODO_STATUS_DONE,
-        "status_changed": not already_done,
-        "text_changed": False,
-        "metadata_updated": (
-            (not already_done)
-            or terminal_upgrade
-            or untyped_completion_repair
-            or unscoped_identity_repair
-        ),
-        "changed": (
-            (not already_done)
-            or terminal_upgrade
-            or untyped_completion_repair
-            or unscoped_identity_repair
-            or bool(next_results)
-        ),
-        "claimed_by": normalize_todo_claimed_by(effective_claimed_by),
-        "task_class": item.get("task_class"),
-        "action_kind": item.get("action_kind"),
-        "capability_binding_ref": item.get("capability_binding_ref"),
-        "continuation_policy": item.get("continuation_policy"),
-        "successor_todo_ids": normalized_successor_todo_ids,
-        "completion_continuation": completion_continuation,
-        "completion_recovery": completion_recovery,
-        "next_todos": next_results,
-        "state_file": str(context.get("state_file") or ""),
-        "project": str(context.get("project") or "") or None,
-        "updated_at": updated_at,
-        "source": "event_log",
-    }
-    result["self_merged"] = self_merged
-    return result
+        result["self_merged"] = self_merged
+        return result

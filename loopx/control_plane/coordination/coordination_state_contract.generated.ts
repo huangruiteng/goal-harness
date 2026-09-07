@@ -38,17 +38,21 @@ export const LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA = "loopx_local_authority_shad
 export const LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA = "loopx_local_authority_shadow_projection_v0";
 export const LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA = "loopx_local_authority_shadow_evidence_v0";
 export const LOCAL_AUTHORITY_SHADOW_OBSERVATION_RECEIPT_SCHEMA = "loopx_local_authority_shadow_observation_receipt_v0";
-export const LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA = "loopx_local_authority_shadow_outbox_entry_v0";
-export const LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA = "loopx_local_authority_shadow_outbox_commit_v0";
+export const LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA = "loopx_local_authority_shadow_outbox_entry_v1";
+export const LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA = "loopx_local_authority_shadow_outbox_commit_v1";
 export const LOCAL_AUTHORITY_SHADOW_DRAIN_CURSOR_SCHEMA = "loopx_local_authority_shadow_drain_cursor_v0";
 export const LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA = "loopx_coordination_runtime_shadow_projection_v0";
-export const LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA = "loopx_coordination_runtime_shadow_commit_entry_request_v0";
+export const LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA = "loopx_coordination_runtime_shadow_commit_entry_request_v1";
 export const LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_RESULT_SCHEMA = "loopx_coordination_runtime_shadow_commit_entry_result_v0";
 export const LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA = "loopx_coordination_runtime_shadow_outbox_read_v0";
 export const LOCAL_AUTHORITY_SHADOW_READ_RESULT_SCHEMA = "loopx_coordination_runtime_shadow_outbox_read_result_v0";
-export const LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA = "loopx_coordination_runtime_shadow_outbox_event_v0";
-export const LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA = "loopx_coordination_runtime_shadow_outbox_receipt_v0";
+export const LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA = "loopx_coordination_runtime_shadow_outbox_event_v1";
+export const LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA = "loopx_coordination_runtime_shadow_outbox_receipt_v1";
 export const LOCAL_AUTHORITY_SHADOW_TRANSACTION_EVIDENCE_SCHEMA = "loopx_local_authority_shadow_evidence_v1";
+
+export const SHADOW_MANAGEMENT_STATE_SCHEMA = "loopx_shadow_management_state_v1";
+export const SHADOW_MANAGEMENT_MANIFEST_SCHEMA = "loopx_shadow_management_manifest_v1";
+export const SHADOW_OUTBOX_MANIFEST_SCHEMA = "loopx_shadow_outbox_manifest_v1";
 
 export const LEGACY_COORDINATION_WRITER_FENCE_SCHEMA = "loopx_legacy_coordination_writer_fence_v0";
 export const LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA = "loopx_legacy_coordination_writer_fence_engage_request_v0";
@@ -253,6 +257,11 @@ export const COORDINATION_STATE_CONTRACT = deepFreeze({
     "event_schema": LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA,
     "transaction_receipt_schema": LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA,
     "transaction_evidence_schema": LOCAL_AUTHORITY_SHADOW_TRANSACTION_EVIDENCE_SCHEMA
+  },
+  "shadow_management_protocol": {
+    "state_schema": SHADOW_MANAGEMENT_STATE_SCHEMA,
+    "manifest_schema": SHADOW_MANAGEMENT_MANIFEST_SCHEMA,
+    "outbox_manifest_schema": SHADOW_OUTBOX_MANIFEST_SCHEMA
   },
   "legacy_writer_fence_protocol": {
     "fence_schema": LEGACY_COORDINATION_WRITER_FENCE_SCHEMA,

@@ -33,10 +33,7 @@ from loopx.control_plane.coordination.coordination_state_contract_generated impo
     LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
 )
 from loopx.control_plane.turn_driver import delivery_continuity
-from loopx.control_plane.coordination.local_authority_shadow_adapter import (
-    LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA as BRIDGE_SHADOW_EVIDENCE_SCHEMA,
-    LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA as BRIDGE_SHADOW_REQUEST_SCHEMA,
-)
+from loopx.control_plane.coordination.local_authority_shadow_observation import LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA as BRIDGE_SHADOW_EVIDENCE_SCHEMA, LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA as BRIDGE_SHADOW_REQUEST_SCHEMA
 from loopx.control_plane.coordination.local_authority_shadow_outbox import (
     OUTBOX_ENTRY_SCHEMA,
 )

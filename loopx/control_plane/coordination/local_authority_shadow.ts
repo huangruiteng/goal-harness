@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 import type { JsonObject } from "../effect_program.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
+import { withFileMutationLock } from "../effect_runtime_io.ts";
 import {
   requireInteger,
   requireJsonObject,
@@ -16,11 +18,15 @@ import type {
   AuthorityStoreLoadResult,
   AuthorityStoreReceiptResult,
 } from "./authority_store.ts";
-import { authorityUnicodeCompare, canonicalAuthorityBytes } from "./authority_store_codec.ts";
+import { authorityUnicodeCompare, canonicalAuthorityBytes, canonicalAuthoritySha256 } from "./authority_store_codec.ts";
 import {
   TODO_CANONICAL_READ_RECORD_FIELDS,
+  validateCoordinationTodoReadModel,
 } from "./coordination_projection.ts";
 import { FileAuthorityStore } from "./file_authority_store.ts";
+import { requireShadowCaptureBinding, withShadowMaintenanceLock, readShadowBootstrapSourcePath } from "./shadow_management.ts";
+import { outboxEntryIdentity, OUTBOX_ENTRY_FILE_PATTERN } from "./local_authority_shadow_identity.ts";
+import { legacyCoordinationTodoLockPath, taskLeaseLockPath } from "./legacy_writer_lock_paths.ts";
 import {
   LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_REQUEST_SCHEMA,
   LOCAL_AUTHORITY_SHADOW_COMMIT_ENTRY_RESULT_SCHEMA,
@@ -33,6 +39,8 @@ import {
   LOCAL_AUTHORITY_SHADOW_REQUEST_SCHEMA,
   LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA,
   LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA,
+  LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA,
 } from "./coordination_state_contract.generated.ts";
 
 export {
@@ -385,6 +393,8 @@ const COMMIT_ENTRY_REQUEST_FIELDS = new Set([
   "partition_digest",
 ]);
 const ENTRY_FIELDS = new Set([
+  "prepared_sha256", "committed_sha256",
+  "capture_lineage_id",
   "entry_id",
   "partition",
   "seq",
@@ -396,6 +406,7 @@ const ENTRY_FIELDS = new Set([
   "resolution",
 ]);
 const READ_REQUEST_FIELDS = new Set([
+  "receipt_operation_id",
   "schema_version",
   "runtime_root",
   "goal_id",
@@ -405,7 +416,7 @@ const READ_REQUEST_FIELDS = new Set([
 ]);
 const ENTRY_ID_PATTERN = /^local-shadow-tx-[0-9a-f]{64}$/u;
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
-const MAX_SCAN_LIMIT = 1000;
+const MAX_SCAN_LIMIT = 10000;
 const REVISION_RETRY_ATTEMPTS = 3;
 
 export type ShadowPartition = (typeof SHADOW_PARTITIONS)[number];
@@ -427,6 +438,7 @@ interface ShadowEntryWriter {
 }
 
 interface ShadowEntrySource {
+  previous_partition_digest: string;
   kind: (typeof SOURCE_KINDS)[number];
   previous_bytes_digest: string | null;
   bytes_digest: string | null;
@@ -435,6 +447,9 @@ interface ShadowEntrySource {
 }
 
 interface ShadowEntry {
+  prepared_sha256: string;
+  committed_sha256: string | null;
+  capture_lineage_id: string;
   entry_id: string;
   partition: ShadowPartition;
   seq: number;
@@ -470,6 +485,7 @@ export interface LocalAuthorityShadowCommitEntryResult extends JsonObject {
 }
 
 interface ReadRequest {
+  receipt_operation_id: string | null;
   runtime_root: string;
   goal_id: string;
   store_kind: "runtime_shadow" | "legacy_observation";
@@ -527,10 +543,15 @@ function decodeEntry(value: unknown): ShadowEntry {
   }
   const writer = requireJsonObject(raw.writer, "entry.writer");
   const source = requireJsonObject(raw.source, "entry.source");
+  rejectUnexpectedFields(writer, new Set(["runtime", "write_class", "operation_id"]), "entry.writer");
+  rejectUnexpectedFields(source, new Set(["kind", "previous_bytes_digest", "previous_partition_digest", "bytes_digest", "lease", "event_id"]), "entry.source");
   const lease = source.lease === null || source.lease === undefined
     ? null
     : requireJsonObject(source.lease, "entry.source.lease");
   return {
+    prepared_sha256: optionalDigest(raw.prepared_sha256, "entry.prepared_sha256") ?? (() => { throw new Error("prepared_sha256 is required"); })(),
+    committed_sha256: optionalDigest(raw.committed_sha256, "entry.committed_sha256"),
+    capture_lineage_id: requireNonEmptyString(raw.capture_lineage_id, "entry.capture_lineage_id"),
     entry_id: entryId,
     partition: requireStringLiteral(raw.partition, SHADOW_PARTITIONS, "entry.partition"),
     seq,
@@ -540,6 +561,8 @@ function decodeEntry(value: unknown): ShadowEntry {
       operation_id: optionalString(writer.operation_id, "entry.writer.operation_id"),
     },
     source: {
+      previous_partition_digest: optionalDigest(source.previous_partition_digest, "entry.source.previous_partition_digest") ??
+        (() => { throw new Error("previous_partition_digest is required"); })(),
       kind: requireStringLiteral(source.kind, SOURCE_KINDS, "entry.source.kind"),
       previous_bytes_digest: optionalDigest(
         source.previous_bytes_digest,
@@ -624,6 +647,7 @@ function decodeReadRequest(value: unknown): ReadRequest {
     throw new EffectRuntimeRequestError(`scan_limit must be between 0 and ${MAX_SCAN_LIMIT}`);
   }
   return {
+    receipt_operation_id: optionalString(request.receipt_operation_id, "receipt_operation_id"),
     runtime_root: requireNonEmptyString(request.runtime_root, "runtime_root"),
     goal_id: requireGoalId(request.goal_id),
     store_kind: request.store_kind === undefined || request.store_kind === "runtime_shadow"
@@ -676,6 +700,9 @@ function todoReadModel(todos: readonly JsonObject[]): JsonObject {
 /**
  * Fold one partition into the candidate head. A v0 head (whole-snapshot
  * observation) is accepted as the starting point with no partition markers.
+ * Markers describe the last actual mutation, not the last settled entry. Both
+ * drain and qualification read this verified marker for the cursor digest;
+ * bootstrap and no-op prefixes retain null, even with a nonempty baseline.
  */
 export function composeLocalAuthorityShadowHead(
   current: JsonObject | null,
@@ -707,6 +734,11 @@ export function composeLocalAuthorityShadowHead(
     leases,
     todo_read_model: todoReadModel(todos),
     partitions,
+    ...(base.capture_profile === undefined ? {} : {
+      capture_profile: base.capture_profile,
+      capture_lineage_id: base.capture_lineage_id,
+      source_root_digest: base.source_root_digest,
+    }),
   };
   return next;
 }
@@ -715,6 +747,9 @@ function transactionReceipt(request: CommitEntryRequest, noOp: boolean): JsonObj
   const { entry } = request;
   return {
     schema_version: LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA,
+    prepared_sha256: entry.prepared_sha256,
+    committed_sha256: entry.committed_sha256,
+    capture_lineage_id: entry.capture_lineage_id,
     entry_id: entry.entry_id,
     partition: entry.partition,
     seq: entry.seq,
@@ -724,6 +759,7 @@ function transactionReceipt(request: CommitEntryRequest, noOp: boolean): JsonObj
     source_kind: entry.source.kind,
     source_bytes_digest: entry.source.bytes_digest,
     source_previous_bytes_digest: entry.source.previous_bytes_digest,
+    source_previous_partition_digest: entry.source.previous_partition_digest,
     source_event_id: entry.source.event_id,
     source_lease: entry.source.lease,
     source_root_digest: entry.source_root_digest,
@@ -750,12 +786,16 @@ function transactionEvent(request: CommitEntryRequest, noOp: boolean): JsonObjec
   else if (entry.resolution === "unproved") kind = "source_transaction_unproved";
   return {
     schema_version: LOCAL_AUTHORITY_SHADOW_EVENT_SCHEMA_V1,
+    prepared_sha256: entry.prepared_sha256,
+    committed_sha256: entry.committed_sha256,
+    capture_lineage_id: entry.capture_lineage_id,
     kind,
     partition: entry.partition,
     seq: entry.seq,
     entry_id: entry.entry_id,
     write_class: entry.writer.write_class,
     partition_digest: request.partition_digest,
+    previous_partition_digest: entry.source.previous_partition_digest,
     no_op: noOp,
   };
 }
@@ -777,6 +817,7 @@ function commitEntryResult(
     reason_code: options.reasonCode ?? null,
     goal_id: request.goal_id,
     entry_id: request.entry.entry_id,
+    capture_lineage_id: request.entry.capture_lineage_id,
     partition: request.entry.partition,
     seq: request.entry.seq,
     no_op: NO_OP_RESOLUTIONS.has(request.entry.resolution),
@@ -791,16 +832,13 @@ function transactionReceiptMatches(
   request: CommitEntryRequest,
   result: Extract<AuthorityStoreReceiptResult, { status: "found" }>,
 ): boolean {
-  return result.receipts.some((raw) => {
-    const receipt = raw as Record<string, unknown>;
-    return receipt.schema_version === LOCAL_AUTHORITY_SHADOW_TRANSACTION_RECEIPT_SCHEMA &&
-      receipt.entry_id === request.entry.entry_id &&
-      receipt.partition === request.entry.partition &&
-      receipt.seq === request.entry.seq &&
-      (receipt.partition_digest ?? null) === request.partition_digest &&
-      receipt.primary_authority === "legacy_local" &&
-      receipt.provider_to_local_writes === false;
-  });
+  if (result.receipts.length !== 1) return false;
+  const actual = { ...result.receipts[0] };
+  const expected = transactionReceipt(request, NO_OP_RESOLUTIONS.has(request.entry.resolution));
+  if (typeof actual.drained_at !== "string") return false;
+  delete actual.drained_at;
+  delete expected.drained_at;
+  return canonicalAuthorityBytes(actual).equals(canonicalAuthorityBytes(expected));
 }
 
 async function reconcileTransactionReceipt(
@@ -844,7 +882,7 @@ function openShadowStore(
   const providerDirectory = storeKind === "legacy_observation"
     ? join(runtimeRoot, "authority-shadow", "file", goalId)
     : join(runtimeRoot, "authority-shadow", "file-v0");
-  return (dependencies.openStore ?? ((directory, id) => new FileAuthorityStore(directory, id)))(
+  return (dependencies.openStore ?? ((directory, id) => new FileAuthorityStore(directory, id, { existingOnly: true })))(
     providerDirectory,
     goalId,
   );
@@ -853,6 +891,279 @@ function openShadowStore(
 type CommitAttempt =
   | { kind: "final"; result: LocalAuthorityShadowCommitEntryResult }
   | { kind: "retry"; result: LocalAuthorityShadowCommitEntryResult };
+
+export interface ShadowLineageBinding {
+  capture_profile: string;
+  capture_lineage_id: string;
+  source_root_digest: string;
+  store_identity: string;
+  bootstrap_operation_id: string;
+  bootstrap_provider_revision: string;
+}
+
+export class ShadowLineageError extends Error {
+  readonly reason_code: string;
+  constructor(reasonCode: string) { super(reasonCode); this.reason_code = reasonCode; }
+}
+
+function requireLineage(condition: unknown, reason: string): asserts condition {
+  if (!condition) throw new ShadowLineageError(reason);
+}
+
+function sourceReference(entry: ShadowEntry, digest: string | null): string {
+  if (entry.source.bytes_digest !== null) return entry.source.bytes_digest;
+  if (entry.source.event_id !== null) return `event:${entry.source.event_id}`;
+  if (entry.resolution === "seed" && digest !== null) return `seed:${digest}`;
+  throw new ShadowLineageError("entry_source_identity_missing");
+}
+
+function validateEntryIdentity(request: CommitEntryRequest, binding: ShadowLineageBinding): void {
+  const { entry } = request;
+  requireLineage(entry.capture_lineage_id === binding.capture_lineage_id, "stale_generation");
+  const rootDigest = `sha256:${createHash("sha256").update(resolve(request.runtime_root)).digest("hex")}`;
+  requireLineage(entry.source_root_digest === binding.source_root_digest && rootDigest === binding.source_root_digest,
+    "source_root_mismatch");
+  requireLineage(entry.entry_id === outboxEntryIdentity(request.goal_id, entry.partition, entry.seq,
+    sourceReference(entry, request.partition_digest), entry.capture_lineage_id, entry.source_root_digest),
+  "entry_identity_mismatch");
+  if (request.partition_projection !== null) {
+    requireLineage(request.partition_digest === `sha256:${canonicalAuthoritySha256(request.partition_projection)}`,
+      "partition_digest_mismatch");
+  }
+  requireLineage(entry.source.kind !== "state_event_log", "event_log_writer_not_bound");
+  requireLineage(entry.source.kind === (entry.partition === "todos" ? "markdown_active_state" : "task_lease_record"),
+    "entry_source_partition_mismatch");
+  requireLineage(entry.resolution !== "unproved" && entry.resolution !== "seed", "source_transaction_unproved");
+}
+
+function partitionProjection(head: JsonObject, partition: ShadowPartition): JsonObject {
+  return partition === "todos" ? { handoff_mode: head.handoff_mode, todos: head.todos } : { leases: head.leases };
+}
+
+function validateSourceContinuity(request: CommitEntryRequest, previous: JsonObject): void {
+  const digest = `sha256:${canonicalAuthoritySha256(partitionProjection(previous, request.entry.partition))}`;
+  requireLineage(request.entry.source.previous_partition_digest === digest, "source_partition_continuity_unproved");
+  if (!NO_OP_RESOLUTIONS.has(request.entry.resolution)) {
+    requireLineage(request.partition_digest !== digest, "partition_unchanged");
+  }
+}
+
+async function verifyPendingEntryFiles(request: CommitEntryRequest): Promise<void> {
+  const entry = request.entry;
+  const directory = join(request.runtime_root, "authority-shadow", "outbox", request.goal_id, entry.partition);
+  const stem = `${String(entry.seq).padStart(10, "0")}-${entry.entry_id}`;
+  const bytes = await readFile(join(directory, `${stem}.prepared.json`));
+  requireLineage(`sha256:${createHash("sha256").update(bytes).digest("hex")}` === entry.prepared_sha256,
+    "outbox_prepared_bytes_mismatch");
+  const prepared = requireJsonObject(JSON.parse(bytes.toString("utf8")), "prepared entry");
+  requireLineage(prepared.schema_version === LOCAL_AUTHORITY_SHADOW_OUTBOX_ENTRY_SCHEMA &&
+    prepared.goal_id === request.goal_id && prepared.entry_id === entry.entry_id && prepared.seq === entry.seq &&
+    prepared.partition === entry.partition && prepared.capture_lineage_id === entry.capture_lineage_id &&
+    prepared.source_root_digest === entry.source_root_digest && prepared.prepared_at === entry.prepared_at &&
+    canonicalAuthorityBytes(prepared.writer).equals(canonicalAuthorityBytes(entry.writer)), "outbox_prepared_identity_mismatch");
+  const source = { ...requireJsonObject(prepared.source, "prepared source") };
+  delete source.previous_lease;
+  requireLineage(canonicalAuthorityBytes(source).equals(canonicalAuthorityBytes(entry.source)), "outbox_prepared_source_mismatch");
+  if (request.partition_projection !== null) {
+    let projection = requireJsonObject(prepared.projection, "prepared projection");
+    if (entry.partition === "leases") {
+      requireLineage(Array.isArray(projection.leases), "outbox_prepared_projection_mismatch");
+      const leases = (projection.leases as JsonObject[]).map((value) => {
+        const record = requireJsonObject(value.record, "prepared lease record");
+        requireLineage(record.goal_id === request.goal_id && record.todo_id === value.file_stem, "source_lease_identity_mismatch");
+        return record;
+      });
+      projection = { leases };
+    }
+    requireLineage(canonicalAuthorityBytes(projection).equals(canonicalAuthorityBytes(request.partition_projection)),
+      "outbox_prepared_projection_mismatch");
+  }
+  let markerBytes: Buffer | null = null;
+  try { markerBytes = await readFile(join(directory, `${stem}.committed.json`)); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  requireLineage((markerBytes === null ? null : `sha256:${createHash("sha256").update(markerBytes).digest("hex")}`) === entry.committed_sha256,
+    "outbox_committed_bytes_mismatch");
+  if (markerBytes !== null) {
+    requireLineage(entry.resolution === "committed", "outbox_resolution_marker_mismatch");
+    const marker = requireJsonObject(JSON.parse(markerBytes.toString("utf8")), "committed marker");
+    rejectUnexpectedFields(marker, new Set(["schema_version", "entry_id", "capture_lineage_id", "committed_at"]), "committed marker");
+    requireLineage(marker.schema_version === LOCAL_AUTHORITY_SHADOW_OUTBOX_COMMIT_SCHEMA && marker.entry_id === entry.entry_id &&
+      marker.capture_lineage_id === entry.capture_lineage_id && marker.committed_at === entry.committed_at, "outbox_committed_identity_mismatch");
+  } else {
+    requireLineage(entry.committed_at === null && entry.resolution !== "committed", "outbox_committed_marker_missing");
+  }
+}
+
+/** Resolve markerless evidence again under the actual primary lock, and keep
+ * that lock through the candidate commit. A caller's earlier observation can
+ * have become stale while it crossed the Python/TypeScript process boundary.
+ */
+async function withMarkerlessSourceProof<T>(
+  request: CommitEntryRequest,
+  binding: Awaited<ReturnType<typeof requireShadowCaptureBinding>>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (request.entry.committed_sha256 !== null) return await operation();
+  const entry = request.entry;
+  const proveAndCommit = async (sourcePath: string): Promise<T> => {
+    await verifyPendingEntryFiles(request);
+    const directory = join(request.runtime_root, "authority-shadow", "outbox", request.goal_id, entry.partition);
+    for (const item of await readdir(directory, { withFileTypes: true })) {
+      requireLineage(item.isFile() && !item.isSymbolicLink(), "source_transaction_unproved");
+      if (item.name === "drain-cursor.json") continue;
+      const match = OUTBOX_ENTRY_FILE_PATTERN.exec(item.name);
+      requireLineage(match !== null && Number(match[1]) <= entry.seq &&
+        (Number(match[1]) !== entry.seq || match[2] === entry.entry_id), "source_transaction_unproved");
+    }
+    let source: Buffer | null = null;
+    try { source = await readFile(sourcePath); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const digest = source === null ? null : `sha256:${createHash("sha256").update(source).digest("hex")}`;
+    const expected = entry.resolution === "abandoned" ? entry.source.previous_bytes_digest : entry.source.bytes_digest;
+    requireLineage((entry.resolution === "abandoned" || entry.resolution === "committed_proven_by_readback") &&
+      digest === expected, "source_transaction_unproved");
+    return await operation();
+  };
+  if (entry.partition === "todos") {
+    const statePath = await readShadowBootstrapSourcePath(request.runtime_root, request.goal_id, binding);
+    return await withFileMutationLock(legacyCoordinationTodoLockPath(request.runtime_root, request.goal_id), () =>
+      withFileMutationLock(statePath, () => proveAndCommit(statePath)));
+  }
+  const todoId = entry.source.lease?.todo_id;
+  requireLineage(typeof todoId === "string" && /^[A-Za-z0-9_.-]+$/.test(todoId) && todoId !== "." && todoId !== "..",
+    "source_transaction_unproved");
+  const leasePath = join(request.runtime_root, "goals", request.goal_id, "task-leases", `${todoId}.json`);
+  return await withFileMutationLock(taskLeaseLockPath(request), () => proveAndCommit(leasePath));
+}
+
+export interface ValidatedShadowLineage {
+  head: Extract<AuthorityStoreLoadResult, { status: "loaded" }>;
+  transactions: AuthorityStoreCommittedTransaction[];
+  last_sequences: Record<ShadowPartition, number>;
+  last_applied_sequences: Record<ShadowPartition, number>;
+  write_classes: string[];
+}
+
+/** The caller holds its primary partition lock. This is existing-only and
+ * never takes M or writes a cursor: management cannot complete a transition
+ * while that primary lock is held, and a changed binding still fails closed.
+ */
+export async function readProvenShadowSequence(
+  runtimeRoot: string, goalId: string, partition: ShadowPartition, expectedLineageId: string,
+): Promise<number> {
+  const binding = await requireShadowCaptureBinding(runtimeRoot, goalId);
+  requireLineage(binding.capture_lineage_id === expectedLineageId, "stale_generation");
+  const store = new FileAuthorityStore(join(runtimeRoot, "authority-shadow", "file-v0"), goalId, { existingOnly: true });
+  const lineage = await loadValidatedShadowLineage(store, runtimeRoot, goalId, binding);
+  const current = await requireShadowCaptureBinding(runtimeRoot, goalId);
+  requireLineage(canonicalAuthorityBytes(binding).equals(canonicalAuthorityBytes(current)), "stale_generation");
+  return lineage.last_sequences[partition];
+}
+
+/** Validate the exact bootstrap, every transaction, and the final readback.
+ * The caller owns maintenance exclusion; this function never takes M.
+ */
+export async function loadValidatedShadowLineage(
+  store: AuthorityStore,
+  runtimeRoot: string,
+  goalId: string,
+  binding: ShadowLineageBinding,
+): Promise<ValidatedShadowLineage> {
+  const identity = await store.storeIdentity();
+  requireLineage(identity.status === "available" && identity.store_identity === binding.store_identity,
+    "shadow_store_identity_mismatch");
+  const head = await store.loadAuthority();
+  requireLineage(head.status === "loaded", "bootstrap_required");
+  const transactions: AuthorityStoreCommittedTransaction[] = [];
+  let after: string | null = null;
+  for (;;) {
+    const page = await store.scanCommitted(after, 256);
+    requireLineage(page.status === "page", "shadow_history_unavailable");
+    transactions.push(...page.transactions);
+    requireLineage(transactions.length <= 10000, "shadow_qualification_history_too_large");
+    if (!page.has_more) break;
+    requireLineage(page.next_cursor !== null && page.next_cursor !== after && page.transactions.length > 0,
+      "shadow_qualification_cursor_stalled");
+    after = page.next_cursor;
+  }
+  const first = transactions[0];
+  requireLineage(first !== undefined && first.cursor === "1" && first.operation_id === binding.bootstrap_operation_id &&
+    first.provider_revision === binding.bootstrap_provider_revision && first.receipts.length === 0 && first.events.length === 1,
+  "shadow_qualification_bootstrap_identity_invalid");
+  const baseline = first.projection;
+  requireLineage(binding.capture_profile === "file_outbox_v1" && baseline.capture_profile === binding.capture_profile &&
+    baseline.capture_lineage_id === binding.capture_lineage_id && baseline.source_root_digest === binding.source_root_digest &&
+    baseline.goal_id === goalId && baseline.schema_version === LOCAL_AUTHORITY_SHADOW_PROJECTION_SCHEMA_V1 &&
+    typeof baseline.handoff_mode === "string" && Array.isArray(baseline.leases), "legacy_lineage_ineligible");
+  validateCoordinationTodoReadModel(baseline, goalId);
+  requireLineage(canonicalAuthorityBytes(baseline.partitions).equals(canonicalAuthorityBytes({ todos: null, leases: null })),
+    "shadow_bootstrap_partitions_invalid");
+  const bootstrapEvent = first.events[0]!;
+  requireLineage(canonicalAuthorityBytes(bootstrapEvent).equals(canonicalAuthorityBytes({
+    schema_version: "loopx_coordination_runtime_shadow_bootstrap_event_v0",
+    operation_id: binding.bootstrap_operation_id,
+    source_version: bootstrapEvent.source_version,
+    source_projection_sha256: canonicalAuthoritySha256(baseline),
+    mode_declaration: "legacy_canonical_shadow",
+  })) && typeof bootstrapEvent.source_version === "string", "shadow_qualification_bootstrap_shape_invalid");
+  let previous = baseline;
+  const settled: Record<ShadowPartition, number> = { todos: 0, leases: 0 };
+  const applied: Record<ShadowPartition, number> = { todos: 0, leases: 0 };
+  const writeClasses = new Set<string>();
+  const operationIds = new Set<string>([first.operation_id]);
+  for (const [index, transaction] of transactions.slice(1).entries()) {
+    requireLineage(transaction.cursor === String(index + 2) && transaction.receipts.length === 1 && transaction.events.length === 1 &&
+      !operationIds.has(transaction.operation_id), "shadow_qualification_transaction_shape_invalid");
+    operationIds.add(transaction.operation_id);
+    const receipt = transaction.receipts[0]!;
+    const partition = requireStringLiteral(receipt.partition, SHADOW_PARTITIONS, "receipt.partition");
+    const noOp = receipt.no_op === true;
+    const projection: JsonObject | null = noOp ? null : partition === "todos"
+      ? { handoff_mode: transaction.projection.handoff_mode, todos: transaction.projection.todos }
+      : { leases: transaction.projection.leases };
+    const request: CommitEntryRequest = {
+      runtime_root: runtimeRoot, goal_id: goalId,
+      entry: decodeEntry({
+        capture_lineage_id: receipt.capture_lineage_id,
+        prepared_sha256: receipt.prepared_sha256, committed_sha256: receipt.committed_sha256,
+        entry_id: receipt.entry_id, partition, seq: receipt.seq,
+        writer: { runtime: receipt.writer_runtime, write_class: receipt.write_class, operation_id: receipt.writer_operation_id },
+        source: { kind: receipt.source_kind, bytes_digest: receipt.source_bytes_digest,
+          previous_partition_digest: receipt.source_previous_partition_digest,
+          previous_bytes_digest: receipt.source_previous_bytes_digest, event_id: receipt.source_event_id, lease: receipt.source_lease },
+        source_root_digest: receipt.source_root_digest, prepared_at: receipt.prepared_at,
+        committed_at: receipt.committed_at, resolution: receipt.resolution,
+      }),
+      partition_projection: projection,
+      partition_digest: optionalDigest(receipt.partition_digest, "receipt.partition_digest"),
+    };
+    validateEntryIdentity(request, binding);
+    validateSourceContinuity(request, previous);
+    requireLineage(transaction.operation_id === request.entry.entry_id && request.entry.seq === settled[partition] + 1 &&
+      noOp === NO_OP_RESOLUTIONS.has(request.entry.resolution) &&
+      transactionReceiptMatches(request, { status: "found", receipts: transaction.receipts,
+        cursor: transaction.cursor, provider_revision: transaction.provider_revision }), "shadow_qualification_transaction_identity_invalid");
+    requireLineage(canonicalAuthorityBytes(transaction.events).equals(canonicalAuthorityBytes([transactionEvent(request, noOp)])),
+      "shadow_qualification_event_identity_invalid");
+    const expected = composeLocalAuthorityShadowHead(previous, goalId, request.entry, projection, request.partition_digest);
+    requireLineage(canonicalAuthorityBytes(expected).equals(canonicalAuthorityBytes(transaction.projection)),
+      "shadow_qualification_projection_history_invalid");
+    validateCoordinationTodoReadModel(transaction.projection, goalId);
+    settled[partition] = request.entry.seq;
+    if (!noOp) { applied[partition] = request.entry.seq; writeClasses.add(request.entry.writer.write_class); }
+    previous = transaction.projection;
+  }
+  const last = transactions.at(-1)!;
+  const reread = await store.loadAuthority();
+  requireLineage(reread.status === "loaded" && reread.provider_revision === head.provider_revision &&
+    last.provider_revision === head.provider_revision && last.cursor === head.cursor &&
+    canonicalAuthorityBytes(previous).equals(canonicalAuthorityBytes(head.head)) &&
+    canonicalAuthorityBytes(reread.head).equals(canonicalAuthorityBytes(head.head)), "shadow_snapshot_changed_retry");
+  return { head, transactions, last_sequences: settled, last_applied_sequences: applied,
+    write_classes: [...writeClasses].sort(authorityUnicodeCompare) };
+}
 
 async function settleCommitOutcome(
   store: AuthorityStore,
@@ -921,6 +1232,9 @@ async function attemptCommitEntry(
       }),
     };
   }
+  if (loaded.status === "missing") {
+    return { kind: "final", result: commitEntryResult(request, "failed", { reasonCode: "bootstrap_required" }) };
+  }
   const nextHead = composeLocalAuthorityShadowHead(
     loaded.status === "loaded" ? loaded.head : null,
     request.goal_id,
@@ -928,6 +1242,7 @@ async function attemptCommitEntry(
     request.partition_projection,
     request.partition_digest,
   );
+  validateCoordinationTodoReadModel(nextHead, request.goal_id);
   const committed = await store.commitAuthority({
     expected_provider_revision: loaded.status === "loaded" ? loaded.provider_revision : null,
     operation_id: request.entry.entry_id,
@@ -949,8 +1264,8 @@ async function attemptCommitEntry(
  *
  * `operation_id` is the entry id, so a retry after a lost response replays
  * onto the same transaction instead of recording the source write twice.
- * No-op resolutions (abandoned / unproved) keep the sequence chain auditable
- * without changing the compared head fields.
+ * Proven abandoned entries settle their sequence without changing the compared
+ * head. Unproved entries remain pending and require explicit recovery.
  */
 export async function commitLocalAuthorityShadowEntry(
   value: unknown,
@@ -958,32 +1273,37 @@ export async function commitLocalAuthorityShadowEntry(
 ): Promise<LocalAuthorityShadowCommitEntryResult> {
   const request = decodeCommitEntryRequest(value);
   const noOp = NO_OP_RESOLUTIONS.has(request.entry.resolution);
-  let store: AuthorityStore;
   try {
-    store = openShadowStore(
-      request.runtime_root,
-      request.goal_id,
-      "runtime_shadow",
-      dependencies,
-    );
-  } catch {
-    return commitEntryResult(request, "unavailable", {
-      reasonCode: "provider_construction_failed",
+    return await withShadowMaintenanceLock(request.runtime_root, request.goal_id, async () => {
+      const binding = await requireShadowCaptureBinding(request.runtime_root, request.goal_id);
+      validateEntryIdentity(request, binding);
+      const store = openShadowStore(request.runtime_root, request.goal_id, "runtime_shadow", dependencies);
+      for (let index = 0; index < REVISION_RETRY_ATTEMPTS; index += 1) {
+        const active = await requireShadowCaptureBinding(request.runtime_root, request.goal_id);
+        requireLineage(active.capture_lineage_id === binding.capture_lineage_id, "stale_generation");
+        const lineage = await loadValidatedShadowLineage(store, request.runtime_root, request.goal_id, active);
+        const existing = await store.readReceipt(request.entry.entry_id);
+        if (existing.status === "found") {
+          return await reconcileTransactionReceipt(store, request, binding.store_identity, "replayed");
+        }
+        requireLineage(existing.status === "missing", "shadow_receipt_unavailable");
+        requireLineage(lineage.transactions.length < 10000, "shadow_qualification_history_too_large");
+        const attempt = await withMarkerlessSourceProof(request, active, async () => {
+          await verifyPendingEntryFiles(request);
+          requireLineage(request.entry.seq === lineage.last_sequences[request.entry.partition] + 1,
+            "partition_sequence_mismatch");
+          validateSourceContinuity(request, lineage.head.head);
+          return await attemptCommitEntry(store, request, binding.store_identity, noOp);
+        });
+        if (attempt.kind === "final") return attempt.result;
+      }
+      return commitEntryResult(request, "conflict_retry_required", { reasonCode: "provider_revision_mismatch" });
     });
-  }
-  try {
-    const identity = await store.storeIdentity();
-    if (identity.status !== "available") {
-      return commitEntryResult(request, identity.status, { reasonCode: identity.reason_code });
-    }
-    let attempt: CommitAttempt | null = null;
-    for (let index = 0; index < REVISION_RETRY_ATTEMPTS; index += 1) {
-      attempt = await attemptCommitEntry(store, request, identity.store_identity, noOp);
-      if (attempt.kind === "final") return attempt.result;
-    }
-    return (attempt as CommitAttempt).result;
-  } catch {
-    return commitEntryResult(request, "unavailable", { reasonCode: "provider_call_failed" });
+  } catch (error) {
+    const raw = error as { reason_code?: string; code?: string };
+    return commitEntryResult(request, "failed", {
+      reasonCode: raw.reason_code ?? raw.code ?? "provider_call_failed",
+    });
   }
 }
 
@@ -1088,8 +1408,28 @@ export async function readLocalAuthorityShadow(
       };
     }
     const result = loadedReadResult(base, identity.store_identity, loaded);
+    if (request.store_kind === "runtime_shadow" && loaded.status === "loaded" && loaded.head.capture_profile !== "file_outbox_v1") {
+      result.eligible = false;
+      result.reason_code = "legacy_lineage_ineligible";
+    } else if (request.store_kind === "runtime_shadow" && loaded.status === "loaded") {
+      const binding = await requireShadowCaptureBinding(request.runtime_root, request.goal_id);
+      const lineage = await loadValidatedShadowLineage(store, request.runtime_root, request.goal_id, binding);
+      const receipt = request.receipt_operation_id === null ? null :
+        lineage.transactions.find((transaction) => transaction.operation_id === request.receipt_operation_id) ?? null;
+      result.proof = {
+        capture_lineage_id: binding.capture_lineage_id,
+        bootstrap_provider_revision: binding.bootstrap_provider_revision,
+        last_sequences: lineage.last_sequences,
+        last_applied_sequences: lineage.last_applied_sequences,
+        transactions: structuredClone(lineage.transactions.filter((transaction) =>
+          request.scan_after_cursor === null || Number(transaction.cursor) > Number(request.scan_after_cursor)
+        ).slice(0, request.scan_limit)) as unknown as JsonObject[],
+        receipt: receipt === null ? null : structuredClone(receipt) as unknown as JsonObject,
+      };
+    }
     return request.scan_limit > 0 ? await appendScanPage(store, request, result) : result;
-  } catch {
-    return { ...base, reason_code: "provider_call_failed" };
+  } catch (error) {
+    const raw = error as { reason_code?: string; code?: string };
+    return { ...base, status: "failed", reason_code: raw.reason_code ?? raw.code ?? "provider_call_failed" };
   }
 }

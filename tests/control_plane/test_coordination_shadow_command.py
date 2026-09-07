@@ -48,21 +48,13 @@ def _run(
     monkeypatch.setattr(
         command, "resolve_runtime_root", lambda *_args, **_kwargs: tmp_path
     )
-    monkeypatch.setattr(
-        command,
-        "list_goal_todos",
-        lambda **_kwargs: {
-            "todos": [
-                _canonical_todo("todo_b", status="open"),
-                _canonical_todo("todo_a", status="done"),
-            ]
-        },
-    )
-    monkeypatch.setattr(
-        command,
-        "load_task_lease_runtime_shadow_records",
-        lambda **_kwargs: [{"todo_id": "todo_b", "owner": "agent-a"}],
-    )
+    monkeypatch.setattr(command, "resolve_goal_state", lambda **kwargs: (_goal(), tmp_path, tmp_path / "ACTIVE_GOAL_STATE.md"))
+    monkeypatch.setattr(command, "build_runtime_shadow_source_snapshot", lambda **kwargs: (
+        command.build_todo_runtime_shadow_projection(goal_id="goal-a", todos=[
+            _canonical_todo("todo_b", status="open"), _canonical_todo("todo_a", status="done")],
+            leases=[{"todo_id": "todo_b", "owner": "agent-a"}]),
+        {"state_path": str(tmp_path / "ACTIVE_GOAL_STATE.md")},
+    ))
     captured: dict[str, object] = {}
 
     def print_payload(payload, *_args) -> None:
@@ -323,7 +315,7 @@ def test_coordination_shadow_qualify_applies_coverage_policy(
     ]
 
 
-def test_coordination_shadow_rollback_is_revision_fenced_and_reads_back_missing(
+def test_coordination_shadow_rollback_passes_exact_selector_to_management_owner(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -369,7 +361,7 @@ def test_coordination_shadow_rollback_is_revision_fenced_and_reads_back_missing(
     assert result == 0
     assert payload["ok"] is True
     assert payload["executed"] is True
-    assert payload["inspection"]["status"] == "missing"
+    assert payload["inspection"]["status"] == "not_evaluated"
     assert rollback_request["expected_provider_revision"] == "file:revision-1"
     assert rollback_request["operation_id"] == (
         "shadow-rollback:goal-a:file:revision-1"
@@ -387,7 +379,7 @@ def test_coordination_shadow_rejects_goal_without_exact_opt_in(
     )
     monkeypatch.setattr(
         command,
-        "list_goal_todos",
+        "build_runtime_shadow_source_snapshot",
         lambda **_kwargs: (_ for _ in ()).throw(
             AssertionError("must not read legacy state without opt-in")
         ),

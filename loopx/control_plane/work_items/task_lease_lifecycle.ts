@@ -1,3 +1,5 @@
+import { ShadowManagementError, requireShadowPrimaryWriteAllowed } from "../coordination/shadow_management.ts";
+import { LegacyCoordinationWriteError, requireLegacyCoordinationPrimaryWriteAllowed } from "../coordination/legacy_writer_fence.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,9 +22,7 @@ import {
   type FileMutationLockClaim,
 } from "../effect_runtime_io.ts";
 import {
-  checkLegacyCoordinationWriteAllowed,
   legacyCoordinationLeaseLockPath,
-  LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
 } from "../coordination/legacy_writer_fence.ts";
 import {
   settlementIdentity,
@@ -489,8 +489,9 @@ async function captureLeaseWrite(
   next: LeaseRecord,
   writeClass: string,
 ): Promise<Awaited<ReturnType<typeof beginLeaseOutboxEntry>> | null> {
-  if (request.runtime_shadow === null) return null;
-  return await beginLeaseOutboxEntry({
+  if (request.runtime_shadow === null &&
+      await requireShadowPrimaryWriteAllowed(request.runtime_root, request.goal_id) === null) return null;
+  const capture = await beginLeaseOutboxEntry({
     runtime_root: request.runtime_root,
     goal_id: request.goal_id,
     lease_directory: taskLeaseDirectory(request),
@@ -499,6 +500,10 @@ async function captureLeaseWrite(
     previous_lease: previous,
     planned_lease: next,
   });
+  if (capture.failure && await requireShadowPrimaryWriteAllowed(request.runtime_root, request.goal_id) !== null) {
+    throw new ShadowManagementError("shadow_capture_prepare_failed", "durable shadow preparation failed; the primary lease was not changed");
+  }
+  return capture;
 }
 
 function attachRuntimeShadowCapture(
@@ -513,6 +518,7 @@ function attachRuntimeShadowCapture(
       seq: capture.seq,
       source_bytes_digest: capture.source_bytes_digest,
       failure: capture.failure,
+      skipped_reason: capture.skipped_reason,
     },
   };
 }
@@ -1293,6 +1299,9 @@ function failureRequestContext(value: unknown): Partial<LifecycleRequest> | null
 }
 
 function errorInfo(error: unknown, fallbackStage: LifecycleStage = "durable_writeback"): LifecycleErrorInfo {
+  if (error instanceof ShadowManagementError || error instanceof LegacyCoordinationWriteError) {
+    return {code: error.code, message: error.message, payload: error.payload, stage: "validation"};
+  }
   if (error instanceof TaskLeaseLifecycleError) {
     return {
       code: error.code,
@@ -2069,6 +2078,7 @@ async function fenceVerify(
     } else {
       receipt = lockedReceipt;
     }
+    await requireShadowPrimaryWriteAllowed(request.runtime_root, request.goal_id);
     const initialTodo = authorityTodo(request);
     // Publish the token before semantic validation. If the response is lost
     // after acquisition, a retry can adopt this exact lock and finish the
@@ -2240,6 +2250,7 @@ async function fenceVerify(
     const explicitFence = request.idempotency_key !== null || request.expected_version !== null;
     const autoAcquire = allowsUserGateAutoAcquire(request, todo);
     if (autoAcquire && !effective && !active) {
+      await requireLegacyCoordinationPrimaryWriteAllowed(request.runtime_root, request.goal_id);
       if (!request.owner) {
         throw new TaskLeaseLifecycleError("hard_lease handoff mode auto-acquire requires an attributed actor; provide --agent-id", "handoff_mode_requires_lease", { goal_id: request.goal_id, todo_id: request.todo_id, reason: "missing_actor", lease_path: leasePath });
       }
@@ -2615,6 +2626,7 @@ async function fenceClose(
     }
     let shadowCapture: LeaseOutboxCapture | null = null;
     if (request.committed && request.release_lease) {
+      await requireLegacyCoordinationPrimaryWriteAllowed(request.runtime_root, request.goal_id);
       const at = lifecycleNow(request, dependencies);
       const leasePath = leasePathFor(request);
       const rawLease = await readLease(leasePath);
@@ -2758,20 +2770,7 @@ export async function executeTaskLeaseLifecycle(
     return await withFileMutationLock(
       legacyCoordinationLeaseLockPath(request.runtime_root, request.goal_id),
       () => withFileMutationLock(lockPathFor(request!), async () => {
-        const writerGuard = await checkLegacyCoordinationWriteAllowed({
-          schema_version: LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
-          runtime_root: request!.runtime_root,
-          goal_id: request!.goal_id,
-        });
-        if (writerGuard.status !== "allowed") {
-          throw new TaskLeaseLifecycleError(
-            writerGuard.status === "blocked"
-              ? "legacy task-lease writer is fenced; use the canonical file authority"
-              : String(writerGuard.reason ?? "legacy writer fence check failed"),
-            String(writerGuard.reason_code ?? "legacy_writer_fence_check_failed"),
-            writerGuard,
-          );
-        }
+        await requireLegacyCoordinationPrimaryWriteAllowed(request!.runtime_root, request!.goal_id);
         return await ordinaryOperation(request!, dependencies);
       }),
     );

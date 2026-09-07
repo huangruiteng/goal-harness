@@ -84,23 +84,33 @@ confined to the `bindings` block nulls every binding, marks
 `summary.privacy_violations`, which no flag relaxes. Evidence therefore
 carries counters, cursors, outcome tokens, and sha256 prefixes only.
 
-## Test seams later PRs must provide
+## Bounded outbox correctness and the pending ladder
 
-The pending `s2c2.*` rows will be implemented against these seams; a Stage 2C
-parity PR that does not expose them cannot be ladder-verified:
+The independently runnable [correctness suite](correctness.md) covers the
+`file_outbox_v1` capture lineage, strict cursor recovery, mixed writers,
+source fences, and recoverable bootstrap/rollback. It uses real CLI and native
+processes, the production `FileAuthorityStore`, and process death at persistence
+boundaries. [Installed-package E2E](installed.py) repeats the public lifecycle
+outside the checkout for both wheel and sdist. [Negative controls](mutants.py)
+deliberately remove correctness checks in disposable source copies.
 
-- a drain lock file at `<runtime>/authority-shadow/outbox/<goal>/drain` so the
-  ladder can hold the drain window with `loopx.file_lock.exclusive_file_lock`
-  exactly as it holds `<runtime>/authority-shadow/file/<goal>/observation`
-  today, then SIGKILL a writer before or during drain;
-- one file per outbox entry under `<runtime>/authority-shadow/outbox/<goal>/`
-  with a prepared-then-committed marker, so pending entries are countable and
-  a rollback with pending entries is observable from disk;
-- `drain` and `verify` product commands that emit JSON with `drained_count`,
-  `cursor_before`, `cursor_after`, `parity_verdict`, and the source and
-  candidate digests, so parity-equal and foreign-edit rows can assert on
-  typed fields rather than prose;
-- the same commands must resolve the runtime root the way `todo` and
-  `task-lease` do (`effective_runtime_root`), so the one-lineage guarantee that
-  `s2c1.dual_runtime_root_consistency` proves for the observation hooks also
-  holds for drain and verify.
+These checks do not change the nine pending `s2c2.*` ladder declarations above.
+Sustained production parity, the migration/growth gates, and promotion remain
+separate obligations. A bounded qualification result reports
+`sustained_parity_verdict=not_evaluated`.
+
+Future ladder rows must use the actual product interfaces:
+
+- `authority-shadow drain` for receipt-verified replay and cursor recovery;
+- `coordination-shadow inspect / qualify / read-candidate` for comparison,
+  bounded historical qualification, and a qualified read from that same head;
+- `coordination-shadow rollback` with an exact revision or unfinished bootstrap
+  operation selector, followed by explicit rebootstrap;
+- the stable management lock outside the goal outbox for scheduling a management
+  boundary. Rollback moves the entire goal outbox, so a lock inside that directory
+  cannot coordinate it. The tests retain scheduling-only barriers around real
+  persistence calls rather than depending on the retired drain lock.
+
+There is no `verify` command or generic `reset`. The independent v0 observation
+store and its runtime-root override behavior retain their original scope; its
+historical evidence is not an outbox qualification receipt.

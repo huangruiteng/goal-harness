@@ -117,7 +117,7 @@ jobs:
         # Without timing history least_duration alternates equal-weight tests.
         # Each runner retains the measured two-worker pool.
         run: >-
-          python -m pytest -q -n 2
+          python -m pytest -q -n 2 -m "not stage2c_e2e"
           --splits 2 --group ${{ matrix.shard }}
           --splitting-algorithm least_duration
           --durations=25 --durations-min=1
@@ -175,6 +175,70 @@ jobs:
     uses: ./.github/workflows/sonarcloud.yml
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  stage2c-correctness-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: tests/requirements-stage2c-linux-py311.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.6"
+          cache: npm
+      - name: Install locked test and package build tools
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r tests/requirements-stage2c-linux-py311.txt
+          npm ci --ignore-scripts
+      - name: Build and verify the checked-out source package
+        run: |
+          python -m build --no-isolation --wheel --outdir .local/stage2c-source-install
+          python - <<'PYTHON'
+          import hashlib
+          from pathlib import Path
+
+          directory = Path(".local/stage2c-source-install").resolve()
+          wheels = list(directory.glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit("Expected exactly one wheel from the checked-out source")
+          wheel = wheels[0]
+          digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+          (directory / "requirements.txt").write_text(
+              f"loopx @ {wheel.as_uri()} --hash=sha256:{digest}\n", encoding="utf-8"
+          )
+          PYTHON
+          python -m pip install --disable-pip-version-check --require-hashes --no-deps --no-index -r .local/stage2c-source-install/requirements.txt
+          python -m pip check
+          # Remove the generated source copy before pytest's normal discovery.
+          python -c "import shutil; shutil.rmtree('build')"
+      - name: Qualify real CLI, mixed writers, process death, and recovery
+        env:
+          LOOPX_SHADOW_COMPARISON_OUTPUT: .local/stage2c-observables
+        run: python -m pytest -q -m stage2c_e2e --junitxml=stage2c-e2e.xml
+      - name: Reject deliberate correctness regressions
+        run: python examples/shared-goal-authority-e2e/mutants.py --output .local/stage2c-mutants
+      - name: Build independently installed distributions
+        run: python -m build --no-isolation
+      - name: Qualify wheel outside the repository
+        run: python examples/shared-goal-authority-e2e/installed.py --artifact dist/*.whl --report-json installed-wheel.json
+      - name: Qualify sdist outside the repository
+        run: python examples/shared-goal-authority-e2e/installed.py --artifact dist/*.tar.gz --report-json installed-sdist.json
+      - name: Retain bounded acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage2c-correctness-evidence
+          include-hidden-files: true
+          path: |
+            stage2c-e2e.xml
+            .local/stage2c-observables/
+            installed-wheel.json
+            installed-sdist.json
+            .local/stage2c-mutants/
 
   windows-powershell:
     runs-on: windows-latest

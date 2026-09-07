@@ -752,20 +752,20 @@ def _release_effect_mutation_claim(
     _remove_created_effect_file(path, identity)
 
 
-def _reclaim_stale_effect_mutation_lock(path: Path) -> None:
+def _reclaim_stale_effect_mutation_lock(path: Path) -> bool:
     identity = _effect_file_identity(path)
     if identity is None:
-        return
+        return False
     owner = _read_effect_mutation_owner(path)
     if owner is not None and _effect_mutation_process_is_alive(owner.get("pid")):
-        return
+        return False
     if owner is None:
         try:
             age_seconds = time.time() - path.stat().st_mtime
         except OSError:
-            return
+            return False
         if age_seconds < EFFECT_MUTATION_INVALID_STALE_SECONDS:
-            return
+            return False
     claim_token = (
         str(owner["token"])
         if owner is not None
@@ -773,37 +773,38 @@ def _reclaim_stale_effect_mutation_lock(path: Path) -> None:
     )
     claim = _claim_effect_mutation_lock(path, claim_token)
     if claim is None:
-        return
+        return False
     stale_path = path.with_name(f"{path.name}.stale.{uuid4()}")
     try:
         current = _read_effect_mutation_owner(path)
         if owner is not None and (
             current is None or current.get("token") != owner.get("token")
         ):
-            return
+            return False
         if current is not None and _effect_mutation_process_is_alive(
             current.get("pid")
         ):
-            return
+            return False
         if current is None:
             try:
                 if (
                     time.time() - path.stat().st_mtime
                     < EFFECT_MUTATION_INVALID_STALE_SECONDS
                 ):
-                    return
+                    return False
             except OSError:
-                return
+                return False
         if not _same_effect_file_identity(identity, _effect_file_identity(path)):
-            return
+            return False
         path.replace(stale_path)
     except FileNotFoundError:
-        return
+        return False
     finally:
         if claim is not None:
             _release_effect_mutation_claim(claim)
     stale_path.unlink(missing_ok=True)
 
+    return True
 
 def _release_effect_mutation_lock(
     path: Path,
@@ -911,6 +912,7 @@ def exclusive_cross_runtime_file_lock(
     started = time.monotonic()
     started_at = _utc_now_iso()
     deadline = started + timeout
+    retried_reclaimed_lock = False
     while True:
         try:
             descriptor = os.open(
@@ -919,7 +921,12 @@ def exclusive_cross_runtime_file_lock(
                 0o600,
             )
         except FileExistsError:
-            _reclaim_stale_effect_mutation_lock(effect_lock_path)
+            reclaimed = _reclaim_stale_effect_mutation_lock(effect_lock_path)
+            # A zero-wait probe gets one immediate acquisition attempt after
+            # proving and removing a dead owner. It never waits for a live one.
+            if reclaimed and not retried_reclaimed_lock:
+                retried_reclaimed_lock = True
+                continue
             now = time.monotonic()
             if now >= deadline:
                 raise _timeout_error(

@@ -257,6 +257,7 @@ def handle_bootstrap_connect_command(
             "ok": False,
             "registry": str(registry_path),
             "error": str(exc),
+                **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
         }
     print_payload(payload, args.format, render_bootstrap_markdown)
     return 0 if payload.get("ok") else 1

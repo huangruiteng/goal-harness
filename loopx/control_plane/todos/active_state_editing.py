@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import stat
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from ..goals.active_state_metadata import todo_role_for_heading
@@ -25,6 +29,32 @@ TODO_SECTION_HEADINGS = {
     "agent": "Agent Todo",
 }
 COMPLETED_WORK_ARCHIVE_HEADING = "Completed Work Archive"
+
+
+def atomic_write_state_text(path: Path, text: str) -> None:
+    """Persist complete UTF-8 state while the caller holds its sibling lock."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary_path = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            os.chmod(temporary_path, mode)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        if os.name == "posix":
+            parent = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def section_bounds(lines: list[str], role: str) -> tuple[int, int, str] | None:

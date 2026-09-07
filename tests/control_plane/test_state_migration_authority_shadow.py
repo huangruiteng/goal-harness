@@ -189,7 +189,7 @@ def test_dry_run_reports_exclusion_and_seed_plan_without_writing(
         return original_rglob(path, pattern)
 
     monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority_shadow_adapter."
+        "loopx.control_plane.coordination.local_authority_shadow_observation."
         "observe_local_authority_commit",
         forbidden_observer,
     )
@@ -228,7 +228,7 @@ def test_seed_failure_is_public_safe_evidence_and_does_not_reverse_migration(
         raise RuntimeError("credential=private-provider-value")
 
     monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority_shadow_adapter."
+        "loopx.control_plane.coordination.local_authority_shadow_observation."
         "observe_local_authority_commit",
         fail_observer,
     )

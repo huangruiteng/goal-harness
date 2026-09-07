@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..control_plane.coordination.runtime_shadow import (
     bootstrap_coordination_runtime_shadow,
+    build_runtime_shadow_source_snapshot,
     build_todo_runtime_shadow_projection,
     inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
@@ -19,7 +20,7 @@ from ..control_plane.coordination.runtime_shadow import (
 from ..history import load_registry
 from ..paths import resolve_runtime_root
 from ..registry import find_registry_goal
-from ..todos import list_goal_todos
+from ..state_refresh import resolve_goal_state
 
 
 PrintPayload = Callable[
@@ -44,11 +45,11 @@ def register_coordination_shadow_command(
         ("inspect", "Compare the current legacy projection with the file shadow."),
         (
             "qualify",
-            "Qualify sustained parity coverage across the file shadow lineage.",
+            "Validate bounded parity and transaction coverage for the active outbox lineage.",
         ),
         (
             "read-candidate",
-            "Read one parity-matched file Todo as pre-promotion evidence.",
+            "Read one Todo from a freshly qualified bounded file shadow.",
         ),
         (
             "bootstrap",
@@ -67,23 +68,24 @@ def register_coordination_shadow_command(
                 help="Execute the administrative effect; otherwise preview only.",
             )
         if name == "rollback":
-            action.add_argument(
+            selector = action.add_mutually_exclusive_group(required=True)
+            selector.add_argument(
                 "--provider-revision",
-                required=True,
                 help="Exact file shadow revision observed by inspect.",
             )
+            selector.add_argument("--bootstrap-operation-id", help="Exact pending bootstrap operation to abort and archive.")
         if name == "qualify":
             action.add_argument(
                 "--minimum-operations",
                 type=int,
                 default=3,
-                help="Minimum distinct mirrored operations required (default: 3).",
+                help="Minimum verified primary mutations in this bounded lineage (default: 3).",
             )
             action.add_argument(
                 "--require-event-kind",
                 action="append",
                 default=[],
-                help="Required mirrored mutation kind; repeat for multiple kinds.",
+                help="Required verified outbox write class; repeat for multiple classes.",
             )
         if name == "read-candidate":
             action.add_argument(
@@ -140,6 +142,15 @@ def _render(payload: dict[str, object]) -> str:
                 f"- read_candidate_qualified: `{read_candidate.get('read_candidate_qualified')}`",
             ]
         )
+    bounded = qualification if isinstance(qualification, dict) else read_candidate
+    if isinstance(bounded, dict) and bounded.get("scope") == "bounded":
+        lines.extend([
+            "- qualification_scope: `bounded`",
+            f"- sustained_parity_verdict: `{bounded.get('sustained_parity_verdict')}`",
+        ])
+        policy = bounded.get("policy")
+        if isinstance(policy, dict):
+            lines.append(f"- minimum_primary_mutations: `{policy.get('minimum_operations')}`")
     error = payload.get("error")
     if error:
         lines.append(f"- error: `{error}`")
@@ -185,29 +196,22 @@ def handle_coordination_shadow_command(
             runtime_root_arg,
             registry_path=registry_path,
         )
-        todo_projection = list_goal_todos(
-            registry_path=registry_path,
-            goal_id=args.goal_id,
-            project=args.project,
-            state_file=args.state_file,
-            runtime_root_arg=runtime_root_arg,
-        )
-        projection = build_todo_runtime_shadow_projection(
-            goal_id=args.goal_id,
-            todos=todo_projection.get("todos"),
-            leases=load_task_lease_runtime_shadow_records(
-                runtime_root=runtime_root,
-                goal_id=args.goal_id,
-            ),
-        )
+        _, _, state_path = resolve_goal_state(registry=registry, goal_id=args.goal_id,
+            project_override=args.project, state_file_override=args.state_file)
+        if args.coordination_shadow_command == "rollback":
+            projection, source_snapshot = {}, {"state_path": str(state_path)}
+        else:
+            projection, source_snapshot = build_runtime_shadow_source_snapshot(goal=goal,
+                runtime_root=runtime_root, state_path=state_path, registry_path=registry_path)
         projection_version = _projection_version(projection)
         projected_todos = projection.get("todos")
         projected_leases = projection.get("leases")
-        inspection = inspect_coordination_runtime_shadow(
+        inspection = {"status": "not_evaluated"} if args.coordination_shadow_command == "rollback" else inspect_coordination_runtime_shadow(
             goal=goal,
             runtime_root=runtime_root,
             goal_id=args.goal_id,
             projection=projection,
+            source_snapshot=source_snapshot,
         )
         payload: dict[str, object] = {
             "ok": inspection.get("status") != "failed",
@@ -233,13 +237,23 @@ def handle_coordination_shadow_command(
             "decision_read_from_shadow": False,
         }
         if args.coordination_shadow_command == "bootstrap" and args.execute:
+            from ..control_plane.coordination.shadow_management import read_shadow_management_state
+            management = read_shadow_management_state(runtime_root, args.goal_id)
+            if management is not None and management["status"] in {"bootstrapping", "active"}:
+                operation_id = str(management["operation"]["operation_id"])
+            else:
+                predecessor = management["operation"]["operation_id"] if management and management["status"] == "inactive" else "initial"
+                operation_digest = _projection_version({"predecessor": predecessor, "projection": projection,
+                    "source_snapshot": source_snapshot, "runtime_root": str(runtime_root)})
+                operation_id = f"shadow-bootstrap:{args.goal_id}:{operation_digest}"
             bootstrap = bootstrap_coordination_runtime_shadow(
                 goal=goal,
                 runtime_root=runtime_root,
                 goal_id=args.goal_id,
-                operation_id=f"shadow-bootstrap:{args.goal_id}:{projection_version}",
+                operation_id=operation_id,
                 source_version=str(payload["source_version"]),
                 projection=projection,
+                source_snapshot=source_snapshot,
             )
             payload["executed"] = True
             payload["bootstrap"] = bootstrap
@@ -249,6 +263,7 @@ def handle_coordination_shadow_command(
                     runtime_root=runtime_root,
                     goal_id=args.goal_id,
                     projection=projection,
+                    source_snapshot=source_snapshot,
                 )
             final_inspection = payload["inspection"]
             payload["ok"] = bool(
@@ -262,6 +277,7 @@ def handle_coordination_shadow_command(
                 runtime_root=runtime_root,
                 goal_id=args.goal_id,
                 projection=projection,
+                source_snapshot=source_snapshot,
                 minimum_operations=args.minimum_operations,
                 required_event_kinds=args.require_event_kind,
             )
@@ -274,6 +290,7 @@ def handle_coordination_shadow_command(
                 goal_id=args.goal_id,
                 todo_id=args.todo_id,
                 projection=projection,
+                source_snapshot=source_snapshot,
             )
             payload["read_candidate"] = read_candidate
             payload["ok"] = bool(
@@ -282,38 +299,21 @@ def handle_coordination_shadow_command(
                 and read_candidate.get("decision_read_from_shadow") is False
             )
         if args.coordination_shadow_command == "rollback":
-            provider_revision = str(args.provider_revision).strip()
+            provider_revision = getattr(args, "provider_revision", None)
+            pending_bootstrap = getattr(args, "bootstrap_operation_id", None)
             payload["expected_provider_revision"] = provider_revision
-            observed_revision = inspection.get("provider_revision")
-            if observed_revision is not None and observed_revision != provider_revision:
-                payload["ok"] = False
-                payload["error"] = "provider revision does not match active shadow"
-                payload["error_code"] = "shadow_provider_revision_mismatch"
-            elif args.execute:
+            payload["expected_bootstrap_operation_id"] = pending_bootstrap
+            if args.execute:
                 rollback = rollback_coordination_runtime_shadow(
-                    goal=goal,
-                    runtime_root=runtime_root,
-                    goal_id=args.goal_id,
-                    operation_id=(
-                        f"shadow-rollback:{args.goal_id}:{provider_revision}"
-                    ),
+                    goal=goal, runtime_root=runtime_root, goal_id=args.goal_id,
+                    operation_id=f"shadow-rollback:{args.goal_id}:{provider_revision or pending_bootstrap}",
                     expected_provider_revision=provider_revision,
+                    expected_bootstrap_operation_id=pending_bootstrap,
+                    projection=projection, source_snapshot=source_snapshot,
                 )
                 payload["executed"] = True
                 payload["rollback"] = rollback
-                if rollback.get("status") in {"applied", "replayed"}:
-                    payload["inspection"] = inspect_coordination_runtime_shadow(
-                        goal=goal,
-                        runtime_root=runtime_root,
-                        goal_id=args.goal_id,
-                        projection=projection,
-                    )
-                final_inspection = payload["inspection"]
-                payload["ok"] = bool(
-                    rollback.get("status") in {"applied", "replayed"}
-                    and isinstance(final_inspection, dict)
-                    and final_inspection.get("status") == "missing"
-                )
+                payload["ok"] = rollback.get("status") in {"applied", "replayed", "recovered"}
     except Exception as exc:
         payload = {
             "ok": False,

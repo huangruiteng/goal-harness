@@ -384,6 +384,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                     "dry_run": False,
                     "appended": False,
                     "error": str(exc),
+                    **({"error_code": exc.code, **getattr(exc, "payload", {})} if isinstance(getattr(exc, "code", None), str) else {}),
                 },
                 status=400,
             )

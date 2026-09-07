@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from loopx.control_plane.coordination import local_authority_shadow_adapter as adapter
@@ -59,6 +61,11 @@ def _fixture(tmp_path: Path, *, enabled: bool) -> tuple[Path, Path, Path]:
         ),
         encoding="utf-8",
     )
+    if enabled:
+        boot = subprocess.run([sys.executable, "-m", "loopx.entrypoint", "--registry", str(registry),
+            "--format", "json", "coordination-shadow", "bootstrap", "--goal-id", GOAL_ID, "--execute"],
+            cwd=Path(__file__).resolve().parents[2], text=True, capture_output=True, timeout=30)
+        assert boot.returncode == 0, boot.stdout + boot.stderr
     return registry, state, runtime_root
 
 
@@ -96,7 +103,7 @@ def test_runtime_shadow_todo_writer_captures_full_records_and_reuses_one_store(
     assert head["todos"][0]["text"] == "Retain complete canonical Todo fields."
     assert head["todos"][0]["note"] == "transaction-bound"
     assert head["todo_read_model"]["todo_count"] == 1
-    assert view["cursor"] == "2"
+    assert view["cursor"] == "3"
     assert not (runtime_root / "authority-shadow" / "file" / GOAL_ID).exists()
 
 

@@ -42,10 +42,10 @@ import {
 } from "../../loopx/control_plane/coordination/legacy_writer_fence.ts";
 import {
   bootstrapCoordinationRuntimeShadow,
-  commitCoordinationRuntimeShadow,
   COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
-  COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
+import { projection as fileProjection, sourceRequest, pendingEntry, settleFiles } from "./shadow_file_fixture.ts";
+import { commitLocalAuthorityShadowEntry } from "../../loopx/control_plane/coordination/local_authority_shadow.ts";
 import { executeTaskLeaseAcquire } from "../../loopx/control_plane/work_items/task_lease_acquire.ts";
 import {
   TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
@@ -118,35 +118,26 @@ async function claimSeededTodo(
 }
 
 async function qualifiedShadow(root: string) {
-  const baseline = withTodoReadModel({
-    goal_id: "goal-a",
-    todos: [todoRecord()],
-    leases: [],
-  });
+  const baseline = fileProjection([todoRecord()], [], "soft_claim");
+  const statePath = join(root, "ACTIVE_GOAL_STATE.md");
+  await writeFile(statePath, "---\ngoal_id: goal-a\nhandoff_mode: soft_claim\n---\n\n## Agent Todo\n\n");
+  const store = new FileAuthorityStore(join(root, "authority-shadow", "file-v0"), "goal-a");
+  const f = {root, statePath, baseline, store};
   const bootstrapped = await bootstrapCoordinationRuntimeShadow({
+    ...await sourceRequest(f, baseline),
     schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: "bootstrap:goal-a:state-0",
-    source_version: "state:0",
-    projection: baseline,
+    operation_id: "bootstrap:goal-a:state-0", source_version: "state:0",
   });
-  assert.equal(bootstrapped.status, "applied");
-  const projection = withTodoReadModel({
-    ...baseline,
-    todos: [todoRecord({ claimed_by: "agent-a" })],
-  });
-  const mirrored = await commitCoordinationRuntimeShadow({
-    schema_version: COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: "todo:goal-a:todo_a:claim-1",
-    event_kind: "todo_claim",
-    source_version: "state:1",
-    projection,
-  });
-  assert.equal(mirrored.status, "applied");
-  return { projection, providerRevision: String(mirrored.provider_revision) };
+  assert.equal(bootstrapped.status, "applied", JSON.stringify(bootstrapped));
+  const entry = await pendingEntry(f, 1, {handoff_mode: "soft_claim", todos: [todoRecord({claimed_by: "agent-a"})]},
+    {writeClass: "todo_claim"});
+  const mirrored = await commitLocalAuthorityShadowEntry(entry);
+  assert.equal(mirrored.outcome, "delivered", JSON.stringify(mirrored));
+  await settleFiles(f, entry, mirrored);
+  const loaded = await store.loadAuthority();
+  assert.equal(loaded.status, "loaded");
+  if (loaded.status !== "loaded") throw new Error("fixture head missing");
+  return { projection: loaded.head, providerRevision: loaded.provider_revision };
 }
 
 function promotionRequest(
@@ -181,6 +172,7 @@ async function engageFence(request: ReturnType<typeof promotionRequest>) {
     schema_version: LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA,
     runtime_root: request.runtime_root,
     goal_id: request.goal_id,
+    state_path: join(request.runtime_root, "ACTIVE_GOAL_STATE.md"),
     fence: request.writer_fence,
   });
   assert.equal(result.status, "applied");
@@ -201,6 +193,7 @@ test("legacy write guard flips from allowed to fail-closed after the durable fen
     schema_version: LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA,
     runtime_root: request.runtime_root,
     goal_id: request.goal_id,
+    state_path: join(request.runtime_root, "ACTIVE_GOAL_STATE.md"),
     fence: request.writer_fence,
   });
   assert.equal(replayed.status, "replayed");
@@ -208,6 +201,7 @@ test("legacy write guard flips from allowed to fail-closed after the durable fen
     schema_version: LEGACY_COORDINATION_WRITER_FENCE_ENGAGE_REQUEST_SCHEMA,
     runtime_root: request.runtime_root,
     goal_id: request.goal_id,
+    state_path: join(request.runtime_root, "ACTIVE_GOAL_STATE.md"),
     fence: { ...request.writer_fence, fence_id: "legacy-writer-fence:other" },
   });
   assert.equal(conflict.status, "conflict");
@@ -217,17 +211,26 @@ test("legacy write guard flips from allowed to fail-closed after the durable fen
   assert.equal(blocked.authority_mode, "file_v0");
 });
 
-test("explicit local promotion requires qualified shadow and creates replayable canonical authority", async () => {
+test("new file outbox qualification does not implicitly enable canonical promotion", async () => {
   const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-promote-"));
   const shadow = await qualifiedShadow(root);
   const request = promotionRequest(root, shadow.projection, shadow.providerRevision);
   await engageFence(request);
-
   const applied = await promoteLocalCoordinationAuthority(request);
+  assert.equal(applied.status, "failed");
+  assert.equal(applied.reason_code, "local_authority_shadow_not_qualified");
+  const canonical = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a", {existingOnly: true});
+  assert.equal((await canonical.loadAuthority()).status, "missing");
+});
+
+test("already canonical provider mutation preserves full Todo fields and receipt replay", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-canonical-todo-mutation-"));
+  const store = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
+  const applied = await store.commitAuthority({ expected_provider_revision: null, operation_id: "canonical-seed",
+    events: [], next_projection: withTodoReadModel({goal_id: "goal-a", handoff_mode: "soft_claim",
+      todos: [todoRecord({claimed_by: "agent-a"})], leases: []}), receipts: [] });
   assert.equal(applied.status, "applied");
-  assert.equal(applied.legacy_writer_fenced, true);
-  assert.equal(applied.legacy_fallback_used, false);
-  assert.equal(applied.canonical_authority, "file_v0");
+  if (applied.status !== "applied") throw new Error("canonical fixture failed");
 
   const advanced = await mutateLocalCoordinationAuthority({
     schema_version: LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA,
@@ -275,9 +278,10 @@ test("explicit local promotion requires qualified shadow and creates replayable 
   assert.equal((unchanged.todo as Record<string, unknown>).claimed_by, "agent-a");
   assert.equal((unchanged.todo as Record<string, unknown>).status, "in_progress");
 
-  const replayed = await promoteLocalCoordinationAuthority(request);
-  assert.equal(replayed.status, "replayed");
-  assert.equal(replayed.provider_revision, applied.provider_revision);
+  const receipt = await store.readReceipt("todo:goal-a:todo_a:advance-after-promotion");
+  assert.equal(receipt.status, "found");
+  if (receipt.status !== "found") throw new Error("mutation receipt missing");
+  assert.equal(receipt.provider_revision, advanced.provider_revision);
 
   const read = await readLocalCoordinationTodo({
     schema_version: LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA,
@@ -328,38 +332,16 @@ test("local promotion fences shadow revision, digest, and writer-fence identity"
   assert.equal((await canonical.loadAuthority()).status, "missing");
 });
 
-test("promotion and provider list fail closed without exact Todo consumer semantics", async () => {
+test("new bootstrap and provider list fail closed without exact Todo consumer semantics", async () => {
   const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-semantic-fence-"));
-  const incomplete = {
-    goal_id: "goal-a",
-    todos: [{ todo_id: "todo_a", role: "agent", status: "open" }],
-    leases: [],
-  };
+  const incomplete = { goal_id: "goal-a", todos: [{ todo_id: "todo_a", role: "agent", status: "open" }], leases: [] };
   const bootstrapped = await bootstrapCoordinationRuntimeShadow({
     schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: "bootstrap:goal-a:incomplete",
-    source_version: "state:0",
-    projection: incomplete,
+    runtime_root: root, goal_id: "goal-a", operation_id: "bootstrap:goal-a:incomplete",
+    source_version: "state:0", projection: incomplete,
   });
-  assert.equal(bootstrapped.status, "applied");
-  const mirrored = await commitCoordinationRuntimeShadow({
-    schema_version: COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
-    runtime_root: root,
-    goal_id: "goal-a",
-    operation_id: "todo:goal-a:incomplete",
-    event_kind: "todo_update",
-    source_version: "state:1",
-    projection: incomplete,
-  });
-  assert.equal(mirrored.status, "applied");
-  const request = promotionRequest(root, incomplete, String(mirrored.provider_revision));
-  request.required_event_kinds = ["todo_update"];
-  await engageFence(request);
-  const rejected = await promoteLocalCoordinationAuthority(request);
-  assert.equal(rejected.status, "failed");
-  assert.equal(rejected.reason_code, "local_authority_shadow_not_qualified");
+  assert.equal(bootstrapped.status, "failed");
+  assert.equal((await new FileAuthorityStore(join(root, "authority-shadow", "file-v0"), "goal-a", {existingOnly: true}).loadAuthority()).status, "missing");
 
   const canonical = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
   const committed = await canonical.commitAuthority({

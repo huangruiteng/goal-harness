@@ -1,9 +1,7 @@
 """Split-root fence regressions for the monitor-poll and Turn writebacks.
 
-A promotion engages the legacy writer fence under the CLI ``--runtime-root``
-override.  Every Python Todo writeback of the same composition must resolve
-its fence and mutex from that same override root, never from the registry's
-``common_runtime_root``.
+Each writeback uses its effective runtime root and also respects the authority
+of the registered source file. An override cannot bypass either source fence.
 """
 
 from __future__ import annotations
@@ -149,23 +147,33 @@ def test_monitor_poll_writeback_blocked_when_override_root_is_fenced(
     assert state.read_text(encoding="utf-8") == state_before
 
 
-def test_monitor_poll_writeback_allows_when_only_registry_root_is_fenced(
-    monkeypatch: pytest.MonkeyPatch,
+def test_monitor_poll_writeback_blocks_when_the_registry_source_is_fenced(
     tmp_path: Path,
 ) -> None:
-    """The override root alone decides; a registry-root fence must not block."""
+    """An override shares the source state, so its original fence still applies."""
+
+    from loopx.control_plane.effect_runtime import effect_runtime_result
 
     registry, state, runtime_registry, runtime_override = (
         _write_split_root_goal(tmp_path)
     )
-    _engage_fence_at(runtime_registry)
-    monkeypatch.setattr(
-        "loopx.control_plane.coordination.legacy_writer_fence."
-        "effect_runtime_result",
-        lambda *_args, **_kwargs: pytest.fail(
-            "an override-root writeback must not consult another root's fence"
-        ),
-    )
+    before = state.read_bytes()
+    engaged = effect_runtime_result("coordination.local_authority.legacy_writer_fence.engage", {
+        "schema_version": "loopx_legacy_coordination_writer_fence_engage_request_v0",
+        "runtime_root": str(runtime_registry), "goal_id": GOAL_ID, "state_path": str(state),
+        "fence": {"schema_version": "loopx_legacy_coordination_writer_fence_v0", "state": "engaged",
+            "goal_id": GOAL_ID, "fence_id": "original-source", "source_version": "source:1",
+            "source_projection_sha256": "a" * 64, "expected_shadow_provider_revision": "file:1:aaaaaaaaaaaaaaaaaaaaaaaa"},
+    })
+    assert engaged["status"] == "applied", engaged
+    with pytest.raises(LegacyCoordinationWriterFenced) as error:
+        write_monitor_poll_todo_state(**_poll_kwargs(registry, runtime_override))
+    assert error.value.code == "legacy_coordination_writer_fenced"
+    assert state.read_bytes() == before
+
+
+def test_monitor_poll_writeback_allows_an_unfenced_runtime_override(tmp_path: Path) -> None:
+    registry, state, _runtime_registry, runtime_override = _write_split_root_goal(tmp_path)
 
     receipt = write_monitor_poll_todo_state(
         **_poll_kwargs(registry, runtime_override)

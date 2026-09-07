@@ -134,6 +134,7 @@ from .control_plane.todos.handoff_mode import (
 )
 from .control_plane.coordination.local_authority_shadow_adapter import effective_runtime_root
 from .control_plane.coordination.runtime_shadow_writer_adapter import (
+    write_captured_todo_state,
     begin_todo_runtime_shadow_capture,
     settle_todo_runtime_shadow_capture,
 )
@@ -968,9 +969,8 @@ def add_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
 
     payload = {
         "ok": True,
@@ -1537,9 +1537,8 @@ def update_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
     write_class = "todo_claim" if claim_only else "todo_update"
     payload = {
         "ok": True,
@@ -1778,6 +1777,8 @@ def complete_goal_todo(
                 event_result = complete_event_projected_goal_todo(
                     goal_id=goal_id,
                     context=event_context,
+                    runtime_root=shadow_runtime_root,
+                    primary_lock_held=True,
                     evidence=evidence,
                     completion_turn_key=completion_turn_key,
                     completion_identity_source=completion_identity_source,
@@ -1952,9 +1953,8 @@ def complete_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
         release_verified_task_lease_fence(
             task_lease_fence,
             committed=changed and not dry_run,
@@ -2187,9 +2187,8 @@ def supersede_goal_todo(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
         release_verified_task_lease_fence(task_lease_fence, committed=changed and not dry_run)
     result = {
         "ok": True,
@@ -2258,9 +2257,8 @@ def archive_completed_todos(
         if changed:
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
-            shadow_capture.prepare(new_text)
-            resolved_state_file.write_text(new_text, encoding="utf-8")
-            shadow_capture.committed()
+            write_captured_todo_state(shadow_capture, runtime_root=shadow_runtime_root, goal_id=goal_id,
+                state_path=resolved_state_file, text=new_text)
 
     result = {
         "ok": True,

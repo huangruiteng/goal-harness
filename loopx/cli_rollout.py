@@ -48,7 +48,7 @@ def append_cli_rollout_event(
             runtime_root = Path(str(runtime_root_value)).expanduser()
         else:
             registry = load_registry(registry_path)
-            runtime_root = resolve_runtime_root(registry, runtime_root_arg)
+            runtime_root = resolve_runtime_root(registry, runtime_root_arg, registry_path=registry_path)
         event = build_rollout_event(
             goal_id=goal_id,
             event_kind=event_kind,

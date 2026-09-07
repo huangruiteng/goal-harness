@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -16,16 +17,20 @@ from loopx.control_plane.coordination.local_authority_shadow_projection import (
     text_digest,
     todo_partition_projection,
 )
+from loopx.control_plane.coordination.runtime_shadow import (
+    bootstrap_coordination_runtime_shadow,
+    build_runtime_shadow_source_snapshot,
+)
+from loopx.control_plane.coordination.shadow_management import require_shadow_primary_write_allowed
 from loopx.file_lock import exclusive_file_lock
 from loopx.history import load_registry
 from loopx.registry import find_registry_goal
-from loopx.todos import add_goal_todo
 
 
 GOAL_ID = "goal-outbox"
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+def _fixture(tmp_path: Path, *, bootstrap: bool = True) -> tuple[Path, Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
     state = repo / "ACTIVE_GOAL_STATE.md"
@@ -62,6 +67,21 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         ),
         encoding="utf-8",
     )
+    if bootstrap:
+        goal = find_registry_goal(load_registry(registry), GOAL_ID)
+        projection, snapshot = build_runtime_shadow_source_snapshot(
+            goal=goal, runtime_root=runtime_root, state_path=state, registry_path=registry,
+        )
+        enabled_goal = {**goal, "coordination": {**goal["coordination"], "runtime_shadow": {
+            "schema_version": "loopx_coordination_runtime_shadow_config_v0",
+            "enabled": True, "provider": "file_v0",
+        }}}
+        result = bootstrap_coordination_runtime_shadow(
+            goal=enabled_goal, runtime_root=runtime_root, goal_id=GOAL_ID,
+            operation_id="bootstrap:outbox-test", source_version="source:initial",
+            projection=projection, source_snapshot=snapshot,
+        )
+        assert result["status"] == "applied", result
     return registry, state, runtime_root
 
 
@@ -86,27 +106,55 @@ def _capture(
     )
 
 
-def _add_todo(registry: Path, text: str) -> str:
-    result = add_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        role="agent",
-        text=text,
-        task_class="advancement_task",
+def _planned_todo(original: str, text: str) -> tuple[str, str]:
+    """Build source bytes for a low-level capture test; do not run another writer."""
+    todo_id = f"todo_{uuid.uuid4().hex[:12]}"
+    return todo_id, original + (
+        f"- [ ] {text}\n"
+        f"  <!-- loopx:todo todo_id={todo_id} status=open claimed_by=agent-a -->\n"
     )
-    assert result["ok"] is True
-    return str(result["todo_id"])
 
 
 def _todo_dir(runtime_root: Path) -> Path:
     return outbox.partition_directory(runtime_root, GOAL_ID, "todos")
 
 
+def _drain(registry: Path, runtime_root: Path) -> adapter.DrainResult:
+    original = registry.read_bytes()
+    data = json.loads(original)
+    data["goals"][0]["coordination"]["runtime_shadow"] = {
+        "schema_version": "loopx_coordination_runtime_shadow_config_v0",
+        "enabled": True, "provider": "file_v0",
+    }
+    registry.write_text(json.dumps(data))
+    try:
+        return adapter.drain_local_authority_shadow_outbox(
+            registry_path=registry, runtime_root=runtime_root, goal_id=GOAL_ID,
+            max_entries=10, budget_seconds=10, lock_timeout_seconds=2,
+        )
+    finally:
+        registry.write_bytes(original)
+
+
+def _record_change(registry: Path, state: Path, runtime_root: Path, text: str) -> outbox.TodoPartitionCapture:
+    original = state.read_text()
+    _, proposed = _planned_todo(original, text)
+    capture = _capture(registry, state, runtime_root, original_text=original)
+    capture.prepare(proposed)
+    state.write_text(proposed)
+    capture.committed()
+    assert capture.outcome.failure is None, capture.outcome.failure
+    return capture
+
+
+def _files(directory: Path) -> dict[str, bytes]:
+    return {str(path.relative_to(directory)): path.read_bytes() for path in directory.rglob("*") if path.is_file()}
+
+
 def test_capture_records_prepared_then_committed_and_skips_prose_only_writes(tmp_path: Path) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
     original = state.read_text(encoding="utf-8")
-    todo_id = _add_todo(registry, "Bind the shadow to the primary transaction.")
-    new_text = state.read_text(encoding="utf-8")
+    todo_id, new_text = _planned_todo(original, "Bind the shadow to the primary transaction.")
 
     capture = _capture(registry, state, runtime_root, original_text=original)
     capture.prepare(new_text)
@@ -117,9 +165,12 @@ def test_capture_records_prepared_then_committed_and_skips_prose_only_writes(tmp
     assert capture.outcome.seq == 1
     assert capture.outcome.source_bytes_digest == text_digest(new_text)
     assert capture.outcome.entry_id == outbox.entry_identity(
-        goal_id=GOAL_ID, partition="todos", seq=1, source_ref=text_digest(new_text)
+        goal_id=GOAL_ID, partition="todos", seq=1, source_ref=text_digest(new_text),
+        capture_lineage_id=require_shadow_primary_write_allowed(runtime_root, GOAL_ID)["capture_lineage_id"],
+        source_root_digest=outbox.runtime_root_digest(runtime_root),
     )
 
+    state.write_text(new_text)
     capture.committed()
     entries = outbox.list_entries(_todo_dir(runtime_root))
     assert [entry.is_committed for entry in entries] == [True]
@@ -130,6 +181,7 @@ def test_capture_records_prepared_then_committed_and_skips_prose_only_writes(tmp
     assert entry.prepared["source"] == {
         "kind": "markdown_active_state",
         "previous_bytes_digest": text_digest(original),
+        "previous_partition_digest": partition_digest({"handoff_mode": "hard_lease", "todos": []}),
         "bytes_digest": text_digest(new_text),
         "lease": None,
         "event_id": None,
@@ -154,16 +206,17 @@ def test_capture_records_prepared_then_committed_and_skips_prose_only_writes(tmp
     assert prose.outcome.skipped_reason == "partition_unchanged"
     assert len(outbox.list_entries(_todo_dir(runtime_root))) == 1
 
-    _add_todo(registry, "Second coordination fact.")
+    _, third_text = _planned_todo(new_text, "Second coordination fact.")
     third = _capture(registry, state, runtime_root, original_text=new_text)
-    third.prepare(state.read_text(encoding="utf-8"))
+    third.prepare(third_text)
+    state.write_text(third_text)
     third.committed()
     assert third.outcome.seq == 2
     assert [entry.seq for entry in outbox.list_entries(_todo_dir(runtime_root))] == [1, 2]
 
 
 def test_disabled_capture_creates_nothing(tmp_path: Path) -> None:
-    registry, state, runtime_root = _fixture(tmp_path)
+    registry, state, runtime_root = _fixture(tmp_path, bootstrap=False)
     capture = _capture(registry, state, runtime_root, original_text="", enabled=False)
     capture.prepare("# anything")
     capture.committed()
@@ -172,51 +225,26 @@ def test_disabled_capture_creates_nothing(tmp_path: Path) -> None:
     assert not (runtime_root / "authority-shadow").exists()
 
 
-def test_event_branch_records_projection_in_committed_marker(tmp_path: Path) -> None:
+def test_event_only_capture_holds_without_inventing_projection_or_retiring_entries(tmp_path: Path) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
-    empty = state.read_text(encoding="utf-8")
-    baseline_id = _add_todo(registry, "Baseline coordination fact.")
-    original = state.read_text(encoding="utf-8")
-    baseline = _capture(registry, state, runtime_root, original_text=empty)
-    baseline.prepare(original)
-    baseline.committed()
-    assert baseline.outcome.seq == 1
-
-    # An appended event that changes no compared field retires its own entry.
-    unchanged = _capture(registry, state, runtime_root, original_text=original, write_class="todo_complete_event_projection")
-    unchanged.prepare(original, event_id="evt-noop")
-    assert unchanged.outcome.entry_id is not None
-    unchanged.committed(projection_from_disk=True)
-    assert unchanged.outcome.entry_id is None
-    assert unchanged.outcome.skipped_reason == "partition_unchanged"
+    _record_change(registry, state, runtime_root, "Baseline coordination fact.")
+    original = state.read_text()
+    before = _files(_todo_dir(runtime_root))
+    for event_id, proposed in (("evt-noop", original), ("evt-change", original + "\n## Operator Notes\nEvent evidence.\n")):
+        capture = _capture(registry, state, runtime_root, original_text=original,
+                           write_class="todo_complete_event_projection")
+        capture.prepare(proposed, event_id=event_id)
+        capture.committed()
+        assert capture.outcome.entry_id is None
+        assert capture.outcome.skipped_reason == "event_log_writer_not_bound"
+        assert _files(_todo_dir(runtime_root)) == before
     assert [entry.seq for entry in outbox.list_entries(_todo_dir(runtime_root))] == [1]
-
-    capture = _capture(registry, state, runtime_root, original_text=original, write_class="todo_complete_event_projection")
-    capture.prepare(original, event_id="evt-1")
-    [_baseline, entry] = outbox.list_entries(_todo_dir(runtime_root))
-    assert entry.prepared["source"]["kind"] == "state_event_log"
-    assert entry.prepared["source"]["event_id"] == "evt-1"
-    assert entry.prepared["projection"] is None
-    assert entry.prepared["writer"]["operation_id"] == "evt-1"
-    assert entry.source_ref == "event:evt-1"
-    assert not entry.is_committed
-
-    todo_id = _add_todo(registry, "Landed by the event append.")
-    capture.committed(projection_from_disk=True)
-    [_baseline, entry] = outbox.list_entries(_todo_dir(runtime_root))
-    assert entry.is_committed
-    projection = entry.projection()
-    assert projection is not None
-    assert sorted(item["todo_id"] for item in projection["todos"]) == sorted([baseline_id, todo_id])
-    assert entry.recorded_partition_digest() == partition_digest(projection)
-    assert capture.outcome.partition_digest == partition_digest(projection)
 
 
 def test_prepared_only_entries_resolve_from_source_probes(tmp_path: Path) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
     original = state.read_text(encoding="utf-8")
-    _add_todo(registry, "Crash between write and marker.")
-    new_text = state.read_text(encoding="utf-8")
+    _, new_text = _planned_todo(original, "Crash between write and marker.")
     capture = _capture(registry, state, runtime_root, original_text=original)
     capture.prepare(new_text)
     [entry] = outbox.list_entries(_todo_dir(runtime_root))
@@ -226,7 +254,7 @@ def test_prepared_only_entries_resolve_from_source_probes(tmp_path: Path) -> Non
         return outbox.resolve_prepared_only_entry(
             entry,
             markdown_text_reader=lambda: text,
-            lease_record_reader=None,
+            lease_bytes_reader=None,
             event_presence_reader=None,
         )
 
@@ -244,75 +272,66 @@ def test_prepared_only_entries_resolve_from_source_probes(tmp_path: Path) -> Non
         committed=None,
     )
     assert outbox.resolve_prepared_only_entry(
-        event_entry, markdown_text_reader=None, lease_record_reader=None,
+        event_entry, markdown_text_reader=None, lease_bytes_reader=None,
         event_presence_reader=lambda event_id: event_id == "evt-9",
     ) == "unproved"
     assert outbox.resolve_prepared_only_entry(
-        event_entry, markdown_text_reader=None, lease_record_reader=None,
+        event_entry, markdown_text_reader=None, lease_bytes_reader=None,
         event_presence_reader=lambda _event_id: False,
     ) == "abandoned"
 
-    planned = {"todo_id": "todo-a", "version": 2, "lease_epoch": 1, "status": "active", "updated_at": "t2"}
-    previous = {"todo_id": "todo-a", "version": 1, "lease_epoch": 1, "status": "active", "updated_at": "t1"}
+    planned = {"todo_id": "todo-a", "version": 2, "lease_epoch": 1, "status": "active", "updated_at": "t2", "owner": "agent-a"}
+    previous = {**planned, "version": 1, "updated_at": "t1"}
+    planned_bytes = canonical_bytes(planned)
+    previous_bytes = canonical_bytes(previous)
     lease_entry = outbox.OutboxEntry(
-        partition="leases",
-        seq=1,
-        entry_id="local-shadow-tx-" + "1" * 64,
-        prepared_path=tmp_path / "unused.prepared.json",
-        committed_path=None,
-        prepared={"source": {"kind": "task_lease_record", "lease": planned, "previous_lease": previous}},
+        partition="leases", seq=1, entry_id="local-shadow-tx-" + "1" * 64,
+        prepared_path=tmp_path / "unused.prepared.json", committed_path=None,
+        prepared={"source": {"kind": "task_lease_record", "lease": planned,
+                              "bytes_digest": outbox.raw_bytes_digest(planned_bytes),
+                              "previous_bytes_digest": outbox.raw_bytes_digest(previous_bytes)}},
         committed=None,
     )
 
-    def lease_resolve(current: dict[str, object] | None) -> str:
+    def lease_resolve(current: bytes | None) -> str:
         return outbox.resolve_prepared_only_entry(
-            lease_entry,
-            markdown_text_reader=None,
-            lease_record_reader=lambda _todo_id: current,
+            lease_entry, markdown_text_reader=None, lease_bytes_reader=lambda _todo_id: current,
             event_presence_reader=None,
         )
 
-    assert lease_resolve({**planned, "owner": "agent-a"}) == "committed"
-    assert lease_resolve({**previous, "owner": "agent-a"}) == "abandoned"
-    assert lease_resolve({**planned, "version": 9}) == "unproved"
+    assert lease_resolve(planned_bytes) == "committed"
+    assert lease_resolve(previous_bytes) == "abandoned"
+    # Equal versions/epochs/statuses never prove different owner or payload bytes.
+    assert lease_resolve(canonical_bytes({**planned, "owner": "agent-b"})) == "unproved"
+    assert lease_resolve(canonical_bytes({**planned, "extra": "unrecorded"})) == "unproved"
+    assert lease_resolve(canonical_bytes({**planned, "version": 9})) == "unproved"
     assert lease_resolve(None) == "unproved"
 
 
-def test_sequence_advances_past_the_drain_cursor_and_lists_oldest_first(tmp_path: Path) -> None:
-    _registry, _state, runtime_root = _fixture(tmp_path)
+def test_cursor_allocation_hint_does_not_authorize_a_gap_or_candidate_write(tmp_path: Path) -> None:
+    registry, state, runtime_root = _fixture(tmp_path)
     directory = _todo_dir(runtime_root)
     directory.mkdir(parents=True)
-    outbox.write_cursor(
-        directory,
-        partition="todos",
-        last_seq=5,
-        last_entry_id="local-shadow-tx-" + "a" * 64,
-        last_partition_digest=None,
-        last_cursor="5",
-        last_provider_revision="rev-5",
-    )
+    outbox.write_cursor(directory, partition="todos", last_seq=5,
+                        last_entry_id="local-shadow-tx-" + "a" * 64,
+                        last_partition_digest=None, last_cursor="5", last_provider_revision="rev-5")
     assert outbox.next_seq(directory) == 6
-    seed = outbox.SeedSource(partition="todos", projection={"handoff_mode": "hard_lease", "todos": []})
-    first = outbox.write_seed_entry(runtime_root=runtime_root, goal_id=GOAL_ID, seed=seed)
-    second = outbox.write_seed_entry(runtime_root=runtime_root, goal_id=GOAL_ID, seed=seed)
-    assert (first.seq, second.seq) == (6, 7)
+    first = _record_change(registry, state, runtime_root, "Recorded after the cursor hint.")
+    second = _record_change(registry, state, runtime_root, "Another source transaction.")
+    assert (first.outcome.seq, second.outcome.seq) == (6, 7)
     assert [entry.seq for entry in outbox.list_entries(directory)] == [6, 7]
-    assert all(entry.is_committed for entry in outbox.list_entries(directory))
-    assert outbox.latest_partition_digest(directory) == partition_digest(seed.projection)
     summary = outbox.outbox_summary(runtime_root, GOAL_ID)
     assert summary["todos"]["committed_pending"] == 2
     assert summary["todos"]["cursor_last_seq"] == 5
     assert summary["leases"] == {
-        "committed_pending": 0,
-        "prepared_only": 0,
-        "retired_residue": 0,
-        "next_seq": 0,
-        "cursor_last_seq": None,
-        "cursor_last_entry_id": None,
-        "invalid": None,
+        "committed_pending": 0, "prepared_only": 0, "retired_residue": 0, "next_seq": 0,
+        "cursor_last_seq": None, "cursor_last_entry_id": None, "invalid": None,
     }
-    outbox.remove_entry_files(first)
-    assert [entry.seq for entry in outbox.list_entries(directory)] == [7]
+    before = _files(runtime_root / "authority-shadow")
+    result = _drain(registry, runtime_root)
+    assert result.reason_code == "outbox_cursor_unproved"
+    assert result.delivered == 0
+    assert _files(runtime_root / "authority-shadow") == before
 
 
 def test_canonical_projection_rejects_floats_and_bad_lease_identity() -> None:
@@ -333,17 +352,20 @@ def test_canonical_projection_rejects_floats_and_bad_lease_identity() -> None:
     assert projection["leases"][1]["extra"] == "retained"
 
 
-def test_capture_failure_is_typed_and_never_raises(tmp_path: Path) -> None:
+def test_capture_failure_is_typed_and_preserves_the_primary_result(tmp_path: Path) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
-    blocker = runtime_root / "authority-shadow"
-    blocker.parent.mkdir(parents=True)
-    blocker.write_text("not a directory", encoding="utf-8")
-    capture = _capture(registry, state, runtime_root, original_text="")
-    capture.prepare("---\ngoal_id: goal-outbox\n---\n\n## Agent Todo\n\n- [ ] (agent) x <!-- todo_id: todo_000000000001 -->\n")
+    original = state.read_text()
+    _, new_text = _planned_todo(original, "Primary survives an unavailable outbox directory.")
+    blocker = _todo_dir(runtime_root)
+    blocker.write_text("not a directory")
+    capture = _capture(registry, state, runtime_root, original_text=original)
+    capture.prepare(new_text)
+    state.write_text(new_text)
     capture.committed()
     assert capture.outcome.entry_id is None
     assert capture.outcome.failure is not None
     assert capture.outcome.failure["reason_code"] == "outbox_prepare_failed"
+    assert state.read_text() == new_text
 
 
 def test_primary_lock_probe_reports_held_locks(tmp_path: Path) -> None:
@@ -358,9 +380,10 @@ def test_primary_lock_probe_reports_held_locks(tmp_path: Path) -> None:
 def test_prepared_records_must_bind_their_directory_identity_and_source(tmp_path: Path) -> None:
     registry, state, runtime_root = _fixture(tmp_path)
     original = state.read_text(encoding="utf-8")
-    _add_todo(registry, "Bound to this goal and partition.")
+    _, new_text = _planned_todo(original, "Bound to this goal and partition.")
     capture = _capture(registry, state, runtime_root, original_text=original)
-    capture.prepare(state.read_text(encoding="utf-8"))
+    capture.prepare(new_text)
+    state.write_text(new_text)
     capture.committed()
     directory = _todo_dir(runtime_root)
     [entry] = outbox.list_entries(directory)
@@ -390,38 +413,67 @@ def test_prepared_records_must_bind_their_directory_identity_and_source(tmp_path
     outbox.durable_write_json(entry.prepared_path, entry.prepared)
     assert len(outbox.list_entries(directory)) == 1
 
-    # Seed entries bind their identity through the partition digest instead.
-    lease_seed = outbox.write_seed_entry(
-        runtime_root=runtime_root,
-        goal_id=GOAL_ID,
-        seed=outbox.lease_seed_source(runtime_root, GOAL_ID),
-    )
-    assert outbox.record_source_ref(lease_seed.prepared) == f"seed:{lease_seed.recorded_partition_digest()}"
-    lease_directory = outbox.partition_directory(runtime_root, GOAL_ID, "leases")
-    assert [item.entry_id for item in outbox.list_entries(lease_directory)] == [lease_seed.entry_id]
+    # A valid-looking root/lineage from another generation cannot reuse this ID.
+    tampered(capture_lineage_id="another-lineage")
+    tampered(source_root_digest="sha256:" + "1" * 64)
+    tampered(schema_version="loopx_local_authority_shadow_outbox_entry_v0")
+    outbox.durable_write_json(entry.prepared_path, entry.prepared)
+    assert entry.committed_path is not None and entry.committed is not None
+    outbox.durable_write_json(entry.committed_path, {**entry.committed, "capture_lineage_id": "another-lineage"})
+    with pytest.raises(outbox.OutboxError) as invalid_marker:
+        outbox.list_entries(directory)
+    assert invalid_marker.value.reason_code == "outbox_file_invalid"
+    outbox.durable_write_json(entry.committed_path, entry.committed)
+    assert len(outbox.list_entries(directory)) == 1
 
 
-def test_retired_residue_is_defined_by_the_cursor_watermark(tmp_path: Path) -> None:
-    _registry, _state, runtime_root = _fixture(tmp_path)
+def test_cursor_residue_is_diagnostic_and_requires_an_exact_receipt(tmp_path: Path) -> None:
+    registry, state, runtime_root = _fixture(tmp_path)
+    _record_change(registry, state, runtime_root, "First source transaction.")
+    _record_change(registry, state, runtime_root, "Second source transaction.")
     directory = _todo_dir(runtime_root)
-    seed = outbox.SeedSource(partition="todos", projection={"handoff_mode": "hard_lease", "todos": []})
-    first = outbox.write_seed_entry(runtime_root=runtime_root, goal_id=GOAL_ID, seed=seed)
-    second = outbox.write_seed_entry(runtime_root=runtime_root, goal_id=GOAL_ID, seed=seed)
+    first, second = outbox.list_entries(directory)
     assert outbox.retired_residue(directory) == []
-    outbox.write_cursor(
-        directory,
-        partition="todos",
-        last_seq=first.seq,
-        last_entry_id=first.entry_id,
-        last_partition_digest=first.recorded_partition_digest(),
-        last_cursor="1",
-        last_provider_revision="rev-1",
-    )
+    outbox.write_cursor(directory, partition="todos", last_seq=first.seq,
+                        last_entry_id=first.entry_id, last_partition_digest=first.recorded_partition_digest(),
+                        last_cursor="2", last_provider_revision="file:2:" + "1" * 24)
     assert [path.name for path in outbox.retired_residue(directory)] == sorted(
-        [first.committed_path.name, first.prepared_path.name]  # type: ignore[union-attr]
+        [first.committed_path.name, first.prepared_path.name]
     )
-    assert [entry.seq for entry in outbox.list_entries(directory)] == [second.seq]
+    # Hiding entries below an unproved watermark would lose the only delivery evidence.
+    assert [entry.seq for entry in outbox.list_entries(directory)] == [first.seq, second.seq]
     assert outbox.next_seq(directory) == 3
-    assert outbox.reclaim_retired_residue(directory) == 2
-    assert outbox.retired_residue(directory) == []
-    assert [entry.seq for entry in outbox.list_entries(directory)] == [second.seq]
+    before = _files(runtime_root / "authority-shadow")
+    result = _drain(registry, runtime_root)
+    assert result.reason_code == "outbox_cursor_unproved"
+    assert _files(runtime_root / "authority-shadow") == before
+
+
+def test_exact_receipts_allow_cursor_then_residue_cleanup(tmp_path: Path) -> None:
+    registry, state, runtime_root = _fixture(tmp_path)
+    _record_change(registry, state, runtime_root, "An exact transaction to deliver.")
+    directory = _todo_dir(runtime_root)
+    original = _files(directory)
+    delivered = _drain(registry, runtime_root)
+    assert delivered.delivered == 1, delivered.reason_code
+    cursor = outbox.read_cursor(directory)
+    assert cursor is not None and cursor["last_seq"] == 1
+    assert outbox.list_entries(directory) == []
+    for name, raw in original.items():
+        (directory / name).write_bytes(raw)
+    assert len(outbox.retired_residue(directory)) == 2
+    recovered = _drain(registry, runtime_root)
+    assert recovered.reason_code is None, recovered.reason_code
+    assert outbox.list_entries(directory) == []
+    assert outbox.read_cursor(directory) == cursor
+
+
+def test_reclaim_validates_the_complete_batch_before_any_unlink(tmp_path: Path) -> None:
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    first.write_bytes(b"first exact receipt bytes")
+    second.write_bytes(b"second changed after proof")
+    proof = [(first, outbox.raw_bytes_digest(first.read_bytes())), (second, outbox.raw_bytes_digest(b"different bytes"))]
+    with pytest.raises(outbox.OutboxError) as raised:
+        outbox.reclaim_verified_files(proof)
+    assert raised.value.reason_code == "outbox_file_changed"
+    assert first.exists() and second.exists()

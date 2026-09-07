@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
 
 from ...bootstrap import build_goal_entry
 from ...control_plane.runtime.time import now_local_iso
-from ...file_lock import exclusive_file_lock
+from ...file_lock import exclusive_cross_runtime_file_lock as exclusive_file_lock
+from ...paths import resolve_runtime_root
+from ..todos.active_state_editing import atomic_write_state_text as _atomic_write_text
+from ..coordination.legacy_writer_fence import legacy_todo_write_transaction, require_legacy_state_replacement_allowed
 from ...paths import DEFAULT_RUNTIME_ROOT
 from ...registry import atomic_write_json
 from ...repository_identity import normalize_repository_identity
@@ -27,19 +29,6 @@ def _identifier(value: str, *, field: str) -> str:
 
 def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.project-register.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def _registry_records(
@@ -311,7 +300,10 @@ def register_project_goal(
             raise ValueError(
                 f"project_id already has its first registered goal: {project_id}"
             )
-        with exclusive_file_lock(state_file, operation="project_register_state"):
+        effective_root = resolve_runtime_root(registry, str(runtime_root) if runtime_root else None, registry_path=registry_path)
+        with legacy_todo_write_transaction(registry_path, goal_id, state_file, None, "project_register_state", False, runtime_root=effective_root):
+            if not state_file.exists():
+                require_legacy_state_replacement_allowed(runtime_root=effective_root, goal_id=goal_id, goal=existing_goal)
             if state_file.exists():
                 existing_state = state_file.read_text(encoding="utf-8")
                 existing_updated_at = re.search(

@@ -153,6 +153,11 @@ PROTOCOL_BINDINGS = {
     "local_authority_protocol": {key: f"LOCAL_COORDINATION_{key.upper()}" for key in LOCAL_AUTHORITY_PROTOCOL_KEYS},
     "runtime_shadow_protocol": {key: f"COORDINATION_RUNTIME_SHADOW_{key.upper()}" for key in RUNTIME_SHADOW_PROTOCOL_KEYS},
     "local_authority_shadow_protocol": {key: f"LOCAL_AUTHORITY_SHADOW_{key.upper()}" for key in LOCAL_AUTHORITY_SHADOW_PROTOCOL_KEYS},
+    "shadow_management_protocol": {
+        "state_schema": "SHADOW_MANAGEMENT_STATE_SCHEMA",
+        "manifest_schema": "SHADOW_MANAGEMENT_MANIFEST_SCHEMA",
+        "outbox_manifest_schema": "SHADOW_OUTBOX_MANIFEST_SCHEMA",
+    },
     "legacy_writer_fence_protocol": LEGACY_WRITER_FENCE_CONSTANT_NAMES,
     "delivery_continuity_protocol": {key: f"DELIVERY_{key.upper()}" for key in DELIVERY_CONTINUITY_PROTOCOL_KEYS},
     "delivery_workspace_protocol": {key: f"DELIVERY_WORKSPACE_{key.upper()}" for key in DELIVERY_WORKSPACE_PROTOCOL_KEYS},

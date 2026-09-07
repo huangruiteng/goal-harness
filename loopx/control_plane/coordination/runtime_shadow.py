@@ -1,14 +1,14 @@
-"""Default-off Python adapter for the Stage 2C coordination runtime shadow.
+"""Source snapshots and management adapters for bounded file-shadow evidence.
 
-The legacy Todo and task-lease writers remain canonical.  Callers may invoke
-this adapter only after their primary mutation commits; every shadow outcome is
-returned as evidence and must not change the primary command result.
+The legacy Todo and lease stores remain canonical. Bootstrap binds one complete
+source snapshot; subsequent candidate mutations belong to the durable outbox.
 """
 
 from __future__ import annotations
 
 import json
 import hashlib
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,45 +74,28 @@ def resolve_coordination_runtime_shadow_config(
 
 RuntimeInvoker = Callable[..., object]
 
-_LEASE_PROJECTION_FIELDS = (
-    "todo_id",
-    "owner",
-    "write_scopes",
-    "version",
-    "lease_epoch",
-    "acquired_at",
-    "updated_at",
-    "expires_at",
-    "released_at",
-    "status",
-)
-
-
 def load_task_lease_runtime_shadow_records(
     *,
     runtime_root: Path,
     goal_id: str,
 ) -> list[dict[str, object]]:
-    """Read compact legacy lease records for a post-commit shadow snapshot."""
+    """Read complete legacy lease records for a source snapshot."""
 
     lease_directory = runtime_root / "goals" / goal_id / "task-leases"
     if not lease_directory.exists():
         return []
     records: list[dict[str, object]] = []
-    for path in sorted(lease_directory.glob("todo_*.json")):
+    for path in sorted(lease_directory.glob("*.json")):
+        if re.fullmatch(r"[A-Za-z0-9_.-]+\.json", path.name) is None:
+            continue
         value = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(value, Mapping):
             raise ValueError(f"task lease is not an object: {path.name}")
         todo_id = value.get("todo_id")
         if not isinstance(todo_id, str) or not todo_id:
             raise ValueError(f"task lease omits todo_id: {path.name}")
-        records.append(
-            {
-                field: value[field]
-                for field in _LEASE_PROJECTION_FIELDS
-                if field in value and value[field] is not None
-            }
-        )
+        from .local_authority_shadow_projection import compact_lease
+        records.append(compact_lease(value, goal_id=goal_id, file_stem=path.stem))
     records.sort(key=lambda item: str(item["todo_id"]))
     return records
 
@@ -122,26 +105,17 @@ def build_todo_runtime_shadow_projection(
     goal_id: str,
     todos: object,
     leases: object = None,
+    handoff_mode: str = "hard_lease",
 ) -> dict[str, object]:
-    """Persist the complete canonical Todo consumer record for provider cutover."""
+    """Build the complete source projection using the capture partition rules."""
 
-    from ..todos.todo_summary import canonical_todo_read_record
+    from .local_authority_shadow_projection import canonical_bytes, canonical_value, todo_partition_projection
     from .coordination_state_contract import (
         TODO_CANONICAL_READ_RECORD_FIELDS,
         TODO_CANONICAL_READ_RECORD_SCHEMA_VERSION,
     )
 
-    compact: list[dict[str, object]] = []
-    if isinstance(todos, list):
-        for item in todos:
-            if not isinstance(item, Mapping):
-                continue
-            todo_id = item.get("todo_id")
-            if not isinstance(todo_id, str) or not todo_id:
-                continue
-            projected = canonical_todo_read_record(dict(item), reject_unknown=True)
-            compact.append(projected)
-    compact.sort(key=lambda item: str(item["todo_id"]))
+    compact = todo_partition_projection(handoff_mode=handoff_mode, todos=todos if isinstance(todos, list) else [])["todos"]
     compact_leases: list[dict[str, object]] = []
     if isinstance(leases, list):
         for item in leases:
@@ -150,26 +124,14 @@ def build_todo_runtime_shadow_projection(
             todo_id = item.get("todo_id")
             if not isinstance(todo_id, str) or not todo_id:
                 continue
-            compact_leases.append(
-                {
-                    field: item[field]
-                    for field in _LEASE_PROJECTION_FIELDS
-                    if field in item and item[field] is not None
-                }
-            )
+            compact_leases.append(canonical_value(dict(item)))
     compact_leases.sort(key=lambda item: str(item["todo_id"]))
-    todo_records_sha256 = hashlib.sha256(
-        json.dumps(
-            compact,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    todo_records_sha256 = hashlib.sha256(canonical_bytes(compact)).hexdigest()
     return {
         "schema_version": LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA,
         "goal_id": goal_id,
         "source_authority": "legacy_markdown_and_task_lease",
+        "handoff_mode": handoff_mode,
         "todos": compact,
         "leases": compact_leases,
         "todo_read_model": {
@@ -178,7 +140,91 @@ def build_todo_runtime_shadow_projection(
             "records_sha256": todo_records_sha256,
             "contract_fields": list(TODO_CANONICAL_READ_RECORD_FIELDS),
         },
+        "partitions": {"todos": None, "leases": None},
     }
+
+
+def build_runtime_shadow_source_snapshot(
+    *, goal: Mapping[str, Any], runtime_root: Path, state_path: Path,
+    registry_path: Path,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Project exactly the bytes carried by one ephemeral source precondition.
+
+    TS takes the shared source locks and verifies every byte/inventory before
+    publishing a baseline or a bounded qualification result.
+    """
+    from ...event_sourced_state import build_state_projection, normalize_state_event, render_active_state_sections
+    from ...rollout_event_log import ROLLOUT_EVENT_SCHEMA_VERSION, rollout_event_log_path
+    from ...history import load_registry
+    from ...paths import resolve_runtime_root
+    from ...state_refresh import resolve_goal_state
+    from ..status.active_state_projection import state_event_log_candidates
+    from ..todos.active_state_todo_parser import parse_active_state_todos
+    from ..todos.goal_todo_projection import todo_summaries_from_fields
+    from ..todos.handoff_mode import goal_handoff_mode
+    from .local_authority_shadow_projection import canonical_bytes, compact_lease
+    from .shadow_management import ShadowManagementError
+
+    goal_id = str(goal["id"])
+    state_path = state_path.expanduser().resolve()
+    state_bytes = state_path.read_bytes()
+    state_text = state_bytes.decode("utf-8")
+    evidence: list[dict[str, object]] = []
+
+    def read_evidence(path: Path) -> bytes | None:
+        path = path.expanduser().resolve()
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            data = None
+        evidence.append({"path": str(path), "bytes_sha256": None if data is None else "sha256:" + hashlib.sha256(data).hexdigest()})
+        return data
+
+    rollout_bytes = read_evidence(rollout_event_log_path(runtime_root, goal_id))
+    rollout_events: list[dict[str, Any]] = []
+    for line in (rollout_bytes or b"").decode("utf-8").splitlines():
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and value.get("schema_version") == ROLLOUT_EVENT_SCHEMA_VERSION:
+            rollout_events.append(value)
+
+    # Use the production candidate selection and projection semantics. A log
+    # with no Todo projection is harmless; an unbound Todo overlay is a hold.
+    for path in state_event_log_candidates(dict(goal), state_path=state_path):
+        data = read_evidence(path)
+        if not data:
+            continue
+        events = [normalize_state_event(json.loads(line)) for line in data.decode("utf-8").splitlines() if line.strip()]
+        rendered = render_active_state_sections(build_state_projection(events, goal_id=goal_id))
+        fields = parse_active_state_todos(rendered, goal=dict(goal), state_path=state_path, item_limit=None, rollout_events=rollout_events)
+        if any(fields.get(f"{role}_todos") for role in ("user", "agent")):
+            raise ShadowManagementError("event_log_writer_not_bound")
+
+    fields = parse_active_state_todos(state_text, goal=dict(goal), state_path=state_path, item_limit=None, rollout_events=rollout_events)
+    todos = todo_summaries_from_fields(fields=fields, source="markdown_active_state", projection_fields={},
+        projection_overlay=None, rollout_events=rollout_events, roles=["user", "agent"], status=None,
+        todo_id=None, agent_id=None, limit=None).todos
+    leases: list[dict[str, Any]] = []
+    inventory: list[dict[str, object]] = []
+    for path in sorted((runtime_root / "goals" / goal_id / "task-leases").glob("*.json")):
+        if re.fullmatch(r"[A-Za-z0-9_.-]+\.json", path.name) is None:
+            continue
+        data = path.read_bytes()
+        leases.append(compact_lease(json.loads(data), goal_id=goal_id, file_stem=path.stem))
+        inventory.append({"name": path.name, "bytes_sha256": "sha256:" + hashlib.sha256(data).hexdigest()})
+    projection = build_todo_runtime_shadow_projection(goal_id=goal_id, todos=todos, leases=leases,
+        handoff_mode=goal_handoff_mode(state_text))
+    registry = load_registry(registry_path)
+    registered_root = resolve_runtime_root(registry, None, registry_path=registry_path)
+    _, _, registered_state = resolve_goal_state(registry=registry, goal_id=goal_id,
+        project_override=None, state_file_override=None)
+    return projection, {"state_path": str(state_path), "registered_runtime_root": str(registered_root.expanduser().absolute()),
+        "registered_state_path": str(registered_state.expanduser().resolve()),
+        "state_bytes_sha256": "sha256:" + hashlib.sha256(state_bytes).hexdigest(),
+        "lease_inventory": inventory, "projection_sha256": hashlib.sha256(canonical_bytes(projection)).hexdigest(),
+        "evidence_files": evidence}
 
 
 def dispatch_coordination_runtime_shadow(
@@ -206,7 +252,7 @@ def dispatch_coordination_runtime_shadow(
 
     request = {
         "schema_version": RUNTIME_SHADOW_REQUEST_SCHEMA_VERSION,
-        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "runtime_root": str(runtime_root.expanduser().absolute()),
         "goal_id": goal_id,
         "operation_id": operation_id,
         "event_kind": event_kind,
@@ -243,6 +289,7 @@ def bootstrap_coordination_runtime_shadow(
     operation_id: str,
     source_version: str,
     projection: Mapping[str, Any],
+    source_snapshot: Mapping[str, Any] | None = None,
     runtime_invoker: RuntimeInvoker = effect_runtime_result,
 ) -> dict[str, object]:
     """Import one legacy baseline into an empty shadow without promoting it."""
@@ -258,8 +305,9 @@ def bootstrap_coordination_runtime_shadow(
         }
     request = {
         "schema_version": RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION,
-        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "runtime_root": str(runtime_root.expanduser().absolute()),
         "goal_id": goal_id,
+        "source_snapshot": dict(source_snapshot or {}),
         "operation_id": operation_id,
         "source_version": source_version,
         "projection": dict(projection),
@@ -292,7 +340,10 @@ def rollback_coordination_runtime_shadow(
     runtime_root: Path,
     goal_id: str,
     operation_id: str,
-    expected_provider_revision: str,
+    expected_provider_revision: str | None = None,
+    expected_bootstrap_operation_id: str | None = None,
+    projection: Mapping[str, Any] | None = None,
+    source_snapshot: Mapping[str, Any] | None = None,
     runtime_invoker: RuntimeInvoker = effect_runtime_result,
 ) -> dict[str, object]:
     """Quarantine one revision-fenced pre-promotion file shadow lineage."""
@@ -308,10 +359,13 @@ def rollback_coordination_runtime_shadow(
         }
     request = {
         "schema_version": RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA_VERSION,
-        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "runtime_root": str(runtime_root.expanduser().absolute()),
         "goal_id": goal_id,
+        "source_snapshot": dict(source_snapshot or {}),
         "operation_id": operation_id,
         "expected_provider_revision": expected_provider_revision,
+        "expected_bootstrap_operation_id": expected_bootstrap_operation_id,
+        "projection": dict(projection or {}),
     }
     try:
         result = runtime_invoker(RUNTIME_SHADOW_ROLLBACK_METHOD, request)
@@ -341,6 +395,7 @@ def inspect_coordination_runtime_shadow(
     runtime_root: Path,
     goal_id: str,
     projection: Mapping[str, Any],
+    source_snapshot: Mapping[str, Any] | None = None,
     runtime_invoker: RuntimeInvoker = effect_runtime_result,
 ) -> dict[str, object]:
     """Read parity evidence without allowing the shadow to drive decisions."""
@@ -357,8 +412,9 @@ def inspect_coordination_runtime_shadow(
         }
     request = {
         "schema_version": RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA_VERSION,
-        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "runtime_root": str(runtime_root.expanduser().absolute()),
         "goal_id": goal_id,
+        "source_snapshot": dict(source_snapshot or {}),
         "projection": dict(projection),
     }
     try:
@@ -393,6 +449,7 @@ def qualify_coordination_runtime_shadow(
     projection: Mapping[str, Any],
     minimum_operations: int,
     required_event_kinds: list[str],
+    source_snapshot: Mapping[str, Any] | None = None,
     runtime_invoker: RuntimeInvoker = effect_runtime_result,
 ) -> dict[str, object]:
     """Qualify coverage across a shadow lineage without serving from it."""
@@ -409,8 +466,9 @@ def qualify_coordination_runtime_shadow(
         }
     request = {
         "schema_version": RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA_VERSION,
-        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "runtime_root": str(runtime_root.expanduser().absolute()),
         "goal_id": goal_id,
+        "source_snapshot": dict(source_snapshot or {}),
         "projection": dict(projection),
         "minimum_operations": minimum_operations,
         "required_event_kinds": list(required_event_kinds),
@@ -446,6 +504,7 @@ def read_coordination_runtime_shadow_todo_candidate(
     goal_id: str,
     todo_id: str,
     projection: Mapping[str, Any],
+    source_snapshot: Mapping[str, Any] | None = None,
     runtime_invoker: RuntimeInvoker = effect_runtime_result,
 ) -> dict[str, object]:
     """Read one parity-matched file Todo as pre-promotion evidence only."""
@@ -461,8 +520,9 @@ def read_coordination_runtime_shadow_todo_candidate(
         }
     request = {
         "schema_version": RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA_VERSION,
-        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "runtime_root": str(runtime_root.expanduser().absolute()),
         "goal_id": goal_id,
+        "source_snapshot": dict(source_snapshot or {}),
         "todo_id": todo_id,
         "projection": dict(projection),
     }
