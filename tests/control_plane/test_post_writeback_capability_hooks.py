@@ -191,7 +191,6 @@ def _mutated_source(mutation: str) -> dict[str, object]:
     if mutation in {
         "goal_id",
         "agent_id",
-        "todo_id",
         "turn_instance_id",
         "effect_id",
     }:
@@ -215,16 +214,15 @@ def _mutated_source(mutation: str) -> dict[str, object]:
 
 
 # The TypeScript source decoder owns every field rule; these parameters are
-# the full legacy caller inventory of input-construction defects (the five
-# identity fields plus event_kind/state_version/committed_at all lived in
-# one composition rejection before #3847). An empty todo_id is currently a
-# rejection too: if the typed owner later adopts nullable-Todo semantics,
-# that verdict flips in the decoder and in this table first, never in a
+# the full legacy caller inventory of input-construction defects (the four
+# required identity fields plus event_kind/state_version/committed_at all
+# lived in one composition rejection before #3847). Todo-less writebacks are
+# intentionally valid, while a non-string Todo identity remains a decoder
+# rejection. Those verdicts live here and in the typed decoder, never in a
 # second Python validator.
 _SOURCE_REJECTION_MUTATIONS = [
     "goal_id",
     "agent_id",
-    "todo_id",
     "turn_instance_id",
     "effect_id",
     "event_kind",
@@ -285,7 +283,7 @@ def test_zero_registrations_never_reaches_the_runtime() -> None:
     assert dispatch["primary_writeback_preserved"] is True
 
 
-def test_bridge_projects_source_rejection_as_one_composition_failure(
+def test_bridge_projects_source_rejection_as_hook_attributed_composition_failures(
     tmp_path: Path,
 ) -> None:
     """The CLI bridge keeps the legacy single-failure projection."""
@@ -315,8 +313,16 @@ def test_bridge_projects_source_rejection_as_one_composition_failure(
         state_version="2026-09-06T00:00:00Z",
         committed_at="2026-09-06T00:00:00Z",
         hooks=(
-            _hook(key="periodic-report:stage-123", producer_calls=producer_calls),
-            _hook(key="periodic-report:stage-456", producer_calls=producer_calls),
+            _hook(
+                hook_id="periodic_report.stage_completion",
+                key="periodic-report:stage-123",
+                producer_calls=producer_calls,
+            ),
+            _hook(
+                hook_id="periodic_report.vision_completion",
+                key="periodic-report:stage-456",
+                producer_calls=producer_calls,
+            ),
         ),
         projection_builder=lambda **_kwargs: {
             "stage_completion": {
@@ -327,10 +333,15 @@ def test_bridge_projects_source_rejection_as_one_composition_failure(
     )
     assert dispatch["failures"] == [
         {
-            "hook_id": "composition",
-            "capability_id": "unknown",
+            "hook_id": "periodic_report.stage_completion",
+            "capability_id": "periodic-report",
             "error_code": "source_projection_failed",
-        }
+        },
+        {
+            "hook_id": "periodic_report.vision_completion",
+            "capability_id": "periodic-report",
+            "error_code": "source_projection_failed",
+        },
     ]
     assert dispatch["primary_writeback_preserved"] is True
     assert dispatch["external_writes_performed"] is False
@@ -340,7 +351,10 @@ def test_bridge_projects_source_rejection_as_one_composition_failure(
 
 
 def _hook(
-    *, key: str = "periodic-report:stage-123", producer_calls: list[int] | None = None
+    *,
+    hook_id: str = "periodic_report.stage_completion",
+    key: str = "periodic-report:stage-123",
+    producer_calls: list[int] | None = None,
 ) -> PostWritebackHookRegistration:
     def producer(value: object) -> dict[str, object]:
         if producer_calls is not None:
@@ -350,7 +364,7 @@ def _hook(
         assert isinstance(receipt, dict)
         return {
             "schema_version": POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
-            "hook_id": "periodic_report.stage_completion",
+            "hook_id": hook_id,
             "capability_id": "periodic-report",
             "phase": "post_writeback",
             "status": "intent",
@@ -365,7 +379,7 @@ def _hook(
         }
 
     return PostWritebackHookRegistration(
-        hook_id="periodic_report.stage_completion",
+        hook_id=hook_id,
         capability_id="periodic-report",
         event_kinds=("refresh_state",),
         intent_kinds=("periodic_report.trigger_evaluation",),
@@ -424,11 +438,14 @@ def test_post_writeback_dispatch_returns_one_effect_free_intent() -> None:
     assert dispatch["external_writes_performed"] is False
 
 
-def test_post_writeback_dispatch_accepts_todoless_replan_identity() -> None:
+@pytest.mark.parametrize("todo_id", [None, ""], ids=["null", "empty-string"])
+def test_post_writeback_dispatch_accepts_todoless_replan_identity(
+    todo_id: object,
+) -> None:
     source = _source()
     identity = source["identity"]
     assert isinstance(identity, dict)
-    identity["todo_id"] = None
+    identity["todo_id"] = todo_id
 
     dispatch = dispatch_post_writeback_hooks([_hook()], source=source)
 
@@ -437,13 +454,21 @@ def test_post_writeback_dispatch_accepts_todoless_replan_identity() -> None:
     assert dispatch["failures"] == []
 
 
-def test_post_writeback_runtime_failure_identifies_rejected_preflight() -> None:
-    source = _source()
-    identity = source["identity"]
-    assert isinstance(identity, dict)
-    identity["todo_id"] = 7
+def test_post_writeback_runtime_failure_identifies_rejected_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        capability_hooks,
+        "effect_runtime_result",
+        Mock(
+            side_effect=capability_hooks.EffectRuntimeRejected(
+                "transaction request is invalid",
+                diagnostic_code="invalid_request",
+            )
+        ),
+    )
 
-    dispatch = dispatch_post_writeback_hooks([_hook()], source=source)
+    dispatch = dispatch_post_writeback_hooks([_hook()], source=_source())
 
     assert dispatch["invoked_count"] == 0
     assert dispatch["failures"][0]["error_code"] == "runtime_result_invalid"

@@ -72,6 +72,10 @@ TurnStartProducer = Callable[[], Mapping[str, Any]]
 PostWritebackProducer = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
 
+class PostWritebackSourceRejected(ValueError):
+    """The typed runtime rejected deterministic source construction."""
+
+
 @dataclass(frozen=True, slots=True)
 class InteractionProjectionHookRegistration:
     """One read-only capability contribution to an interaction contract."""
@@ -797,8 +801,7 @@ def dispatch_post_writeback_hooks(
     except (EffectRuntimeRejected, OSError, RuntimeError, TypeError, ValueError) as exc:
         if (
             isinstance(exc, EffectRuntimeRejected)
-            and exc.diagnostic_code
-            == POST_WRITEBACK_SOURCE_REJECTION_DIAGNOSTIC_CODE
+            and exc.diagnostic_code == POST_WRITEBACK_SOURCE_REJECTION_DIAGNOSTIC_CODE
         ):
             # The TypeScript decoder owns source legality. Its typed
             # input-construction rejection crosses this boundary as the
@@ -806,7 +809,7 @@ def dispatch_post_writeback_hooks(
             # source_projection_failed failure instead of per-hook
             # runtime_result_invalid noise; every other rejection stays a
             # runtime failure without string matching or field copies.
-            raise ValueError(
+            raise PostWritebackSourceRejected(
                 "post-writeback hooks require committed source identity fields"
             ) from exc
         return _post_writeback_failure_dispatch(
