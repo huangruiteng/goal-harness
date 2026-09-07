@@ -9,7 +9,6 @@ import shutil
 import socket
 import subprocess
 import tempfile
-import threading
 import time
 import uuid
 from collections.abc import Mapping
@@ -33,12 +32,6 @@ STARTUP_POLL_SECONDS = 0.025
 _NODE_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _RUNTIME_SOURCE_SUFFIXES = frozenset({".json", ".ts"})
 _RuntimeSourceSnapshot = tuple[tuple[str, int, int, int], ...]
-_RuntimeDirectorySnapshot = tuple[tuple[str, int, int], ...]
-_RuntimeSourceTopology = tuple[
-    tuple[str, ...], tuple[str, ...], _RuntimeDirectorySnapshot
-]
-_RUNTIME_SOURCE_TOPOLOGIES: dict[str, _RuntimeSourceTopology] = {}
-_RUNTIME_SOURCE_TOPOLOGY_LOCK = threading.Lock()
 
 
 class EffectRuntimeRemoteError(RuntimeError):
@@ -160,43 +153,20 @@ def _control_plane_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _runtime_directory_snapshot(
-    root: Path,
-    directories: tuple[str, ...],
-) -> _RuntimeDirectorySnapshot:
-    return tuple(
-        (
-            relative,
-            (metadata := (root / relative).stat()).st_mtime_ns,
-            metadata.st_ctime_ns,
-        )
-        for relative in directories
-    )
-
-
-def _scan_runtime_source_topology(root: Path) -> _RuntimeSourceTopology:
+def _scan_runtime_source_files(root: Path) -> tuple[str, ...]:
     files: list[str] = []
-    directories = [""]
     for directory, child_directories, filenames in os.walk(root):
         child_directories.sort()
         relative_directory = os.path.relpath(directory, root)
         if relative_directory == ".":
             relative_directory = ""
-        directories.extend(
-            Path(relative_directory, child).as_posix() for child in child_directories
-        )
         files.extend(
             Path(relative_directory, filename).as_posix()
             for filename in sorted(filenames)
             if Path(filename).suffix in _RUNTIME_SOURCE_SUFFIXES
             and Path(directory, filename).is_file()
         )
-    directory_tuple = tuple(sorted(directories))
-    return (
-        tuple(sorted(files)),
-        directory_tuple,
-        _runtime_directory_snapshot(root, directory_tuple),
-    )
+    return tuple(sorted(files))
 
 
 def _runtime_file_snapshot(
@@ -218,35 +188,20 @@ def _runtime_source_snapshot(root: Path | None = None) -> _RuntimeSourceSnapshot
     """Return cheap metadata that invalidates the packaged-source hash."""
 
     source_root = (root or _control_plane_root()).resolve()
-    root_key = os.fspath(source_root)
-    with _RUNTIME_SOURCE_TOPOLOGY_LOCK:
-        topology = _RUNTIME_SOURCE_TOPOLOGIES.get(root_key)
-        if topology is not None:
-            files, directories, previous_directory_snapshot = topology
-            try:
-                current_directory_snapshot = _runtime_directory_snapshot(
-                    source_root, directories
-                )
-            except FileNotFoundError:
-                current_directory_snapshot = ()
-            if current_directory_snapshot != previous_directory_snapshot:
-                topology = None
-        if topology is None:
-            topology = _scan_runtime_source_topology(source_root)
-            if (
-                root_key not in _RUNTIME_SOURCE_TOPOLOGIES
-                and len(_RUNTIME_SOURCE_TOPOLOGIES) >= 8
-            ):
-                _RUNTIME_SOURCE_TOPOLOGIES.pop(next(iter(_RUNTIME_SOURCE_TOPOLOGIES)))
-            _RUNTIME_SOURCE_TOPOLOGIES[root_key] = topology
-        files, _directories, _directory_snapshot = topology
+    try:
+        return _runtime_file_snapshot(
+            source_root, _scan_runtime_source_files(source_root)
+        )
+    except FileNotFoundError:
         try:
-            return _runtime_file_snapshot(source_root, files)
-        except FileNotFoundError:
-            topology = _scan_runtime_source_topology(source_root)
-            _RUNTIME_SOURCE_TOPOLOGIES[root_key] = topology
-            files, _directories, _directory_snapshot = topology
-            return _runtime_file_snapshot(source_root, files)
+            return _runtime_file_snapshot(
+                source_root, _scan_runtime_source_files(source_root)
+            )
+        except FileNotFoundError as exc:
+            raise EffectRuntimeStartupError(
+                "TypeScript Effect runtime source topology did not stabilize",
+                diagnostic_code="packaged_runtime_source_unstable",
+            ) from exc
 
 
 def _runtime_source_files(root: Path | None = None) -> tuple[str, ...]:
@@ -629,10 +584,14 @@ def collect_effect_runtime_readiness(*, deep: bool = False) -> dict[str, object]
                 is not None
                 else "stopped"
             )
-        except OSError:
+        except (OSError, EffectRuntimeStartupError) as exc:
             ready = False
             status = "package_invalid"
-            runtime_diagnostic_code = "packaged_runtime_source_unreadable"
+            runtime_diagnostic_code = getattr(
+                exc,
+                "diagnostic_code",
+                "packaged_runtime_source_unreadable",
+            )
     runtime_lifecycle: dict[str, object] = {
         "schema_version": "loopx_effect_runtime_lifecycle_v0",
         "management": "on_demand_managed",
