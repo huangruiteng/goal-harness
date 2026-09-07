@@ -455,6 +455,7 @@ def handle_registry_admin_command(
                 quota_compute=args.quota_compute,
                 quota_window_hours=args.quota_window_hours,
                 execution_turn_granularity=args.execution_turn_granularity,
+                execution_replan_after_todos=args.execution_replan_after_todos,
                 self_repair_enabled=args.self_repair_enabled,
                 self_repair_health=args.self_repair_health,
                 self_repair_waiting_projection=args.self_repair_waiting_projection,
