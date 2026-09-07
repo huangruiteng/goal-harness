@@ -7,6 +7,7 @@ from typing import Any, Callable
 from ..control_plane.capability_hooks import (
     POST_WRITEBACK_HOOK_DISPATCH_SCHEMA_VERSION,
     PostWritebackHookRegistration,
+    PostWritebackSourceRejected,
     dispatch_post_writeback_hooks,
 )
 from ..control_plane.post_writeback_composition_retry import (
@@ -219,6 +220,13 @@ def dispatch_committed_cli_post_writeback_hooks(
                 "projection": projection,
             },
             runtime_root=runtime_root,
+        )
+    except PostWritebackSourceRejected:
+        # A deterministic decoder verdict cannot succeed on replay. Preserve
+        # the composition failure category without creating misleading
+        # retry work; the typed runtime remains the source-field authority.
+        return _composition_failure_dispatch(
+            hooks, error_code="source_projection_failed", receipt_ref=None
         )
     except Exception:  # An unexpected transport collapse stays retryable.
         return _recorded_composition_failure(
