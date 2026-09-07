@@ -69,7 +69,10 @@ pub fn resume_pending(app: &AppHandle) -> Result<(), String> {
     if state["version"] != app.package_info().version.to_string() {
         return Err("app_update_incomplete".into());
     }
-    install(app)?;
+    let metadata = identity(app)?;
+    if !selected_revision_matches(&metadata) {
+        install(app)?;
+    }
     fs::remove_file(path).map_err(|_| "update_state_unavailable")?;
     Ok(())
 }
@@ -83,6 +86,13 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         .join("runtime/runtime-source.tar.gz");
     let bytes = fs::read(archive).map_err(|_| "runtime_bundle_missing")?;
     install_snapshot(&bytes, &metadata)
+}
+
+pub(crate) fn selected_revision_matches(metadata: &Value) -> bool {
+    crate::services::runtime_identity_for_executable(&crate::services::loopx_executable())
+        .as_ref()
+        .and_then(|value| value["source_revision"].as_str())
+        .is_some_and(|revision| metadata["source_revision"].as_str() == Some(revision))
 }
 
 fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
@@ -108,6 +118,7 @@ fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
             .arg(source.path().join("scripts/install-windows.ps1"));
         c
     };
+    crate::services::configure_runtime_environment(&mut command);
     // Preserve the working interpreter of an existing managed snapshot.
     if let Ok(executable) = fs::canonicalize(crate::services::loopx_executable()) {
         if let Some(release) = executable.parent().and_then(Path::parent) {
@@ -121,6 +132,13 @@ fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
         .env("LOOPX_PROMOTE_DEFAULT", "1")
         // The archive staging directory is temporary, never a canary checkout.
         .env("LOOPX_INSTALL_CANARY", "0")
+        // Preparing the App runtime must not inspect/modify host integrations
+        // or invoke provider doctors that can request user-folder access.
+        .env("LOOPX_INSTALL_SKILL", "0")
+        .env("LOOPX_INSTALL_SLASH_COMMANDS", "0")
+        .env("LOOPX_INSTALL_CLAUDE", "0")
+        .env("LOOPX_INSTALL_OPENCODE", "0")
+        .env("LOOPX_INSTALL_REVALIDATE_EXTENSIONS", "0")
         .env_remove("LOOPX_ARCHIVE_URL")
         .env_remove("LOOPX_ARCHIVE_SHA256")
         .env("LOOPX_REPO", "huangruiteng/loopx")
@@ -245,5 +263,31 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(extract(&bytes, dir.path()).is_err());
         assert!(!dir.path().join("escape").exists());
+    }
+    #[test]
+    fn long_path_metadata_headers_install_as_plain_files() {
+        // `git archive` emits a PAX local header ('x') for paths beyond ustar
+        // capacity; GNU writers emit longname records ('L') instead. This
+        // non-raw iterator folds both into the entry that follows, so such
+        // snapshots are exactly what the App installs: this test is the
+        // extractor half of the acceptance matrix the build-side gate in
+        // scripts/desktop_runtime_bundle.py mirrors. An ustar header makes
+        // the builder fall back to a PAX record; a GNU header to longname.
+        use flate2::{write::GzEncoder, Compression};
+        for new_header in [tar::Header::new_ustar, tar::Header::new_gnu] {
+            let deep = format!("docs/{}long-path.md", "very/deep/".repeat(16));
+            let compressed = GzEncoder::new(Vec::new(), Compression::default());
+            let mut archive = tar::Builder::new(compressed);
+            let mut header = new_header();
+            header.set_size(6);
+            header.set_mode(0o644);
+            archive
+                .append_data(&mut header, &deep, &b"hello!"[..])
+                .unwrap();
+            let bytes = archive.into_inner().unwrap().finish().unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            assert!(extract(&bytes, dir.path()).is_ok(), "{deep}");
+            assert_eq!(fs::read(dir.path().join(&deep)).unwrap(), b"hello!");
+        }
     }
 }

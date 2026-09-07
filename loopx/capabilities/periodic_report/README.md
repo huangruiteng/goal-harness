@@ -6,7 +6,7 @@ presentation, and destinations to profiles and adapters.
 
 | Surface | Value |
 | --- | --- |
-| CLI | `loopx periodic-report inspect-profile --preset weekly`, custom `--profile-json <path>`, `evaluate-trigger`, `evaluate-runtime-trigger`, `compose-run`, and optional `archive-openviking` |
+| CLI | `loopx periodic-report inspect-profile --preset weekly`, `request`, `consume-pending`, custom `--profile-json <path>`, `evaluate-trigger`, `evaluate-runtime-trigger`, `compose-run`, and optional `archive-openviking` |
 | Protocol | [`periodic_report_v0`](../../../docs/reference/protocols/periodic-report-v0.md) |
 | Smokes | `python3 examples/periodic-report-smoke.py`, `periodic-report-profile-smoke.py`, `periodic-report-html-smoke.py`, `periodic-report-bindings-smoke.py`, and `openviking-periodic-report-extension-smoke.py` |
 
@@ -56,6 +56,45 @@ research, operations, and other domains may supply peer source adapters when
 their richer semantics are useful; none is required by the built-in weekly
 profile.
 
+## Request from a Goal Channel
+
+After an Agent reads one addressed Goal Channel item and semantically decides
+that the user is asking it for a report, it records that decision explicitly:
+
+```bash
+loopx periodic-report request \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --source-ref <message-id> \
+  --execute
+```
+
+When exactly one complete source adapter is active, the command selects it
+automatically. With multiple active providers, the Agent selects the provider
+explicitly with `--source-adapter-id <adapter-id>`. The journal retains that
+adapter identity, and later settlement resolves only that owner regardless of
+extension discovery order. A temporarily unavailable owner leaves the request
+pending; LoopX never falls through to another provider.
+
+The adapter id is part of the request idempotency namespace together with the
+Goal, Agent, and provider-local source reference. Two providers may therefore
+use the same opaque source reference without collapsing distinct requests.
+Replay without a selector remains valid when exactly one matching journal entry
+exists; if the same source reference is already owned by multiple providers,
+the Agent must select the intended adapter explicitly.
+
+There is no keyword or regular-expression classifier. The provider adapter
+binds only the exact source selected by the Agent and checks authorship,
+addressing, Goal/Agent connection, target, and inbox identity. A manifest-
+discovered `capability_action` hook supplies the content-free bind and settle
+ports, so this capability and quota import no Lark implementation.
+
+The command persists a replay-safe typed request journal. `consume-pending`
+uses the normal manual trigger, editorial, frozen artifact, Workspace, and
+delivery-Todo pipeline. It acknowledges the provider source only after
+`delivery_ready` durability; failed ACKs become settlement-only retries and do
+not duplicate delivery work.
+
 ## Customize or schedule
 
 The capability remains **inactive for background work and external writes by
@@ -73,6 +112,11 @@ explicit `route_ref` is standing authority to deliver reports produced at
 validated stage boundaries. The selected extension, runtime capability,
 configured route, sender identity, and exact readback must still pass their
 own fail-closed gates.
+
+An explicit Goal override is authoritative and must be complete; LoopX never
+fills its missing fields from machine defaults. `plan-goal-delivery` reports an
+invalid override with a typed field list, its configuration source, and the
+choice to complete or clear the override. This diagnostic path is read-only.
 
 The capability is intentionally effect-free. It first evaluates scheduled or
 material progress facts into a deterministic trigger receipt, then composes a
@@ -138,7 +182,7 @@ composition boundary:
 ```
 
 After a committed `refresh-state` writeback with complete
-Goal/Agent/Todo/Turn/effect identity, core dispatches the TypeScript-validated
+Goal/Agent/Turn/effect identity, core dispatches the TypeScript-validated
 `post_writeback` hook outside the primary transaction. The capability receives
 only a bounded stage-completion projection and its public-safe progress
 snapshot, both captured at the writeback boundary. It may propose one
@@ -146,9 +190,15 @@ idempotent `periodic_report.trigger_evaluation` intent. Core checkpoints that
 proposal in a replay-safe sidecar. A transient failure is durably recorded as
 `retryable_failure`; the next exact replay advances its attempt and may replace
 it with `intent_recorded` or `not_applicable`, while terminal replay returns the
-original receipt without invoking the provider again. Disabled profiles,
-incomplete settlement identity, ordinary
-Todo completion, and generic replan produce no provider invocation or intent.
+original receipt without invoking the provider again. Todo-bound settlements
+carry a non-empty Todo id, while Todo-less autonomous replans carry an explicit
+`null` Todo id. Disabled profiles, incomplete settlement identity, ordinary
+Todo completion, and generic replan produce no trigger intent.
+
+If the Python bridge cannot complete the TypeScript hook transaction, the
+isolated failure includes only a typed runtime phase, error kind, and diagnostic
+code. It does not expose raw provider output or private state, and it does not
+change the committed primary writeback.
 
 The intent is not a report and grants no generation, publication, connector,
 network, credential, or sink authority. A separate governed executor may
@@ -402,7 +452,7 @@ external writes remain disabled by default:
   },
   "extension": {
     "extension_id": "loopx-lark",
-    "extension_version": "1.5.0",
+    "extension_version": "1.6.0",
     "protocol": "periodic_report_sink_v0"
   }
 }

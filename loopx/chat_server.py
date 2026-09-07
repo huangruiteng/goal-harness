@@ -1490,7 +1490,7 @@ def serve_chat(
         runtime_root=runtime_root,
         runtime_controller=server.runtime_controller,
     )
-    server.lark_goal_topic_runtime.refresh()
+    server.lark_goal_topic_runtime.start()
     url = f"http://{host}:{port}{DEFAULT_CHAT_PATH}"
     print(f"Serving LoopX Chat at {url}", flush=True)
     print("Agent boundary: local adapters, read-only sandbox, approval policy never", flush=True)

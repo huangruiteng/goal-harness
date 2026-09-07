@@ -890,6 +890,8 @@ def add_goal_todo(
             "note": note,
             "updated_at": updated_at,
         },
+        project=project,
+        state_file=state_file,
         dry_run=dry_run,
     )
     if canonical_create is not None:
@@ -1088,6 +1090,8 @@ def update_goal_todo(
     clear_claim: bool = False,
     claim_only: bool = False,
     claim_operation_id: str | None = None,
+    task_lease_idempotency_key: str | None = None,
+    task_lease_expected_version: int | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -1113,6 +1117,14 @@ def update_goal_todo(
             raise ValueError("claim_operation_id is supported only by todo claim")
         if not promoted_claim:
             raise ValueError("--claim-operation-id requires promoted canonical authority; no legacy write attempted")
+    if task_lease_expected_version is not None and task_lease_idempotency_key is None:
+        raise ValueError(
+            "--task-lease-expected-version requires --task-lease-idempotency-key"
+        )
+    if task_lease_idempotency_key is not None and not promoted_claim:
+        raise ValueError(
+            "--task-lease-idempotency-key on todo claim requires promoted canonical authority; no legacy write attempted"
+        )
     if promoted_claim:
         unsupported_claim_values = (
             text, status, note, evidence, reason, task_class, action_kind,
@@ -1146,6 +1158,10 @@ def update_goal_todo(
             actor_agent_id=agent_id,
             dry_run=dry_run,
             operation_id=claim_operation_id,
+            task_lease_idempotency_key=task_lease_idempotency_key,
+            task_lease_expected_version=task_lease_expected_version,
+            project=project,
+            state_file=state_file,
         )
         if canonical_claim is not None:
             return canonical_claim
@@ -1167,6 +1183,7 @@ def update_goal_todo(
             registry_path=registry_path, runtime_root=shadow_runtime_root,
             goal_id=goal_id, todo_id=normalize_todo_id(todo_id) or todo_id,
             actor_agent_id=agent_id, role=role, text=text, note=note, dry_run=dry_run,
+            project=project, state_file=state_file,
         )
         if canonical_edit is not None:
             return canonical_edit

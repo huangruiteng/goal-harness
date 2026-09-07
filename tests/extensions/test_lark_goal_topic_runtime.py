@@ -408,6 +408,7 @@ def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
     assert projection["processed_count"] == 0
     assert projection["thread_complete"] is False
     assert projection["coverage_warning"]
+    assert "periodic-report" not in projection["instruction"]
 
 
 def test_invalid_persisted_routing_state_never_answers_replies_or_acknowledges(

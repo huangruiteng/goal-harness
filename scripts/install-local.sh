@@ -528,7 +528,7 @@ validate_release_candidate() {
   fi
 
   local doctor_json
-  if ! doctor_json="$(PATH="$candidate/scripts:$PATH" "$candidate_wrapper" --format json doctor --deep)"; then
+  if ! doctor_json="$(PATH="$candidate/scripts:$PATH" "$candidate_wrapper" --format json doctor --deep --installation-only)"; then
     echo "loopx installer error: release candidate doctor validation failed" >&2
     return 1
   fi
@@ -768,13 +768,13 @@ PY
 fi
 
 export PATH="$bin_dir:$PATH"
-"$bin_dir/loopx" doctor >/dev/null
-if ! "$bin_dir/loopx" --format json extension doctor --all-enabled --execute >/dev/null; then
+"$bin_dir/loopx" doctor --installation-only >/dev/null
+if [[ "${LOOPX_INSTALL_REVALIDATE_EXTENSIONS:-1}" != "0" ]] && ! "$bin_dir/loopx" --format json extension doctor --all-enabled --execute >/dev/null; then
   echo "loopx installer warning: one or more enabled extensions failed post-install doctor revalidation" >&2
   echo "Run 'loopx extension doctor --all-enabled --execute' after repairing the provider." >&2
 fi
 if [[ "$install_canary" != "0" ]]; then
-  "$bin_dir/loopx-canary" doctor >/dev/null
+  "$bin_dir/loopx-canary" doctor --installation-only >/dev/null
 fi
 
 install_workflow_skills "$release_dir/skills" "$release_dir" "$bin_dir/loopx"

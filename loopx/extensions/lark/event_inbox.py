@@ -23,6 +23,11 @@ from ..external_connector_runtime import (
     decide_external_event_ack,
     external_event_ref,
 )
+from .goal_channel_transport import (
+    APP_ID_PATTERN,
+    OPEN_ID_PATTERN,
+    lark_provider_mention_identities,
+)
 
 EVENT_SCHEMA_VERSION = "lark_event_inbox_event_v0"
 CONFIG_SCHEMA_VERSION = "lark_event_inbox_config_v0"
@@ -37,6 +42,8 @@ REACTION_EMOJI_PATTERN = re.compile(r"[A-Za-z0-9_]{1,64}")
 REPLY_PLACEMENT_POLICIES = {"source_thread", "source_context"}
 REPLY_EDITORIAL_STYLES = {"concise", "bullet_points_preferred"}
 ROUTE_KEY_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}")
+SENDER_TYPE_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+ADDRESSING_SOURCES = {"provider_mention", "verified_reply", "legacy_text"}
 LARK_OPERATOR_INBOX_SOURCE_CONTRACT = OperatorInboxSourceContract(
     config_schema_version=CONFIG_SCHEMA_VERSION,
     event_schema_version=EVENT_SCHEMA_VERSION,
@@ -108,6 +115,8 @@ def load_lark_event_inbox_config(
     bot_display_name = " ".join(
         str(reply_payload.get("bot_display_name") or "").split()
     )[:100]
+    bot_app_id = str(reply_payload.get("bot_app_id") or "").strip()
+    bot_open_id = str(reply_payload.get("bot_open_id") or "").strip()
     chat_id = str(reply_payload.get("chat_id") or "").strip()
     placement_policy = str(
         reply_payload.get("placement_policy") or "source_thread"
@@ -164,6 +173,10 @@ def load_lark_event_inbox_config(
             "enabled lark inbox reply requires an explicit non-default "
             "sender_profile, bot identity, bot_display_name, and chat_id"
         )
+    if bot_app_id and not APP_ID_PATTERN.fullmatch(bot_app_id):
+        raise ValueError("lark inbox bot_app_id is invalid")
+    if bot_open_id and not OPEN_ID_PATTERN.fullmatch(bot_open_id):
+        raise ValueError("lark inbox bot_open_id is invalid")
     material_review_payload = payload.get("material_review")
     if material_review_payload is not None and not isinstance(
         material_review_payload, Mapping
@@ -195,6 +208,8 @@ def load_lark_event_inbox_config(
             "sender_profile": sender_profile,
             "sender_identity": sender_identity,
             "bot_display_name": bot_display_name,
+            "bot_app_id": bot_app_id,
+            "bot_open_id": bot_open_id,
             "chat_id": chat_id,
             "placement_policy": placement_policy,
             "editorial_style": editorial_style,
@@ -229,6 +244,8 @@ def _event_from_payload(
     payload: object,
     *,
     bot_display_name: str | None = None,
+    bot_app_id: str | None = None,
+    bot_open_id: str | None = None,
     allow_text_addressing: bool = False,
 ) -> dict[str, Any] | None:
     if (
@@ -259,6 +276,11 @@ def _event_from_payload(
         "content": content,
         "attachment_count": raw_attachment_count,
     }
+    sender_type = str(payload.get("sender_type") or "").strip().lower()
+    if sender_type:
+        if not SENDER_TYPE_PATTERN.fullmatch(sender_type):
+            return None
+        event["sender_type"] = sender_type
     if "route_key" in payload:
         route_key = str(payload.get("route_key") or "").strip()
         if not ROUTE_KEY_PATTERN.fullmatch(route_key):
@@ -277,18 +299,83 @@ def _event_from_payload(
         and "parent_id" in event
         and payload.get("reply_to_bot") is True
     )
-    event["addressed_to_bot"] = bool(
+    addressed_to_bot = bool(
         event["reply_to_bot"]
         or (
             bot_display_name is not None
             and lark_event_mentions_bot(
                 payload,
                 bot_display_name=bot_display_name,
+                bot_app_id=bot_app_id,
+                bot_open_id=bot_open_id,
                 allow_text_fallback=allow_text_addressing,
             )
         )
         or (bot_display_name is None and payload.get("addressed_to_bot") is True)
     )
+    event["addressed_to_bot"] = addressed_to_bot
+
+    mentions = payload.get("mentions")
+    provider_mention_count = 0
+    target_mention_count = 0
+    if isinstance(mentions, list):
+        provider_mentions = [item for item in mentions if isinstance(item, Mapping)]
+        provider_mention_count = len(provider_mentions)
+        expected_identities = {
+            value
+            for value in (
+                str(bot_app_id or "").strip(),
+                str(bot_open_id or "").strip(),
+            )
+            if value
+        }
+        expected_name = _normalized_mention_name(bot_display_name)
+        if expected_identities:
+            target_mention_count = sum(
+                bool(
+                    lark_provider_mention_identities(item).intersection(
+                        expected_identities
+                    )
+                )
+                for item in provider_mentions
+            )
+        elif expected_name:
+            target_mention_count = sum(
+                _normalized_mention_name(item.get("name")) == expected_name
+                for item in provider_mentions
+            )
+        elif payload.get("mentioned") is True and provider_mention_count == 1:
+            # Provider history may identify the current Bot with a typed
+            # `mentioned` flag while an inbox route intentionally has no
+            # reply/display-name configuration. Preserve the exact single-
+            # mention proof without persisting the provider identity.
+            target_mention_count = 1
+    else:
+        raw_provider_count = payload.get("provider_mention_count")
+        raw_target_count = payload.get("target_mention_count")
+        if (
+            type(raw_provider_count) is int
+            and type(raw_target_count) is int
+            and 0 <= raw_target_count <= raw_provider_count <= 50
+        ):
+            provider_mention_count = raw_provider_count
+            target_mention_count = raw_target_count
+    event["provider_mention_count"] = provider_mention_count
+    event["target_mention_count"] = target_mention_count
+
+    stored_addressing_source = str(payload.get("addressing_source") or "").strip()
+    if stored_addressing_source and stored_addressing_source not in ADDRESSING_SOURCES:
+        return None
+    if event["reply_to_bot"]:
+        addressing_source = "verified_reply"
+    elif target_mention_count:
+        addressing_source = "provider_mention"
+    elif addressed_to_bot:
+        addressing_source = stored_addressing_source or "legacy_text"
+    else:
+        addressing_source = ""
+    if addressing_source:
+        event["addressing_source"] = addressing_source
     return event
 
 
@@ -369,31 +456,47 @@ def lark_event_mentions_bot(
     event: Mapping[str, Any],
     *,
     bot_display_name: str,
+    bot_app_id: str | None = None,
+    bot_open_id: str | None = None,
     allow_text_fallback: bool = True,
 ) -> bool:
     """Recognize one provider-native or exact legacy Bot mention."""
 
-    if event.get("mentioned") is True:
-        return True
-    expected = _normalized_mention_name(bot_display_name)
     mentions = event.get("mentions")
-    provider_mention = bool(
-        expected
-        and isinstance(mentions, list)
-        and any(
-            isinstance(mention, Mapping)
-            and _normalized_mention_name(mention.get("name")) == expected
-            for mention in mentions
+    expected_identities = {
+        value
+        for value in (
+            str(bot_app_id or "").strip(),
+            str(bot_open_id or "").strip(),
         )
-    )
-    if provider_mention:
+        if value
+    }
+    expected_name = _normalized_mention_name(bot_display_name)
+    if isinstance(mentions, list):
+        provider_mentions = [
+            mention for mention in mentions if isinstance(mention, Mapping)
+        ]
+        if expected_identities:
+            return any(
+                lark_provider_mention_identities(mention).intersection(
+                    expected_identities
+                )
+                for mention in provider_mentions
+            )
+        if expected_name:
+            return any(
+                _normalized_mention_name(mention.get("name")) == expected_name
+                for mention in provider_mentions
+            )
+        return event.get("mentioned") is True and len(provider_mentions) == 1
+    if event.get("mentioned") is True:
         return True
     # A provider-supplied structured negative is authoritative.  In
     # particular, do not reinterpret an @mention of somebody else because the
     # surrounding message also discusses LoopX.
     if "mentions" in event or "mentioned" in event:
         return False
-    if not expected or not allow_text_fallback:
+    if not expected_name or not allow_text_fallback:
         return False
     content = str(event.get("content") or "")
     escaped = re.escape(" ".join(str(bot_display_name).strip().lstrip("@").split()))
@@ -434,6 +537,8 @@ def ingest_lark_event_inbox(
         event = _event_from_payload(
             payload,
             bot_display_name=str(config["reply"].get("bot_display_name") or ""),
+            bot_app_id=str(config["reply"].get("bot_app_id") or ""),
+            bot_open_id=str(config["reply"].get("bot_open_id") or ""),
             allow_text_addressing=config["capture_scope"] == "addressed_only",
         )
         if event is None:

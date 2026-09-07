@@ -91,6 +91,10 @@ def claim_canonical_todo_if_promoted(
     actor_agent_id: str | None,
     dry_run: bool,
     operation_id: str | None = None,
+    task_lease_idempotency_key: str | None = None,
+    task_lease_expected_version: int | None = None,
+    project: Path | None = None,
+    state_file: Path | None = None,
 ) -> dict[str, Any] | None:
     """Route a post-cutover claim to the TypeScript transaction owner."""
 
@@ -109,9 +113,20 @@ def claim_canonical_todo_if_promoted(
             "registered_agents": registered_agent_ids_from_registry(
                 registry_path, goal_id
             ),
-            "operation_id": operation_id
-            if operation_id is not None
-            else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}",
+            "operation_id": (
+                operation_id
+                if operation_id is not None
+                else f"todo-claim:{goal_id}:{todo_id}:{uuid4().hex}"
+            ),
+            "lease_request": (
+                {
+                    "idempotency_key": task_lease_idempotency_key,
+                    "expected_version": task_lease_expected_version,
+                    "ttl_seconds": None,
+                }
+                if task_lease_idempotency_key is not None
+                else None
+            ),
             "observed_at": now_local(),
             "dry_run": dry_run,
         },
@@ -148,7 +163,9 @@ def claim_canonical_todo_if_promoted(
             code=str(payload.get("reason_code") or "local_authority_todo_claim_failed"),
             payload=payload,
         )
-    return {
+    from ..todos.provider_projection import settle_canonical_todo_projection
+
+    return settle_canonical_todo_projection({
         "ok": True,
         "dry_run": dry_run,
         "goal_id": goal_id,
@@ -156,7 +173,8 @@ def claim_canonical_todo_if_promoted(
         "section": "Agent Todo",
         "todo_id": todo_id,
         **payload,
-    }
+    }, registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
+        project=project, state_file=state_file)
 
 
 def read_canonical_todos_if_promoted(

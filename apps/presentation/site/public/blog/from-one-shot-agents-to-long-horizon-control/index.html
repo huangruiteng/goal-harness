@@ -138,6 +138,7 @@ Authority: bounded experiments allowed; publication remains gated</code></pre>
 </section>
 <section id="effects">
 <h2>5. Effect Programs: recovering what actually happened</h2>
+<p>For the functional-programming perspective in this section, see 齐梦星空’s <a href="#agent-loop-reading">series on Agent Loop, Kleisli arrows, and function composition</a>.</p>
 <p>A pure function is often described as <code>A → B</code>. An agent action looks more like <code>A → F[B]</code>: it can involve permissions, persistence, time, budget, external calls, and failure. The model's proposal and the world's resulting state are distinct facts.</p>
 <pre><code>Goal state → effect request → authority / quota interpretation
   → external operation → observation / readback → receipt
@@ -273,6 +274,13 @@ loopx status</code></pre>
 <li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/docs/architecture.md">LoopX architecture</a>: the design of goals, state, and execution boundaries. For operating instructions, start with the <a href="../../docs/book/en/">Developer Book</a>.</li>
 <li><a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/loopx/control_plane/effect_program.ts">Effect Program implementation</a> and <a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/tests/control_plane_ts/effect_program.test.ts">its tests</a>: settlement order, receipts, replay, and recovery from interruptions.</li>
 <li><a href="../../benchmarks/swe-marathon/">Bilingual SWE-Marathon research brief</a> and <a href="https://github.com/huangruiteng/loopx/blob/41a35880fc63ed8b51696e08ec1f17b5369b1a4b/benchmark/swe-marathon/data.json">pinned aggregate data</a>: settings, results, costs, and limitations across five execution modes.</li>
+</ul>
+<h3 id="agent-loop-reading">Agent Loop and functional programming</h3>
+<p>A Chinese-language Xiaohongshu series by 齐梦星空 (May 2026), exploring effectful computation, tool calling, and composition:</p>
+<ul>
+<li><a href="https://www.xiaohongshu.com/discovery/item/6a01d501000000003700c5de?source=webshare&amp;xhsshare=pc_web&amp;xsec_token=ABqpNuladcxhev099wLKw8M3ilhKBua0BQXNpxnBZEGkc=&amp;xsec_source=pc_share">Agent Loop as an effectful program (1)</a><br><time datetime="2026-05-11">2026-05-11</time></li>
+<li><a href="https://www.xiaohongshu.com/discovery/item/6a02f388000000003502b2d6?source=webshare&amp;xhsshare=pc_web&amp;xsec_token=ABHcIpzpd2RlhAaRr9sZZ-q1OIfRgt7rvG2jn7GUO3tNo=&amp;xsec_source=pc_share">Tool Calling as a Kleisli arrow (2)</a><br><time datetime="2026-05-12">2026-05-12</time></li>
+<li><a href="https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&amp;xhsshare=pc_web&amp;xsec_token=AB43lNCJ5ULmfTrGfeTLWd2-jQ6q8nFMGyNAd-tlXJ1uw=&amp;xsec_source=pc_share">Function composition in the Agent Loop (3)</a><br><time datetime="2026-05-14">2026-05-14</time></li>
 </ul>
 <h3>Related public materials</h3>
 <ul>

@@ -29,6 +29,8 @@ _EXTERNAL_CAPABILITY_TRANSITION_PROPOSAL_KINDS = {
     "continuous_monitor_complete",
 }
 _PYTHON_CALLABLE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$")
+_HOOK_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_.:-]{2,95}$")
+_HOOK_ADAPTER_PHASE = "capability_action"
 _SURFACE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _SURFACE_KIND_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 _PRESENTATION_SURFACE_KEYS = {
@@ -190,6 +192,97 @@ def _presentation_surfaces(
             }
         )
     return surfaces
+
+
+def _hook_adapters(
+    raw: Mapping[str, Any],
+    *,
+    permissions: list[str],
+    runtime: Mapping[str, Any] | None,
+    context: str,
+) -> list[dict[str, Any]]:
+    """Normalize manifest-declared adapters for capability-owned hooks."""
+
+    value = raw.get("hook_adapters", [])
+    if not isinstance(value, list):
+        raise ValueError(f"{context} requires `hook_adapters` to contain TOML tables")
+    if value and runtime is None:
+        raise ValueError(f"{context} hook adapters require an executable runtime")
+
+    adapters: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(value):
+        item_context = f"{context} hook_adapters[{index}]"
+        if not isinstance(item, Mapping):
+            raise ValueError(f"{item_context} must be a TOML table")
+        expected = {
+            "id",
+            "capability_id",
+            "target_hook_id",
+            "phase",
+            "factory",
+            "required_permissions",
+            "ports",
+        }
+        unsupported = sorted(set(item) - expected)
+        if unsupported:
+            raise ValueError(f"{item_context} contains unsupported keys {unsupported}")
+
+        adapter_id = _required_string(item, "id", context=item_context)
+        capability_id = _required_string(item, "capability_id", context=item_context)
+        target_hook_id = _required_string(item, "target_hook_id", context=item_context)
+        phase = _required_string(item, "phase", context=item_context)
+        factory = _required_string(item, "factory", context=item_context)
+        if adapter_id in seen_ids:
+            raise ValueError(f"{context} has duplicate hook adapter id `{adapter_id}`")
+        seen_ids.add(adapter_id)
+        for label, token in (
+            ("id", adapter_id),
+            ("capability_id", capability_id),
+            ("target_hook_id", target_hook_id),
+        ):
+            if _HOOK_TOKEN_RE.fullmatch(token) is None:
+                raise ValueError(f"{item_context} {label} must be a bounded token")
+        if phase != _HOOK_ADAPTER_PHASE:
+            raise ValueError(
+                f"{item_context} phase must be `{_HOOK_ADAPTER_PHASE}`"
+            )
+        if _PYTHON_CALLABLE_RE.fullmatch(factory) is None:
+            raise ValueError(
+                f"{item_context} factory must be a `<python.module>:<callable>` reference"
+            )
+
+        required_permissions = _string_list(
+            item,
+            "required_permissions",
+            context=item_context,
+        )
+        if len(required_permissions) != len(set(required_permissions)):
+            raise ValueError(f"{item_context} required_permissions contains duplicates")
+        undeclared = sorted(set(required_permissions) - set(permissions))
+        if undeclared:
+            raise ValueError(
+                f"{item_context} requires undeclared permissions {undeclared}"
+            )
+        ports = _string_list(item, "ports", context=item_context)
+        if (
+            not 1 <= len(ports) <= 16
+            or len(ports) != len(set(ports))
+            or any(_HOOK_TOKEN_RE.fullmatch(port) is None for port in ports)
+        ):
+            raise ValueError(f"{item_context} ports must contain unique bounded tokens")
+        adapters.append(
+            {
+                "id": adapter_id,
+                "capability_id": capability_id,
+                "target_hook_id": target_hook_id,
+                "phase": phase,
+                "factory": factory,
+                "required_permissions": required_permissions,
+                "ports": ports,
+            }
+        )
+    return adapters
 
 
 def _runtime_contract(
@@ -628,6 +721,12 @@ def load_extension_manifest(path: str | Path) -> dict[str, Any]:
     _require_compatible_loopx_api(requires_loopx_api, context=context)
     permissions = _string_list(raw, "permissions", context=context)
     runtime = _runtime_contract(raw, permissions=permissions, context=context)
+    hook_adapters = _hook_adapters(
+        raw,
+        permissions=permissions,
+        runtime=runtime,
+        context=context,
+    )
     presentation_surfaces = _presentation_surfaces(
         raw,
         runtime=runtime,
@@ -725,6 +824,7 @@ def load_extension_manifest(path: str | Path) -> dict[str, Any]:
         "capabilities": capabilities,
         "implementations": implementations,
         "runtime": runtime,
+        "hook_adapters": hook_adapters,
         "presentation_surfaces": presentation_surfaces,
         "documentation": documentation,
     }

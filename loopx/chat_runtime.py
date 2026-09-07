@@ -738,27 +738,23 @@ class ChatRuntimeController:
         work_dir: Path,
         objective: str,
     ) -> None:
-        if self.closed.is_set():
-            return
-        session = self.store.load_session(session_id)
-        if session is None or session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
-            return
+        # Admission must not read session files: callers can hold their own
+        # lifecycle fence here. The worker validates the session before effects.
         with self.lock:
-            if session_id in self.session_queue_workers:
+            if self.closed.is_set() or session_id in self.session_queue_workers:
                 return
+            worker = threading.Thread(
+                target=self._drain_session_queue,
+                kwargs={
+                    "session_id": session_id,
+                    "work_dir": work_dir,
+                    "objective": objective,
+                },
+                daemon=True,
+            )
             self.session_queue_workers.add(session_id)
-        worker = threading.Thread(
-            target=self._drain_session_queue,
-            kwargs={
-                "session_id": session_id,
-                "work_dir": work_dir,
-                "objective": objective,
-            },
-            daemon=True,
-        )
-        with self.lock:
             self.session_queue_threads[session_id] = worker
-        worker.start()
+            worker.start()
 
     def _drain_session_queue(
         self,
@@ -770,7 +766,12 @@ class ChatRuntimeController:
         try:
             while not self.closed.is_set():
                 session = self.store.load_session(session_id)
-                if session is None or session.get("status") == "closed":
+                if (
+                    self.closed.is_set()
+                    or session is None
+                    or session.get("status") == "closed"
+                    or session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED
+                ):
                     return
                 active_turn_id = str(session.get("active_turn_id") or "")
                 if active_turn_id:

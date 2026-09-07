@@ -29,6 +29,12 @@ import {
 
 export const POST_WRITEBACK_HOOK_SOURCE_SCHEMA_VERSION =
   "loopx_post_writeback_hook_source_v0";
+// Source decoding rejections are one bounded input-construction category,
+// distinguishable from every other runtime/transport fault so the Python
+// adapter can project them as composition failures without re-owning the
+// source field rules, which stay owned by this decoder alone.
+export const POST_WRITEBACK_SOURCE_REJECTION_CODE =
+  "post_writeback_source_invalid";
 export const POST_WRITEBACK_HOOK_TRANSACTION_REQUEST_SCHEMA_VERSION =
   "loopx_post_writeback_hook_transaction_request_v0";
 export const POST_WRITEBACK_HOOK_TRANSACTION_RESULT_SCHEMA_VERSION =
@@ -72,7 +78,7 @@ interface PostWritebackSource extends JsonObject {
   event_kind: string;
   status: string;
   durable: boolean;
-  identity: JsonObject & { goal_id: string };
+  identity: JsonObject & { goal_id: string; todo_id: string | null };
   state_version: string;
   committed_at: string;
   projection: JsonObject;
@@ -191,7 +197,13 @@ function stripPythonWhitespace(value: string): string {
   return value.slice(start, end);
 }
 
-/** Match Python json.dumps(sort_keys=True, separators=(",", ":")) identity bytes. */
+/**
+ * Match Python json.dumps(sort_keys=True, separators=(",", ":")) identity
+ * bytes for the string, boolean, and null shapes this contract carries.
+ * Floats and integers beyond Number.MAX_SAFE_INTEGER differ from CPython's
+ * repr (exponent zero-padding and format thresholds), so cross-language
+ * digest equality must not rely on those shapes.
+ */
 function pythonCanonicalJson(value: unknown): string {
   const chunks: string[] = [];
   const tasks: CanonicalJsonTask[] = [{ kind: "value", value }];
@@ -263,6 +275,14 @@ function pythonStrippedString(value: unknown, label: string): string {
     throw new EffectRuntimeRequestError(`${label} must be a non-empty string`);
   }
   return stripped;
+}
+
+function optionalPythonStrippedString(
+  value: unknown,
+  label: string,
+): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  return pythonStrippedString(value, label);
 }
 
 function boundedTransactionResult(result: JsonObject): JsonObject {
@@ -344,7 +364,7 @@ function exactObjectFields(
   }
 }
 
-function decodeSource(value: unknown): PostWritebackSource {
+function decodeSourceFields(value: unknown): PostWritebackSource {
   const source = requireJsonObject(value, "source");
   exactObjectFields(
     source,
@@ -369,10 +389,16 @@ function decodeSource(value: unknown): PostWritebackSource {
     ["goal_id", "agent_id", "todo_id", "turn_instance_id", "effect_id"],
     "source.identity",
   );
-  const normalizedIdentity: JsonObject & { goal_id: string } = {
+  const normalizedIdentity: JsonObject & {
+    goal_id: string;
+    todo_id: string | null;
+  } = {
     goal_id: pythonStrippedString(identity.goal_id, "source.identity.goal_id"),
     agent_id: pythonStrippedString(identity.agent_id, "source.identity.agent_id"),
-    todo_id: pythonStrippedString(identity.todo_id, "source.identity.todo_id"),
+    todo_id: optionalPythonStrippedString(
+      identity.todo_id,
+      "source.identity.todo_id",
+    ),
     turn_instance_id: pythonStrippedString(
       identity.turn_instance_id,
       "source.identity.turn_instance_id",
@@ -401,6 +427,22 @@ function decodeSource(value: unknown): PostWritebackSource {
     ),
     projection: requireJsonObject(source.projection, "source.projection"),
   };
+}
+
+function decodeSource(value: unknown): PostWritebackSource {
+  try {
+    return decodeSourceFields(value);
+  } catch (error) {
+    if (error instanceof EffectRuntimeRequestError) {
+      // Every field/type/emptiness rejection from the source decoder carries
+      // one dedicated code; message text stays free to evolve.
+      throw new EffectRuntimeRequestError(
+        error.message,
+        POST_WRITEBACK_SOURCE_REJECTION_CODE,
+      );
+    }
+    throw error;
+  }
 }
 
 function decodeRuntimeRoot(value: unknown): string | null {

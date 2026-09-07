@@ -1019,7 +1019,7 @@ def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> No
             "root_id": "om_topic_alpha",
             "message_id": "om_incoming",
             "content": "@LoopX Mew hello",
-            "mentions": [{"name": "LoopX Mew", "id": "ou_mew_bot"}],
+            "mentions": [{"name": "LoopX Mew", "id": APP_ID}],
         },
     )
     assert route == {
@@ -1149,6 +1149,25 @@ def test_provider_bot_open_id_is_persisted_and_routes_tokenized_mentions(
     assert decision["matched"] is True
     assert decision["reason"] == "matched"
 
+    same_name_wrong_identity = decide_lark_topic_event(
+        target_payload=targets,
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_topic_alpha",
+            "message_id": "om_same_name_wrong_identity",
+            "content": "@_user_1 请处理",
+            "mentions": [
+                {
+                    "id": {"open_id": "ou_different_bot"},
+                    "name": str(target["identity"]["bot_display_name"]),
+                }
+            ],
+        },
+    )
+    assert same_name_wrong_identity["matched"] is False
+    assert same_name_wrong_identity["reason"] == "not_addressed"
+
 
 def test_topic_route_decision_reports_safe_reason_codes(tmp_path: Path) -> None:
     state: dict[str, Any] = {}
@@ -1264,7 +1283,7 @@ def test_topic_route_decision_reports_safe_reason_codes(tmp_path: Path) -> None:
             "mentions": [
                 {
                     "key": "@_user_1",
-                    "id": {"open_id": "ou_public_fixture"},
+                    "id": {"app_id": APP_ID},
                     "name": " @LoopX   Mew ",
                 }
             ],

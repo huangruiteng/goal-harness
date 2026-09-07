@@ -18,8 +18,13 @@ from loopx.control_plane.coordination.local_authority import (
 from loopx.control_plane.coordination.runtime_shadow import (
     build_todo_runtime_shadow_projection,
 )
+from loopx.control_plane.coordination.coordination_state_contract import (
+    TODO_DOMAIN_READ_RECORD_SCHEMA_VERSION,
+    TODO_DOMAIN_RECORD_FIELDS,
+)
 from loopx.control_plane.effect_runtime import effect_runtime_result
 from loopx.control_plane.todos.active_state_editing import TODO_SECTION_HEADINGS
+from loopx.control_plane.todos import provider_projection
 from loopx.control_plane.coordination.legacy_writer_fence import (
     legacy_coordination_writer_fence_path,
 )
@@ -40,6 +45,85 @@ def _todo_read_model(todo_count: int) -> dict[str, object]:
         "schema_version": "loopx_todo_canonical_read_record_v0",
         "todo_count": todo_count,
     }
+
+
+def _promote_local_projection(
+    *,
+    runtime_root: Path,
+    goal_id: str,
+    projection: dict[str, object],
+    operation_suffix: str,
+) -> str:
+    canonical_bytes = json.dumps(
+        projection,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    projection_sha256 = hashlib.sha256(canonical_bytes).hexdigest()
+    source_version = f"state:{operation_suffix}:1"
+
+    bootstrap = effect_runtime_result(
+        "coordination.runtime_shadow.bootstrap",
+        {
+            "schema_version": "loopx_coordination_runtime_shadow_bootstrap_v0",
+            "runtime_root": str(runtime_root),
+            "goal_id": goal_id,
+            "operation_id": f"bootstrap:{goal_id}:{operation_suffix}",
+            "source_version": f"state:{operation_suffix}:0",
+            "projection": projection,
+        },
+    )
+    assert bootstrap["status"] == "applied"
+    mirrored = effect_runtime_result(
+        "coordination.runtime_shadow.commit",
+        {
+            "schema_version": "loopx_coordination_runtime_shadow_commit_v0",
+            "runtime_root": str(runtime_root),
+            "goal_id": goal_id,
+            "operation_id": f"todo:{goal_id}:{operation_suffix}:qualify",
+            "event_kind": "todo_update",
+            "source_version": source_version,
+            "projection": projection,
+        },
+    )
+    assert mirrored["status"] == "applied"
+    provider_revision = str(mirrored["provider_revision"])
+    fence = {
+        "schema_version": "loopx_legacy_coordination_writer_fence_v0",
+        "state": "engaged",
+        "goal_id": goal_id,
+        "fence_id": f"legacy-writer-fence:{goal_id}:{operation_suffix}",
+        "source_version": source_version,
+        "source_projection_sha256": projection_sha256,
+        "expected_shadow_provider_revision": provider_revision,
+    }
+    engaged = effect_runtime_result(
+        "coordination.local_authority.legacy_writer_fence.engage",
+        {
+            "schema_version": "loopx_legacy_coordination_writer_fence_engage_request_v0",
+            "runtime_root": str(runtime_root),
+            "goal_id": goal_id,
+            "fence": fence,
+        },
+    )
+    assert engaged["status"] == "applied"
+    promoted = effect_runtime_result(
+        "coordination.local_authority.promote",
+        {
+            "schema_version": "loopx_local_coordination_promotion_request_v0",
+            "runtime_root": str(runtime_root),
+            "goal_id": goal_id,
+            "operation_id": f"promote:{goal_id}:{operation_suffix}",
+            "expected_shadow_provider_revision": provider_revision,
+            "expected_shadow_projection_sha256": projection_sha256,
+            "minimum_operations": 1,
+            "required_event_kinds": ["todo_update"],
+            "writer_fence": fence,
+        },
+    )
+    assert promoted["status"] == "applied"
+    return provider_revision
 
 
 def test_absent_fence_preserves_legacy_path_without_starting_typescript(
@@ -132,6 +216,8 @@ def test_promoted_claim_adapter_invokes_typescript_without_markdown_fallback(
         claimed_by="agent-a",
         actor_agent_id="agent-a",
         dry_run=False,
+        task_lease_idempotency_key="turn:claim-and-acquire",
+        task_lease_expected_version=0,
     )
 
     assert result is not None and result["changed"] is True
@@ -139,6 +225,11 @@ def test_promoted_claim_adapter_invokes_typescript_without_markdown_fallback(
     assert calls[0][1]["registered_agents"] == ["agent-a", "agent-b"]
     assert str(calls[0][1]["operation_id"]).startswith("todo-claim:goal-a:todo_a:")
     assert isinstance(calls[0][1]["observed_at"], str)
+    assert calls[0][1]["lease_request"] == {
+        "idempotency_key": "turn:claim-and-acquire",
+        "expected_version": 0,
+        "ttl_seconds": None,
+    }
 
 
 def test_promoted_add_invokes_native_create_without_markdown_state(
@@ -262,6 +353,98 @@ def test_promoted_add_delegates_semantic_duplicate_to_typescript(
     assert calls[0][0] == "coordination.local_authority.todo_create"
 
 
+def test_promoted_native_create_recovers_markdown_after_delivery_crash(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    project = tmp_path / "project"
+    state_file = project / ".codex/goals/goal-a/ACTIVE_GOAL_STATE.md"
+    state_file.parent.mkdir(parents=True)
+    source = """# Goal
+
+Human context.
+
+## User Todo / Owner Review Reading Queue
+
+## Agent Todo
+
+## Completed Work Archive
+
+## Next Action
+
+Continue.
+"""
+    state_file.write_text(source, encoding="utf-8")
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(json.dumps({
+        "schema_version": 1,
+        "common_runtime_root": str(runtime_root),
+        "goals": [{
+            "id": "goal-a", "status": "active", "repo": str(project),
+            "state_file": ".codex/goals/goal-a/ACTIVE_GOAL_STATE.md",
+            "coordination": {"registered_agents": ["agent-a", "agent-b"]},
+        }],
+    }), encoding="utf-8")
+    projection = build_todo_runtime_shadow_projection(goal_id="goal-a", todos=[])
+    projection["todo_read_model"] = {
+        **projection["todo_read_model"],
+        "schema_version": TODO_DOMAIN_READ_RECORD_SCHEMA_VERSION,
+        "contract_fields": list(TODO_DOMAIN_RECORD_FIELDS),
+    }
+    _promote_local_projection(
+        runtime_root=runtime_root,
+        goal_id="goal-a",
+        projection=projection,
+        operation_suffix="native-projection-recovery",
+    )
+
+    real_write = provider_projection._atomic_write_text
+
+    def crash(*_args: object, **_kwargs: object) -> None:
+        raise OSError("injected projection crash")
+
+    monkeypatch.setattr(provider_projection, "_atomic_write_text", crash)
+    applied = add_goal_todo(
+        registry_path=registry_path,
+        goal_id="goal-a",
+        role="agent",
+        text="Recover the native compatibility projection",
+        task_class="advancement_task",
+        action_kind="implement",
+        claimed_by="agent-a",
+        agent_id="agent-a",
+    )
+
+    assert applied["status"] == "applied"
+    assert applied["projection_delivery"] == "pending"
+    canonical = read_canonical_todos_if_promoted(
+        runtime_root=runtime_root,
+        goal_id="goal-a",
+    )
+    assert canonical is not None
+    assert canonical["todos"][0]["schema_version"] == "todo_domain_record_v0"
+    assert state_file.read_text(encoding="utf-8") == source
+
+    monkeypatch.setattr(provider_projection, "_atomic_write_text", real_write)
+    replay = add_goal_todo(
+        registry_path=registry_path,
+        goal_id="goal-a",
+        role="agent",
+        text="Recover the native compatibility projection",
+        task_class="advancement_task",
+        action_kind="implement",
+        claimed_by="agent-a",
+        agent_id="agent-a",
+    )
+    assert replay["status"] == "no_change"
+    assert replay["projection_delivery"] == "delivered"
+    rendered = state_file.read_text(encoding="utf-8")
+    assert "Recover the native compatibility projection" in rendered
+    assert "Human context." in rendered
+    assert "Continue." in rendered
+
+
 def test_engaged_fence_never_falls_back_when_provider_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -306,7 +489,6 @@ def _seed_promoted_store(
     """Promote one open agent Todo through the real TypeScript runtime."""
 
     projection = build_todo_runtime_shadow_projection(
-        handoff_mode=handoff_mode,
         goal_id="goal-a",
         todos=[
             {
@@ -322,6 +504,8 @@ def _seed_promoted_store(
             }
         ],
     )
+    if handoff_mode is not None:
+        projection["handoff_mode"] = str(handoff_mode)
     canonical_bytes = json.dumps(
         projection,
         ensure_ascii=False,
@@ -467,12 +651,25 @@ def test_promoted_claim_protocol_failure_stays_infrastructure_outage(
 
 
 def test_promoted_claim_folds_agent_id_whitespace_like_legacy(tmp_path: Path) -> None:
-    """Tabs in claimed_by must fold to "-" before and after promotion alike.
-
-    Legacy normalize_todo_claimed_by collapses any whitespace run (Python
-    compact_todo_text) to a single "-"; the TypeScript owner now folds the
-    same way, so the identical claim command keeps succeeding post-cutover.
+    """Every Python whitespace character (including U+0085 NEL, U+001C..U+001F,
+    tabs, NBSP) in claimed_by must fold to '-' identically before and after promotion.
     """
+    from loopx.control_plane.todos.contract import normalize_todo_claimed_by
+
+    variants = [
+        "Agent A",
+        "Agent\tA",
+        "Agent\u0085A",
+        "Agent\u001cA",
+        "Agent\u001dA",
+        "Agent\u001eA",
+        "Agent\u001fA",
+        "Agent\u00a0A",
+        "\u0085 Agent \t A \u001c ",
+    ]
+    for variant in variants:
+        assert normalize_todo_claimed_by(variant) == "agent-a"
+
     _seed_promoted_store(tmp_path)
     result = claim_canonical_todo_if_promoted(
         registry_path=_claim_registry(tmp_path),
@@ -480,8 +677,8 @@ def test_promoted_claim_folds_agent_id_whitespace_like_legacy(tmp_path: Path) ->
         goal_id="goal-a",
         todo_id="todo_a",
         role="agent",
-        claimed_by="Agent\tA",
-        actor_agent_id=None,
+        claimed_by="Agent\u0085A",
+        actor_agent_id="\u0085 Agent \t A \u001c ",
         dry_run=False,
     )
     assert result is not None and result["ok"] is True
@@ -566,6 +763,131 @@ def test_todo_list_uses_provider_after_cutover_even_when_markdown_disagrees(
     assert result["source"] == "file_authority"
     assert [item["todo_id"] for item in result["todos"]] == ["todo_provider"]
     assert result["authority_read"]["legacy_fallback_used"] is False
+
+
+def test_promoted_hard_lease_claim_cli_atomically_acquires_ownership(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    project = tmp_path / "project"
+    state_file = project / ".codex/goals/goal-a/ACTIVE_GOAL_STATE.md"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text("# Goal\n", encoding="utf-8")
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "common_runtime_root": str(runtime_root),
+                "goals": [
+                    {
+                        "id": "goal-a",
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": ".codex/goals/goal-a/ACTIVE_GOAL_STATE.md",
+                        "coordination": {
+                            "registered_agents": ["agent-a", "agent-b"]
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    todo = {
+        "schema_version": "todo_item_v0",
+        "index": 1,
+        "done": False,
+        "text": "Claim and acquire one canonical ownership transaction",
+        "todo_id": "todo_atomic_claim",
+        "role": "agent",
+        "status": "open",
+        "archive_state": "active",
+        "source_section": TODO_SECTION_HEADINGS["agent"],
+        "required_write_scopes": ["loopx/control_plane/**"],
+    }
+    projection = build_todo_runtime_shadow_projection(
+        goal_id="goal-a",
+        todos=[todo],
+    )
+    projection["handoff_mode"] = "hard_lease"
+    _promote_local_projection(
+        runtime_root=runtime_root,
+        goal_id="goal-a",
+        projection=projection,
+        operation_suffix="atomic-claim",
+    )
+    state_file.unlink()
+
+    command = [
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--format",
+        "json",
+        "--registry",
+        str(registry_path),
+        "todo",
+        "claim",
+        "--goal-id",
+        "goal-a",
+        "--todo-id",
+        "todo_atomic_claim",
+        "--claimed-by",
+        "agent-a",
+        "--agent-id",
+        "agent-a",
+        "--claim-operation-id",
+        "atomic-cli-claim",
+        "--task-lease-idempotency-key",
+        "turn:atomic-cli-claim",
+        "--task-lease-expected-version",
+        "0",
+    ]
+    before = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
+    preview = json.loads(
+        subprocess.run(
+            [*command, "--dry-run"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout
+    )
+    assert preview["status"] == "planned"
+    assert preview["todo_changed"] is True
+    assert preview["lease_changed"] is True
+    assert list_goal_todos(registry_path=registry_path, goal_id="goal-a") == before
+
+    applied = json.loads(
+        subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout
+    )
+    assert applied["status"] == "applied"
+    assert applied["todo_changed"] is True
+    assert applied["lease_changed"] is True
+    assert applied["lease"]["owner"] == "agent-a"
+    assert applied["lease"]["idempotency_key"] == "turn:atomic-cli-claim"
+    assert applied["lease"]["write_scopes"] == ["loopx/control_plane/**"]
+    replay = json.loads(
+        subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout
+    )
+    assert replay["status"] == "replayed"
+    assert replay["original_receipt"] == applied["original_receipt"]
+    after = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
+    assert after["todos"][0]["claimed_by"] == "agent-a"
+    assert not state_file.exists()
 
 
 def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
@@ -665,74 +987,12 @@ def test_real_shadow_projection_promotes_complete_complex_todo_semantics(
         goal_id="goal-a",
         todos=[complex_todo, successor, claimable],
     )
-    canonical_bytes = json.dumps(
-        projection,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    projection_sha256 = hashlib.sha256(canonical_bytes).hexdigest()
-
-    bootstrap = effect_runtime_result(
-        "coordination.runtime_shadow.bootstrap",
-        {
-            "schema_version": "loopx_coordination_runtime_shadow_bootstrap_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": "goal-a",
-            "operation_id": "bootstrap:goal-a:complex",
-            "source_version": "state:complex:0",
-            "projection": projection,
-        },
+    _promote_local_projection(
+        runtime_root=runtime_root,
+        goal_id="goal-a",
+        projection=projection,
+        operation_suffix="complex",
     )
-    assert bootstrap["status"] == "applied"
-    mirrored = effect_runtime_result(
-        "coordination.runtime_shadow.commit",
-        {
-            "schema_version": "loopx_coordination_runtime_shadow_commit_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": "goal-a",
-            "operation_id": "todo:goal-a:complex:qualify",
-            "event_kind": "todo_update",
-            "source_version": "state:complex:1",
-            "projection": projection,
-        },
-    )
-    assert mirrored["status"] == "applied"
-    provider_revision = str(mirrored["provider_revision"])
-    fence = {
-        "schema_version": "loopx_legacy_coordination_writer_fence_v0",
-        "state": "engaged",
-        "goal_id": "goal-a",
-        "fence_id": "legacy-writer-fence:goal-a:complex",
-        "source_version": "state:complex:1",
-        "source_projection_sha256": projection_sha256,
-        "expected_shadow_provider_revision": provider_revision,
-    }
-    engaged = effect_runtime_result(
-        "coordination.local_authority.legacy_writer_fence.engage",
-        {
-            "schema_version": "loopx_legacy_coordination_writer_fence_engage_request_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": "goal-a",
-            "fence": fence,
-        },
-    )
-    assert engaged["status"] == "applied"
-    promoted = effect_runtime_result(
-        "coordination.local_authority.promote",
-        {
-            "schema_version": "loopx_local_coordination_promotion_request_v0",
-            "runtime_root": str(runtime_root),
-            "goal_id": "goal-a",
-            "operation_id": "promote:goal-a:complex",
-            "expected_shadow_provider_revision": provider_revision,
-            "expected_shadow_projection_sha256": projection_sha256,
-            "minimum_operations": 1,
-            "required_event_kinds": ["todo_update"],
-            "writer_fence": fence,
-        },
-    )
-    assert promoted["status"] == "applied"
 
     state_file.unlink()
     result = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
@@ -1109,10 +1369,11 @@ def test_hard_lease_eligibility_rejection_is_valueerror(
 ) -> None:
     """A real hard-lease Todo without a lease rejects with a usable repair path.
 
-    The unpromoted path raises TaskLeaseError (a ValueError) pointing at
-    ``loopx task-lease acquire``; the promoted path must keep that caller
-    contract and carry the same actionable recovery guidance, while leaving
-    the canonical state untouched.
+    The unpromoted path raises TaskLeaseError (a ValueError) when a hard-lease
+    Todo has no matching active lease; the promoted path must keep that caller
+    contract and leave the canonical state untouched. The canonical recovery
+    operation is to supply a task-lease idempotency key to acquire the lease
+    atomically with the claim.
     """
 
     _seed_promoted_store(tmp_path, handoff_mode="hard_lease")
@@ -1136,10 +1397,48 @@ def test_hard_lease_eligibility_rejection_is_valueerror(
         )
     assert isinstance(exc_info.value, LocalCoordinationAuthorityRejection)
     assert exc_info.value.code == "handoff_mode_requires_lease"
-    assert "loopx task-lease acquire" in str(exc_info.value)
+    assert (
+        str(exc_info.value)
+        == "hard_lease Todo claim requires an active canonical lease held by the claiming agent"
+    )
     store_after = json.loads(
         (
             tmp_path / "authority" / "file-v0" / "authority-store-bf21e67b01a351a1.json"
         ).read_text(encoding="utf-8")
     )
     assert json.dumps(store_after.get("head", {}), sort_keys=True) == head_before
+
+    # Canonical recovery path: supply task_lease_idempotency_key to acquire
+    # the lease atomically during claim.
+    recovered = claim_canonical_todo_if_promoted(
+        registry_path=registry_path,
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        todo_id="todo_a",
+        role="agent",
+        claimed_by="agent-a",
+        actor_agent_id="agent-a",
+        dry_run=False,
+        task_lease_idempotency_key="turn:claim-and-acquire",
+        task_lease_expected_version=0,
+    )
+    assert recovered is not None and recovered["status"] == "applied"
+    assert recovered["changed"] is True
+    assert recovered["lease"]["owner"] == "agent-a"
+    assert recovered["lease"]["status"] == "active"
+    assert recovered["lease"]["idempotency_key"] == "turn:claim-and-acquire"
+
+    # With the active lease now persisted, subsequent claims succeed without
+    # requiring a new lease request.
+    subsequent = claim_canonical_todo_if_promoted(
+        registry_path=registry_path,
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        todo_id="todo_a",
+        role="agent",
+        claimed_by="agent-a",
+        actor_agent_id="agent-a",
+        dry_run=False,
+    )
+    assert subsequent is not None
+    assert subsequent["status"] in {"applied", "no_change", "replayed"}

@@ -141,7 +141,7 @@ def _extension_activation() -> dict[str, Any]:
     return {
         "schema_version": "loopx_extension_activation_v0",
         "extension_id": "loopx-lark",
-        "provider_version": "1.5.0",
+        "provider_version": "1.6.0",
         "revision": "publicfixture123",
         "enabled": True,
         "doctor_verified": True,

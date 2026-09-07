@@ -7,7 +7,11 @@ import test from "node:test";
 
 import { FileAuthorityStore } from "../../loopx/control_plane/coordination/file_authority_store.ts";
 import type { AuthorityStoreCommit } from "../../loopx/control_plane/coordination/authority_store.ts";
-import { canonicalAuthorityBytes } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import {
+  AuthorityStoreProtocolError,
+  canonicalAuthorityBytes,
+} from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import { normalizeTodoAgent } from "../../loopx/control_plane/coordination/todo_agents.ts";
 import {
   TODO_DOMAIN_ITEM_SCHEMA,
   TODO_DOMAIN_READ_RECORD_SCHEMA,
@@ -514,9 +518,30 @@ test("provider-first Todo claim preserves the complete record and is replay-safe
 
 test("agent id normalization folds any whitespace run like the Python kernel", async () => {
   // Parity with loopx/control_plane/todos/contract.py normalize_todo_claimed_by:
-  // compact_todo_text collapses every whitespace run (tabs included) into one
-  // space before mapping it to "-", so the same claim command keeps working
+  // compact_todo_text collapses every Python-recognized whitespace run (including
+  // U+0085 NEL, U+001C..U+001F information separators, tabs, and NBSP) into
+  // one space before mapping it to "-", so the same claim command keeps working
   // before and after promotion.
+  const whitespaceVariants = [
+    "Agent A",
+    "Agent\tA",
+    "Agent\u0085A",
+    "Agent\u001cA",
+    "Agent\u001dA",
+    "Agent\u001eA",
+    "Agent\u001fA",
+    "Agent\u00a0A",
+    "\u0085 Agent \t A \u001c ",
+  ];
+  for (const variant of whitespaceVariants) {
+    assert.equal(normalizeTodoAgent(variant, "claimed_by"), "agent-a");
+  }
+  // BOM (U+FEFF) is not Python whitespace and must not be accepted
+  assert.throws(
+    () => normalizeTodoAgent("\ufeffAgent A", "claimed_by"),
+    AuthorityStoreProtocolError,
+  );
+
   const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-claim-tab-"));
   const store = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
   const seeded = await store.commitAuthority({
@@ -539,8 +564,8 @@ test("agent id normalization folds any whitespace run like the Python kernel", a
     goal_id: "goal-a",
     todo_id: "todo_a",
     role: "agent",
-    claimed_by: "Agent\tA",
-    actor_agent_id: "Agent \t A",
+    claimed_by: "Agent\u0085A",
+    actor_agent_id: "\u0085 Agent \t A \u001c ",
     registered_agents: ["agent-a"],
     operation_id: "todo-claim:goal-a:todo_a:tab",
     observed_at: "2026-09-05T04:30:00Z",
@@ -915,6 +940,84 @@ test("provider-first Todo claim validates authority and hard-lease ownership", a
     todo_id: "todo_a",
   });
   assert.equal((unchanged.todo as Record<string, unknown>).claimed_by, undefined);
+});
+
+test("provider-first Todo claim atomically acquires its canonical hard lease", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-claim-lease-"));
+  const store = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
+  assert.equal((await store.commitAuthority({
+    expected_provider_revision: null,
+    operation_id: "promote:claim-with-lease",
+    events: [{ schema_version: "promotion_v0" }],
+    next_projection: withTodoReadModel({
+      goal_id: "goal-a",
+      handoff_mode: "hard_lease",
+      todos: [todoRecord({ required_write_scopes: ["loopx/control_plane/**"] })],
+      leases: [],
+    }),
+    receipts: [],
+  })).status, "applied");
+  const request = {
+    schema_version: LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    todo_id: "todo_a",
+    role: "agent",
+    claimed_by: "agent-a",
+    actor_agent_id: "agent-a",
+    registered_agents: ["agent-a", "agent-b"],
+    operation_id: "todo-claim:goal-a:todo_a:with-lease",
+    observed_at: "2026-09-05T04:30:00Z",
+    dry_run: false,
+    lease_request: {
+      idempotency_key: "turn:claim-with-lease",
+      expected_version: 0,
+      ttl_seconds: 2_700,
+    },
+  };
+
+  const preview = await claimLocalCoordinationTodo({...request, dry_run: true});
+  assert.equal(preview.status, "planned");
+  assert.equal(preview.todo_changed, true);
+  assert.equal(preview.lease_changed, true);
+  const before = await store.loadAuthority();
+  assert.equal(before.status, "loaded");
+  if (before.status !== "loaded") return;
+  assert.deepEqual(before.head.leases, []);
+  assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+
+  const applied = await claimLocalCoordinationTodo(request);
+  assert.equal(applied.status, "applied", JSON.stringify(applied));
+  assert.equal(applied.todo_changed, true);
+  assert.equal(applied.lease_changed, true);
+  assert.equal(applied.lease_idempotent, false);
+  const after = await store.loadAuthority();
+  assert.equal(after.status, "loaded");
+  if (after.status !== "loaded") return;
+  assert.equal((after.head.todos as Record<string, unknown>[])[0]?.claimed_by, "agent-a");
+  assert.deepEqual(after.head.leases, [applied.lease]);
+  const lease = applied.lease as Record<string, unknown>;
+  assert.equal(lease.schema_version, "task_lease_v0");
+  assert.equal(lease.owner, "agent-a");
+  assert.equal(lease.idempotency_key, "turn:claim-with-lease");
+  assert.deepEqual(lease.write_scopes, ["loopx/control_plane/**"]);
+  assert.equal(lease.version, 1);
+  assert.equal(lease.lease_epoch, 1);
+
+  const replay = await claimLocalCoordinationTodo({
+    ...request,
+    observed_at: "2026-09-05T06:00:00Z",
+  });
+  assert.equal(replay.status, "replayed");
+  assert.deepEqual(replay.original_receipt, applied.original_receipt);
+  const retiredGeneration = await claimLocalCoordinationTodo({
+    ...request,
+    operation_id: "todo-claim:goal-a:todo_a:fresh-after-expiry",
+    observed_at: "2026-09-05T06:00:00Z",
+    lease_request: {...request.lease_request, expected_version: 1},
+  });
+  assert.equal(retiredGeneration.reason_code, "idempotency_key_reuse");
+  assert.deepEqual(await store.loadAuthority(), after);
 });
 
 test("local canonical runtime never falls back when provider state is missing", async () => {

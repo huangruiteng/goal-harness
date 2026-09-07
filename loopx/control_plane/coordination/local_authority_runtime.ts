@@ -51,6 +51,10 @@ import {
   executeCoordinationTodoUpdate,
 } from "./todo_update.ts";
 import { editCoordinationTodo, TODO_COMPATIBILITY_EDIT_RESULT_SCHEMA } from "./todo_compatibility_edit.ts";
+import {
+  normalizeIdempotencyKey,
+  normalizeTtl,
+} from "../work_items/task_lease_acquire.ts";
 
 export const LOCAL_COORDINATION_TODO_CLAIM_REQUEST_SCHEMA =
   "loopx_local_coordination_todo_claim_request_v0";
@@ -560,6 +564,24 @@ export async function claimLocalCoordinationTodo(
     const registeredAgents = input.registered_agents.map(
       (value) => claimAgentValue(value, "registered agent"),
     );
+    const leaseRequestValue = input.lease_request;
+    const leaseRequest = leaseRequestValue === null || leaseRequestValue === undefined
+      ? null
+      : (() => {
+        const request = requireJsonObject(leaseRequestValue, "lease_request");
+        const expectedVersion = request.expected_version;
+        if (expectedVersion !== null && expectedVersion !== undefined &&
+            (!Number.isSafeInteger(expectedVersion) || Number(expectedVersion) < 0)) {
+          throw new Error(
+            "lease_request.expected_version must be a non-negative safe integer or null",
+          );
+        }
+        return {
+          idempotency_key: normalizeIdempotencyKey(request.idempotency_key),
+          expected_version: expectedVersion === undefined ? null : expectedVersion as number | null,
+          ttl_seconds: normalizeTtl(request.ttl_seconds),
+        };
+      })();
     const result = await executeCoordinationTodoClaim(store, {
       goal_id: goalId,
       todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
@@ -572,6 +594,7 @@ export async function claimLocalCoordinationTodo(
         : requireAuthorityStoreId(input.role, "role"),
       registered_agents: registeredAgents,
       operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+      lease_request: leaseRequest,
       dry_run: input.dry_run,
       now: claimObservedAt(input.observed_at),
     });

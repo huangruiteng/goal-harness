@@ -566,7 +566,8 @@ def test_quota_action_selection_requires_turn_identity() -> None:
                 "Continue the work.",
             ],
             "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-            "--claim-operation-id, --project, --state-file, and --dry-run; unsupported: "
+            "--claim-operation-id, --task-lease-idempotency-key, "
+            "--task-lease-expected-version, --project, --state-file, and --dry-run; unsupported: "
             "--decision-outcome, --next-agent-todo",
         ),
     ],
@@ -1144,7 +1145,7 @@ def test_doctor_accepts_subcommand_json_format(
     monkeypatch.setattr(
         doctor_command,
         "collect_doctor",
-        lambda *, deep=False, agent_type=None: {
+        lambda *, deep=False, agent_type=None, installation_only=False: {
             "ok": True,
             "deep": deep,
             "agent_type": agent_type,

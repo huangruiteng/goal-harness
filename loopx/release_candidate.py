@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 from importlib.metadata import PackageNotFoundError, distribution
 import subprocess
 from pathlib import Path
@@ -275,3 +276,45 @@ def collect_deep_install_checks(
         package_root=package_root,
         invocation_root=invocation_root,
     )
+
+
+def collect_installation_doctor(*, deep: bool) -> dict[str, Any]:
+    """Validate the package/toolchain without opening registered user projects.
+
+    Installers must not depend on workspace availability or macOS folder
+    consent. Keep the same representative package and runtime semantic checks
+    as deep doctor; ambient Goal, skill and provider health is a separate read.
+    """
+    from .control_plane.effect_runtime import collect_effect_runtime_readiness
+    from .command_invocation import resolve_command_path
+    from .doctor import current_script_invocation_path, python_distribution_install
+
+    invocation = current_script_invocation_path()
+    command = resolve_command_path("loopx") or invocation
+    package_root = Path(__file__).resolve().parents[1]
+    selected = os.environ.get("LOOPX_RELEASE_ROOT")
+    runtime = collect_effect_runtime_readiness(deep=deep)
+    checks = [
+        {"id": "command_available", "required": True, "ok": command is not None},
+        {"id": "typescript_effect_runtime_ready", "required": True,
+         "ok": bool(runtime.get("ready")), "detail": runtime.get("status")},
+    ]
+    payload: dict[str, Any] = {
+        "mode": "deep" if deep else "standard",
+        "scope": "installation_only",
+        "checks": checks,
+        "typescript_control_plane": runtime,
+        "path": {"loopx": str(command) if command else None},
+    }
+    if deep:
+        candidate = collect_deep_install_checks(
+            command_path=command,
+            invocation_path=invocation,
+            package_root=package_root,
+            invocation_root=Path(selected).expanduser().resolve() if selected else package_root,
+            distribution_root=python_distribution_install(Path(__file__).resolve()).get("root"),
+        )
+        checks.extend(candidate["checks"])
+        payload["release_candidate"] = candidate
+    payload["ok"] = all(check["ok"] for check in checks)
+    return payload

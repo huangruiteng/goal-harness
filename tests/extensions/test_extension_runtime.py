@@ -23,6 +23,7 @@ from loopx.capabilities.semantic_preference.cli import (
 )
 from loopx.capabilities.semantic_preference.contract import provider_doctor, recall
 from loopx.cli import main
+from loopx.extensions.hook_adapters import discover_extension_hook_adapters
 from loopx.extensions.manifest import load_extension_manifest
 from loopx.extensions.openviking_semantic_preference.provider import (
     register_openviking_provider_arguments,
@@ -197,6 +198,91 @@ def test_presentation_surface_manifest_is_normalized(tmp_path: Path) -> None:
             "empty_state_detail": "Publish a validated projection.",
         }
     ]
+
+
+def test_capability_action_hook_adapter_manifest_is_normalized(tmp_path: Path) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest_path = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        permission="semantic_preference.read",
+    )
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        + """
+
+[[hook_adapters]]
+id = "sample-report-source"
+capability_id = "sample-report"
+target_hook_id = "sample_report.request"
+phase = "capability_action"
+factory = "sample_extension.hooks:build_adapter"
+required_permissions = ["semantic_preference.read"]
+ports = ["sample_report.request.bind_source", "sample_report.request.settle_source"]
+""",
+        encoding="utf-8",
+    )
+
+    manifest = load_extension_manifest(manifest_path)
+
+    assert manifest["hook_adapters"] == [
+        {
+            "id": "sample-report-source",
+            "capability_id": "sample-report",
+            "target_hook_id": "sample_report.request",
+            "phase": "capability_action",
+            "factory": "sample_extension.hooks:build_adapter",
+            "required_permissions": ["semantic_preference.read"],
+            "ports": [
+                "sample_report.request.bind_source",
+                "sample_report.request.settle_source",
+            ],
+        }
+    ]
+
+
+def test_capability_action_factory_failure_is_content_free_and_kernel_independent(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest_path = _standalone_manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        permission="semantic_preference.read",
+    )
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        + """
+
+[[hook_adapters]]
+id = "sample-report-source"
+capability_id = "sample-report"
+target_hook_id = "sample_report.request"
+phase = "capability_action"
+factory = "missing_extension.hooks:build_adapter"
+required_permissions = ["semantic_preference.read"]
+ports = ["sample_report.request.bind_source"]
+""",
+        encoding="utf-8",
+    )
+    state_file = tmp_path / "runtime" / "extensions" / "state.json"
+    install_extension(manifest_path, state_file=state_file, execute=True)
+
+    discovery = discover_extension_hook_adapters(
+        state_file=state_file,
+        phase="capability_action",
+        capability_id="sample-report",
+        target_hook_id="sample_report.request",
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        goal_id="sample-goal",
+        agent_id="sample-agent",
+    )
+
+    assert discovery.ports == ()
+    assert len(discovery.failures) == 1
+    assert discovery.failures[0].adapter_id == "sample-report-source"
+    assert discovery.failures[0].error_code == "extension_hook_adapter_unavailable"
 
 
 @pytest.mark.parametrize(

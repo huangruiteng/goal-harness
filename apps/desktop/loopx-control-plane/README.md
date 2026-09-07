@@ -26,7 +26,7 @@ qualified. Browser/PWA users continue to use `loopx update`.
 ## Updates And Recovery
 
 The update panel is collapsed by default and opens above the sidebar without
-reducing the Goal list height. Automatic checks never install software. Its
+reducing the Goal list height. Automatic update checks never replace the App. Its
 advanced options expose stable/main channels, repair, and macOS rollback.
 The main channel points to the latest **complete signed build**, not arbitrary
 moving Git HEAD. A missing feed or failed signature is an error, not proof that
@@ -38,13 +38,49 @@ The bundled runtime owns the CLI, HTTP APIs and workspace assets. A runtime-only
 CLI update cannot patch native startup or updater bugs; those require an App
 update. The App update workflow packages both layers from one Git revision.
 
+On macOS, opening the App now automatically prepares its bundled runtime when
+the default CLI is missing or has a different source revision. This changes
+the previous startup behavior, which stopped at a manual repair gate. It can
+replace a separately updated default CLI with the App's matching snapshot;
+use an App update to move the paired installation forward. Automatic startup
+does not download another App or choose another update channel. Explicit
+`LOOPX_BIN` overrides are retained and are never replaced automatically: a
+mismatched override must be corrected by its owner.
+
+The installer and App-owned services use the same bounded tool search,
+including standard Homebrew locations on macOS, without loading interactive
+shell profiles. Finder launches therefore do not depend on terminal PATH setup.
+Installation uses `loopx doctor --deep --installation-only`: package ownership,
+representative imports/commands/files and the TypeScript runtime semantic probe
+remain required, but existing Goal projects are not traversed. Native runtime
+preparation also leaves host skills/slash commands and provider doctors alone;
+it cannot depend on a macOS Documents-folder consent prompt. Ordinary
+`loopx doctor` retains its full operator/integration diagnostics. Terminal
+installation still revalidates enabled extensions by default; the App sets
+`LOOPX_INSTALL_REVALIDATE_EXTENSIONS=0` for its bounded bootstrap.
+Failed runtime preparation remains supervised, with at most three automatic
+install attempts per App process and at least 30 seconds between attempts.
+Existing recovery controls remain available after that budget is exhausted,
+and externally corrected installations are still detected. A matching runtime
+completes a pending installation journal without reinstalling it.
+
+A listener that accepts TCP but does not answer HTTP is given a 15-second
+startup grace period. The supervisor can then replace it only after verifying
+its LoopX command, service kind and port, including a second PID readback before
+termination. Unknown listeners are retained and reported as startup errors.
+
+Chat begins serving its workspace and readiness endpoints independently of Lark
+binding discovery. Slow or permission-blocked project reads remain in one
+background initialization worker; discovery failures retry every five seconds.
+Closing the server fences late discovery results before any queue resumption
+or event consumer starts. Existing enabled bindings retain their routing and
+authorization rules.
+
 If startup cannot proceed, the embedded **Recovery & updates** screen stays
 available without a working HTTP service. **Repair this version** reinstalls
-the bundled runtime. It may replace a separately updated CLI with this App's
-matching snapshot, so it requires an explicit click. No automatic downgrade
-is performed when the selected runtime differs. Explicit `LOOPX_BIN` overrides
-are retained; an override that still selects another revision fails identity
-verification instead of reporting success.
+the bundled runtime and then reconnects the same window automatically; it no
+longer requires a second App restart. Reloading the WebView cannot terminate
+the native startup supervisor.
 
 An update journal resumes an approved runtime installation after restart.
 Concurrent transactions and additional installs before a required restart are

@@ -288,8 +288,18 @@ loopx quota spend-slot --goal-id <goal-id> --todo-id <selected-todo-id> --slots 
 ```
 
 When a host explicitly advertises `task_lease_v0`, it must also expose the
-equivalent CLI fallback. Acquiring a hard lease does not replace todo claim,
-quota, capability, write-scope, or workspace guards:
+equivalent CLI fallback. After canonical authority promotion, a `hard_lease`
+host can acquire the lease and claim atomically; LoopX derives write scopes
+from the canonical Todo:
+
+```bash
+loopx todo claim --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-id> --agent-id <agent-id> --claim-operation-id <operation-id> --task-lease-idempotency-key <turn-key> --task-lease-expected-version <lease-version>
+```
+
+The atomic options fail closed before promotion. The existing two-command
+fallback remains available where the lease is acquired separately. Acquiring
+a hard lease does not replace quota, capability, write-scope, or workspace
+guards:
 
 ```bash
 loopx task-lease acquire --goal-id <goal-id> --todo-id <todo_id> --owner <agent-id> --idempotency-key <turn-key> --write-scope <scope>

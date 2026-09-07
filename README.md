@@ -718,16 +718,16 @@ traces, credentials, private logs, or operator artifacts.
 
 ## Current Status
 
-The v0.4.x line is a usable local control plane for long-running agent work and
-is entering broader adoption. It is not a full agent platform, an agent runtime,
-or an autonomous production controller.
+LoopX 1.0 is a usable local control plane for long-running agent work and is
+entering broader adoption. It is not a full agent platform, an agent runtime, or
+an autonomous production controller.
 
 Today LoopX ships a durable state kernel for goals, typed todos and decision
 scopes, peer claims and leases, evidence and writeback, quota-aware scheduling,
 and cross-turn continuation. Guided start, recurring heartbeat, isolated Codex
 CLI turns, evidence-backed Issue-Fix admission, optional Explore and auto
-research paths, public validation canaries, and a read-first multi-project
-dashboard build on that shared control state.
+research paths, public validation canaries, and the multi-project Personal
+Workspace all build on that shared control state.
 
 Support levels remain explicit. The state and CLI contracts are the stable
 center; several host integrations and advanced paths are optional, default-off,
