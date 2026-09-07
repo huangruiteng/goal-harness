@@ -14,6 +14,8 @@ from ...extensions.runtime import (
 from ...rollout_event_log import iter_rollout_events
 from .core import build_periodic_report_run
 from .machine_defaults import (
+    SUBSCRIPTION_ERROR_SCHEMA,
+    PeriodicReportSubscriptionConfigurationError,
     build_goal_periodic_report_delivery_plan,
 )
 from .machine_store import (
@@ -542,6 +544,19 @@ def handle_periodic_report_command(
         else:
             request = _load_json_object(args.request_json)
             payload = build_periodic_report_run(request)
+    except PeriodicReportSubscriptionConfigurationError as exc:
+        payload = {
+            "ok": False,
+            "schema_version": SUBSCRIPTION_ERROR_SCHEMA,
+            "command": args.periodic_report_command,
+            "error_kind": "subscription_configuration_invalid",
+            "goal_id": exc.goal_id,
+            "configuration_source": exc.configuration_source,
+            "invalid_fields": list(exc.invalid_fields),
+            "error": str(exc),
+            "remediation": exc.remediation,
+            "mutation_performed": False,
+        }
     except Exception as exc:
         payload = {
             "ok": False,

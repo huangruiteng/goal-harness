@@ -26,9 +26,31 @@ DELIVERY_IDENTITY_SCHEMA = "periodic_report_goal_delivery_identity_v0"
 DELIVERY_AUTHORITY_SCHEMA = "periodic_report_delivery_authority_v0"
 DELIVERY_PLAN_REQUEST_SCHEMA = "periodic_report_goal_delivery_plan_request_v0"
 DELIVERY_PLAN_SCHEMA = "periodic_report_goal_delivery_plan_v0"
+SUBSCRIPTION_ERROR_SCHEMA = "periodic_report_subscription_error_v0"
 
 _INHERITANCE_MODE = "live_machine_default"
 _REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class PeriodicReportSubscriptionConfigurationError(ValueError):
+    """Expose bounded diagnosis for one invalid effective Goal subscription."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        goal_id: str,
+        configuration_source: str,
+        invalid_fields: tuple[str, ...],
+    ) -> None:
+        super().__init__(message)
+        self.goal_id = goal_id
+        self.configuration_source = configuration_source
+        self.invalid_fields = invalid_fields
+        self.remediation = (
+            "Provide a complete explicit periodic_report override, or clear the "
+            "override to restore live machine-default inheritance."
+        )
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -259,6 +281,29 @@ def _normalized_goal_subscription(
     return subscription
 
 
+def _invalid_goal_subscription_fields(config: Mapping[str, Any]) -> tuple[str, ...]:
+    """Identify invalid typed fields without interpreting exception prose."""
+
+    invalid: list[str] = []
+    enabled = config.get("enabled")
+    if not isinstance(enabled, bool):
+        invalid.append("enabled")
+    try:
+        timezone_name = _text(
+            config.get("timezone", "UTC"), "goal periodic_report.timezone"
+        )
+        ZoneInfo(timezone_name)
+    except (TypeError, ValueError, ZoneInfoNotFoundError):
+        invalid.append("timezone")
+    if enabled is True:
+        for field in ("profile_preset", "route_ref"):
+            try:
+                _text(config.get(field), f"goal periodic_report.{field}")
+            except (TypeError, ValueError):
+                invalid.append(field)
+    return tuple(invalid or ["configuration"])
+
+
 def resolve_goal_periodic_report_subscription(
     goal: Mapping[str, Any],
     machine_defaults: Mapping[str, Any] | None = None,
@@ -285,12 +330,25 @@ def resolve_goal_periodic_report_subscription(
     configuration = resolution["configuration"]
     if not isinstance(configuration, Mapping):  # pragma: no cover - kernel contract
         raise TypeError("resolved periodic report configuration must be an object")
-    return _normalized_goal_subscription(
-        goal_id=goal_id,
-        config=configuration,
-        source=("not_configured" if source == "capability_default" else source),
-        source_revision=(source_revision if source == "machine_default" else None),
+    normalized_source = (
+        "not_configured" if source == "capability_default" else source
     )
+    try:
+        return _normalized_goal_subscription(
+            goal_id=goal_id,
+            config=configuration,
+            source=normalized_source,
+            source_revision=(source_revision if source == "machine_default" else None),
+        )
+    except (TypeError, ValueError) as exc:
+        if source != "goal_override":
+            raise
+        raise PeriodicReportSubscriptionConfigurationError(
+            str(exc),
+            goal_id=goal_id,
+            configuration_source=source,
+            invalid_fields=_invalid_goal_subscription_fields(configuration),
+        ) from exc
 
 
 def normalize_periodic_report_delivery_authority(raw: object) -> dict[str, Any]:
@@ -491,6 +549,8 @@ __all__ = [
     "GOAL_SUBSCRIPTION_SCHEMA",
     "MACHINE_DEFAULTS_SCHEMA",
     "PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA",
+    "SUBSCRIPTION_ERROR_SCHEMA",
+    "PeriodicReportSubscriptionConfigurationError",
     "build_goal_periodic_report_delivery_identity",
     "build_periodic_report_delivery_authority",
     "build_goal_periodic_report_delivery_plan",
