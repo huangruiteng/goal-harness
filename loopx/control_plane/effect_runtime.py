@@ -188,7 +188,20 @@ def _runtime_source_snapshot(root: Path | None = None) -> _RuntimeSourceSnapshot
     """Return cheap metadata that invalidates the packaged-source hash."""
 
     source_root = (root or _control_plane_root()).resolve()
-    return _runtime_file_snapshot(source_root, _scan_runtime_source_files(source_root))
+    try:
+        return _runtime_file_snapshot(
+            source_root, _scan_runtime_source_files(source_root)
+        )
+    except FileNotFoundError:
+        try:
+            return _runtime_file_snapshot(
+                source_root, _scan_runtime_source_files(source_root)
+            )
+        except FileNotFoundError as exc:
+            raise EffectRuntimeStartupError(
+                "TypeScript Effect runtime source topology did not stabilize",
+                diagnostic_code="packaged_runtime_source_unstable",
+            ) from exc
 
 
 def _runtime_source_files(root: Path | None = None) -> tuple[str, ...]:
@@ -571,10 +584,14 @@ def collect_effect_runtime_readiness(*, deep: bool = False) -> dict[str, object]
                 is not None
                 else "stopped"
             )
-        except OSError:
+        except (OSError, EffectRuntimeStartupError) as exc:
             ready = False
             status = "package_invalid"
-            runtime_diagnostic_code = "packaged_runtime_source_unreadable"
+            runtime_diagnostic_code = getattr(
+                exc,
+                "diagnostic_code",
+                "packaged_runtime_source_unreadable",
+            )
     runtime_lifecycle: dict[str, object] = {
         "schema_version": "loopx_effect_runtime_lifecycle_v0",
         "management": "on_demand_managed",
