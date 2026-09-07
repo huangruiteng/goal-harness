@@ -6,7 +6,7 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ...extensions.runtime import (
     execute_extension_runtime_binding,
@@ -14,6 +14,8 @@ from ...extensions.runtime import (
 from ...rollout_event_log import iter_rollout_events
 from .core import build_periodic_report_run
 from .machine_defaults import (
+    SUBSCRIPTION_ERROR_SCHEMA,
+    PeriodicReportSubscriptionConfigurationError,
     build_goal_periodic_report_delivery_plan,
 )
 from .machine_store import (
@@ -44,10 +46,16 @@ PrintPayload = Callable[
 ]
 FormatSelector = Callable[..., str]
 AddFormat = Callable[[argparse.ArgumentParser], None]
-ProviderCommandRegistrar = Callable[
-    [argparse._SubParsersAction, AddFormat],
-    None,
-]
+
+
+class ProviderCommandRegistrar(Protocol):
+    def __call__(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+        add_subcommand_format: AddFormat,
+    ) -> None: ...
+
+
 ProviderCommandHandler = Callable[..., int | None]
 
 
@@ -308,6 +316,31 @@ def _archive_openviking(
 
 def render_periodic_report_markdown(payload: dict[str, object]) -> str:
     if not payload.get("ok"):
+        if payload.get("schema_version") == SUBSCRIPTION_ERROR_SCHEMA:
+            invalid_fields = payload.get("invalid_fields")
+            normalized_invalid_fields = (
+                [str(field) for field in invalid_fields]
+                if isinstance(invalid_fields, list)
+                else []
+            )
+            rendered_invalid_fields = ", ".join(
+                f"`{field}`" for field in normalized_invalid_fields
+            )
+            return "\n".join(
+                [
+                    "# Periodic Report Configuration Error",
+                    "",
+                    f"- error: {payload.get('error')}",
+                    f"- configuration_source: `{payload.get('configuration_source')}`",
+                    f"- invalid_fields: {rendered_invalid_fields}",
+                    f"- mutation_performed: `{payload.get('mutation_performed')}`",
+                    "",
+                    "## Remediation",
+                    "",
+                    str(payload.get("remediation") or ""),
+                    "",
+                ]
+            )
         return f"# Periodic Report Error\n\n- error: {payload.get('error')}\n"
     if payload.get("schema_version") == "periodic_report_activation_v0":
         profile = payload.get("profile")
@@ -542,6 +575,19 @@ def handle_periodic_report_command(
         else:
             request = _load_json_object(args.request_json)
             payload = build_periodic_report_run(request)
+    except PeriodicReportSubscriptionConfigurationError as exc:
+        payload = {
+            "ok": False,
+            "schema_version": SUBSCRIPTION_ERROR_SCHEMA,
+            "command": args.periodic_report_command,
+            "error_kind": "subscription_configuration_invalid",
+            "goal_id": exc.goal_id,
+            "configuration_source": exc.configuration_source,
+            "invalid_fields": list(exc.invalid_fields),
+            "error": str(exc),
+            "remediation": exc.remediation,
+            "mutation_performed": False,
+        }
     except Exception as exc:
         payload = {
             "ok": False,
