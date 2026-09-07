@@ -644,14 +644,14 @@ raw benchmark task/log/trajectory/verifier output、credentials、token、私有
 
 ## 当前状态
 
-`0.4.x` 已经是一套可用的长程 Agent 本地控制面，正在进入更广泛的采用阶段。
+LoopX 1.0 已经是一套可用的长程 Agent 本地控制面，正在进入更广泛的采用阶段。
 LoopX 不是完整 agent platform，不是 agent runtime，也不是自治生产控制器。
 
 目前 LoopX 已交付围绕 goal、typed todo / decision scope、平级 claim / lease、
 evidence / writeback、quota-aware scheduling 和跨轮 continuation 的 durable state
 kernel。在这套共享控制状态之上，已经提供 guided start、recurring heartbeat、
 隔离 Codex CLI Turn、evidence-backed Issue-Fix admission、可选 Explore / auto
-research 路径、公开 validation canary，以及 read-first 多项目 dashboard。
+research 路径、公开 validation canary，以及多项目 Personal Workspace。
 
 不同表面的支持等级仍需明确区分：state 与 CLI contract 是稳定核心；部分 host
 integration 和进阶路径仍是 optional、default-off 或 experimental。LoopX 不会自行
