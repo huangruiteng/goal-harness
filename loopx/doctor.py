@@ -875,7 +875,12 @@ def collect_doctor(
     *,
     deep: bool = False,
     agent_type: str | None = None,
+    installation_only: bool = False,
 ) -> dict[str, Any]:
+    if installation_only:
+        from .release_candidate import collect_installation_doctor
+
+        return collect_installation_doctor(deep=deep)
     from .control_plane.runtime.runtime_projection_route import (
         collect_runtime_projection_route_diagnostics,
     )
@@ -1470,11 +1475,6 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
                 "```",
             ]
         )
-    typescript_control_plane = (
-        payload.get("typescript_control_plane")
-        if isinstance(payload.get("typescript_control_plane"), dict)
-        else {}
-    )
     if typescript_control_plane:
         lines.extend(
             [

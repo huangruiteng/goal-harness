@@ -69,7 +69,10 @@ pub fn resume_pending(app: &AppHandle) -> Result<(), String> {
     if state["version"] != app.package_info().version.to_string() {
         return Err("app_update_incomplete".into());
     }
-    install(app)?;
+    let metadata = identity(app)?;
+    if !selected_revision_matches(&metadata) {
+        install(app)?;
+    }
     fs::remove_file(path).map_err(|_| "update_state_unavailable")?;
     Ok(())
 }
@@ -83,6 +86,13 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         .join("runtime/runtime-source.tar.gz");
     let bytes = fs::read(archive).map_err(|_| "runtime_bundle_missing")?;
     install_snapshot(&bytes, &metadata)
+}
+
+pub(crate) fn selected_revision_matches(metadata: &Value) -> bool {
+    crate::services::runtime_identity_for_executable(&crate::services::loopx_executable())
+        .as_ref()
+        .and_then(|value| value["source_revision"].as_str())
+        .is_some_and(|revision| metadata["source_revision"].as_str() == Some(revision))
 }
 
 fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
@@ -108,6 +118,7 @@ fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
             .arg(source.path().join("scripts/install-windows.ps1"));
         c
     };
+    crate::services::configure_runtime_environment(&mut command);
     // Preserve the working interpreter of an existing managed snapshot.
     if let Ok(executable) = fs::canonicalize(crate::services::loopx_executable()) {
         if let Some(release) = executable.parent().and_then(Path::parent) {
@@ -121,6 +132,13 @@ fn install_snapshot(bytes: &[u8], metadata: &Value) -> Result<(), String> {
         .env("LOOPX_PROMOTE_DEFAULT", "1")
         // The archive staging directory is temporary, never a canary checkout.
         .env("LOOPX_INSTALL_CANARY", "0")
+        // Preparing the App runtime must not inspect/modify host integrations
+        // or invoke provider doctors that can request user-folder access.
+        .env("LOOPX_INSTALL_SKILL", "0")
+        .env("LOOPX_INSTALL_SLASH_COMMANDS", "0")
+        .env("LOOPX_INSTALL_CLAUDE", "0")
+        .env("LOOPX_INSTALL_OPENCODE", "0")
+        .env("LOOPX_INSTALL_REVALIDATE_EXTENSIONS", "0")
         .env_remove("LOOPX_ARCHIVE_URL")
         .env_remove("LOOPX_ARCHIVE_SHA256")
         .env("LOOPX_REPO", "huangruiteng/loopx")

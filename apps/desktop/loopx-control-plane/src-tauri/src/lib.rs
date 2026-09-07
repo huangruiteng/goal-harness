@@ -77,15 +77,25 @@ pub fn run() {
 
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                if maintenance::resume(&handle).is_err() {
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.eval(
-                            "window.loopxBootFailed('本机组件尚未就绪，请展开恢复与更新，检查更新或修复当前版本。')",
-                        );
-                    }
-                    return;
-                }
+                // Runtime preparation belongs to the same live supervisor as
+                // service startup. A failed install must not strand this window
+                // after a later repair, reload, or external runtime correction.
                 while !shutting_down_for_setup.load(Ordering::Acquire) {
+                    {
+                        let mut current = services_for_setup.lock().expect("service state lock");
+                        if current.is_some() {
+                            if maintenance::reconnect_requested(&handle) {
+                                // Runtime repair reuses this supervisor even
+                                // after the workspace has already been opened.
+                                // Drop only processes owned by this App.
+                                *current = None;
+                            } else {
+                                drop(current);
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                continue;
+                            }
+                        }
+                    }
                     match maintenance::start_services(&handle) {
                         Ok(None) => {
                             std::thread::sleep(std::time::Duration::from_millis(200));
@@ -107,9 +117,8 @@ pub fn run() {
                                     .show();
                             }
                             if let Some(window) = handle.get_webview_window("main") {
-                                let _ = window.navigate(origin);
+                                let _ = window.navigate(origin.clone());
                             }
-                            return;
                         }
                         Err(error) => {
                             let message = "本地服务暂时无法启动，请检查安装或端口占用。";

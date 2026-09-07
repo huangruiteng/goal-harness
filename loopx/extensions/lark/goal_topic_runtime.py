@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import threading
@@ -471,6 +472,32 @@ class LarkGoalTopicRuntimeService:
         self._lock = threading.Lock()
         self._workers: dict[str, tuple[threading.Event, threading.Thread]] = {}
         self._health: dict[str, dict[str, Any]] = {}
+        self._closed = threading.Event()
+        self._startup_thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Discover existing bindings without blocking the HTTP readiness path."""
+
+        with self._lock:
+            if self._closed.is_set() or self._startup_thread is not None:
+                return
+            self._startup_thread = threading.Thread(
+                target=self._refresh_on_start,
+                name="loopx-lark-startup",
+                daemon=True,
+            )
+            self._startup_thread.start()
+
+    def _refresh_on_start(self) -> None:
+        while not self._closed.is_set():
+            try:
+                self.refresh()
+                return
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Lark binding discovery failed; retrying in the background"
+                )
+            self._closed.wait(5)
 
     @staticmethod
     def _now() -> str:
@@ -586,39 +613,18 @@ class LarkGoalTopicRuntimeService:
         self._update_health(profile, status="stopped", error_code=None)
 
     def refresh(self) -> None:
+        if self._closed.is_set():
+            return
         snapshot = self.snapshot_provider()
         desired = set(_active_profile_configs(snapshot))
-        binding_payloads = snapshot.get("binding_payloads")
-        contexts = snapshot.get("goal_contexts")
-        if isinstance(binding_payloads, Mapping) and isinstance(contexts, Mapping):
-            for goal_id, payload in binding_payloads.items():
-                if not isinstance(payload, Mapping):
-                    continue
-                for binding in bindings_for_goal(payload, str(goal_id)):
-                    raw_routing = binding.get("routing")
-                    routing: Mapping[str, Any] = (
-                        raw_routing if isinstance(raw_routing, Mapping) else {}
-                    )
-                    if routing.get("ingress_mode") != "session_queue":
-                        continue
-                    context = contexts.get(str(goal_id))
-                    context = context if isinstance(context, Mapping) else {}
-                    session_id = str(binding.get("session_id") or "")
-                    work_dir = str(context.get("work_dir") or "")
-                    try:
-                        has_queued_turns = bool(
-                            session_id
-                            and self.runtime_controller.store.queued_turns(session_id)
-                        )
-                    except KeyError:
-                        has_queued_turns = False
-                    if has_queued_turns and work_dir:
-                        self.runtime_controller.resume_session_queue(
-                            session_id=session_id,
-                            work_dir=Path(work_dir).expanduser().resolve(),
-                            objective=str(context.get("objective") or goal_id),
-                        )
+        if self._closed.is_set():
+            return
+        self._resume_session_queues(snapshot)
+        # A filesystem read may outlive server shutdown (for example, while
+        # waiting for OS directory consent). Never start effects after close.
         with self._lock:
+            if self._closed.is_set():
+                return
             stale = set(self._workers) - desired
             missing = desired - set(self._workers)
             for profile in stale:
@@ -644,11 +650,52 @@ class LarkGoalTopicRuntimeService:
                 self._workers[profile] = (stop, thread)
                 thread.start()
 
+    def _resume_session_queues(self, snapshot: Mapping[str, Any]) -> None:
+        binding_payloads = snapshot.get("binding_payloads")
+        contexts = snapshot.get("goal_contexts")
+        if isinstance(binding_payloads, Mapping) and isinstance(contexts, Mapping):
+            for goal_id, payload in binding_payloads.items():
+                if not isinstance(payload, Mapping):
+                    continue
+                for binding in bindings_for_goal(payload, str(goal_id)):
+                    if self._closed.is_set():
+                        return
+                    raw_routing = binding.get("routing")
+                    routing: Mapping[str, Any] = (
+                        raw_routing if isinstance(raw_routing, Mapping) else {}
+                    )
+                    if routing.get("ingress_mode") != "session_queue":
+                        continue
+                    context = contexts.get(str(goal_id))
+                    context = context if isinstance(context, Mapping) else {}
+                    session_id = str(binding.get("session_id") or "")
+                    work_dir = str(context.get("work_dir") or "")
+                    try:
+                        has_queued_turns = bool(
+                            session_id
+                            and self.runtime_controller.store.queued_turns(session_id)
+                        )
+                    except KeyError:
+                        has_queued_turns = False
+                    if has_queued_turns and work_dir:
+                        resolved_work_dir = Path(work_dir).expanduser().resolve()
+                        # Discovery is slow I/O; only cancellation and the
+                        # controller's I/O-free worker admission belong here.
+                        with self._lock:
+                            if self._closed.is_set():
+                                return
+                            self.runtime_controller.resume_session_queue(
+                                session_id=session_id,
+                                work_dir=resolved_work_dir,
+                                objective=str(context.get("objective") or goal_id),
+                            )
+
     def active_profiles(self) -> list[str]:
         with self._lock:
             return sorted(self._workers)
 
     def close(self) -> None:
+        self._closed.set()
         with self._lock:
             workers = list(self._workers.values())
             self._workers.clear()

@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -18,6 +18,28 @@ pub struct Maintenance {
     snapshot: Mutex<Value>,
     pending: Mutex<Option<(String, Update)>>,
     last_failure: Mutex<Value>,
+    runtime_retry: Mutex<RuntimeRetry>,
+}
+
+#[derive(Default)]
+struct RuntimeRetry {
+    attempts: u8,
+    last_attempt: Option<Instant>,
+}
+
+impl RuntimeRetry {
+    fn admit(&mut self, now: Instant) -> bool {
+        if self.attempts >= 3
+            || self
+                .last_attempt
+                .is_some_and(|last| now.duration_since(last) < Duration::from_secs(30))
+        {
+            return false;
+        }
+        self.attempts += 1;
+        self.last_attempt = Some(now);
+        true
+    }
 }
 impl Maintenance {
     fn acquire(&self) -> Result<BusyGuard<'_>, String> {
@@ -33,6 +55,43 @@ impl Maintenance {
         }
         *self.snapshot.lock().unwrap() = value.clone();
         value
+    }
+
+    fn prepare_runtime(
+        &self,
+        matches: bool,
+        explicit_override: bool,
+        now: Instant,
+        install: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        if matches {
+            *self.runtime_retry.lock().unwrap() = RuntimeRetry::default();
+            return Ok(());
+        }
+        if explicit_override {
+            self.publish(
+                "runtime_required",
+                json!({"code":"runtime_identity_mismatch", "revision_matches":false}),
+            );
+            return Err("runtime_identity_mismatch".into());
+        }
+        if !self.runtime_retry.lock().unwrap().admit(now) {
+            // Keep the last actionable install error while the live supervisor
+            // observes external correction and permits an explicit repair.
+            return Err("runtime_setup_required".into());
+        }
+        self.publish("installing_runtime", json!({}));
+        match install() {
+            Ok(()) => {
+                *self.runtime_retry.lock().unwrap() = RuntimeRetry::default();
+                self.publish("connecting", json!({}));
+                Ok(())
+            }
+            Err(error) => {
+                self.publish("error", json!({"code":error}));
+                Err(error)
+            }
+        }
     }
 
     // Service supervision and maintenance must never replace/start different
@@ -57,16 +116,17 @@ impl Maintenance {
         if phase == "restart_required" {
             return Ok(None);
         }
-        let observing_update = matches!(phase.as_str(), "connecting" | "service_error");
         match start() {
             Ok(services) => {
-                if observing_update {
-                    self.publish("ready", json!({}));
-                }
+                self.publish("ready", json!({}));
                 Ok(Some(services))
             }
             Err(error) => {
-                if observing_update {
+                let runtime_error = matches!(
+                    self.snapshot.lock().unwrap()["phase"].as_str(),
+                    Some("error" | "runtime_required")
+                );
+                if !runtime_error {
                     self.publish("service_error", json!({"code":"service_start_failed"}));
                 }
                 Err(error)
@@ -208,11 +268,17 @@ async fn perform(
                 &handle.package_info().version.to_string(),
                 "bundled",
             )?;
+            // Explicit repair must reinstall even when the manifest matches:
+            // missing/corrupt runtime files are not an identity mismatch.
+            bundled_runtime::install(&handle)?;
             bundled_runtime::resume_pending(&handle)
         })
         .await
         .map_err(|_| "runtime_install_failed")??;
-        return Ok(state.publish("restart_required", json!({})));
+        *state.runtime_retry.lock().unwrap() = RuntimeRetry::default();
+        // Only replacing the App binary needs a process restart. The live
+        // supervisor will connect this same window after runtime repair.
+        return Ok(state.publish("connecting", json!({})));
     }
     let update = state
         .pending
@@ -252,17 +318,6 @@ async fn perform(
     *state.pending.lock().unwrap() = None;
     Ok(state.publish("restart_required", json!({"version":target})))
 }
-pub fn resume(app: &AppHandle) -> Result<(), String> {
-    let result = resume_runtime(app);
-    if let Err(error) = &result {
-        if error != "runtime_setup_required" {
-            app.state::<Maintenance>()
-                .publish("error", json!({"code":error}));
-        }
-    }
-    result
-}
-
 fn resume_runtime(app: &AppHandle) -> Result<(), String> {
     // Development intentionally pairs a live frontend with a developer-selected
     // runtime; it must neither replace itself nor force release installation.
@@ -271,49 +326,135 @@ fn resume_runtime(app: &AppHandle) -> Result<(), String> {
     }
     let state = app.state::<Maintenance>();
     let _guard = state.acquire()?;
-    if !bundled_runtime::journal(app)?.exists() {
-        {
-            let bundled = bundled_runtime::identity(app)?;
-            let installed = crate::services::runtime_identity_for_executable(
-                &crate::services::loopx_executable(),
-            );
-            if installed.as_ref().map(|v| &v["source_revision"])
-                != Some(&bundled["source_revision"])
-            {
-                state.publish(
-                    "runtime_required",
-                    json!({
-                        "code":"runtime_setup_required",
-                        "installed_identity_available": installed.is_some(),
-                        "revision_matches": false
-                    }),
-                );
-                return Err("runtime_setup_required".into());
-            }
-        }
-        return Ok(());
-    }
-    state.publish("installing_runtime", json!({}));
-    let result = bundled_runtime::resume_pending(app);
-    match result {
-        Ok(()) => {
-            state.publish("connecting", json!({}));
-            Ok(())
-        }
-        Err(error) => {
-            state.publish("error", json!({"code":error}));
-            Err(error)
+    let bundled = bundled_runtime::identity(app)?;
+    let matches = bundled_runtime::selected_revision_matches(&bundled);
+    let explicit_override = std::env::var("LOOPX_BIN").is_ok_and(|v| !v.trim().is_empty());
+    // Validate an existing approved target before any automatic installation.
+    // A journal for another App must never authorize this App's bundle.
+    let journal = bundled_runtime::journal(app)?;
+    if journal.exists() {
+        let pending: Value = serde_json::from_slice(
+            &std::fs::read(&journal).map_err(|_| "update_state_unavailable")?,
+        )
+        .map_err(|_| "update_state_invalid")?;
+        if pending["version"] != app.package_info().version.to_string() {
+            return Err("app_update_incomplete".into());
         }
     }
+    state.prepare_runtime(matches, explicit_override, Instant::now(), || {
+        if !journal.exists() {
+            bundled_runtime::record_pending(
+                app,
+                &app.package_info().version.to_string(),
+                "bundled",
+            )?;
+        }
+        bundled_runtime::resume_pending(app)
+    })?;
+    if journal.exists() {
+        // Idempotent completion after a crash between promotion and journal
+        // removal: do not reinstall an already matching runtime.
+        bundled_runtime::resume_pending(app)?;
+    }
+    Ok(())
 }
 pub fn start_services(app: &AppHandle) -> Result<Option<crate::services::ServiceSet>, String> {
-    app.state::<Maintenance>()
-        .reconcile_services(|| crate::services::ServiceSet::start().map_err(|e| e.to_string()))
+    app.state::<Maintenance>().reconcile_services(|| {
+        if let Err(error) = resume_runtime(app) {
+            if error != "runtime_setup_required" {
+                app.state::<Maintenance>()
+                    .publish("error", json!({"code":error}));
+            }
+            return Err(error);
+        }
+        crate::services::ServiceSet::start().map_err(|e| e.to_string())
+    })
+}
+
+pub fn reconnect_requested(app: &AppHandle) -> bool {
+    app.state::<Maintenance>().snapshot.lock().unwrap()["phase"] == "connecting"
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn runtime_failure_can_recover_without_restarting_the_supervisor() {
+        let state = Maintenance::default();
+        let now = Instant::now();
+        let attempt = |matches, now, install: fn() -> Result<(), String>| {
+            state.reconcile_services(|| {
+                state.prepare_runtime(matches, false, now, install)?;
+                Ok(())
+            })
+        };
+        assert!(attempt(false, now, || Err("runtime_install_exit_1".into())).is_err());
+        assert!(
+            state.acquire().is_ok(),
+            "failed automatic install releases maintenance"
+        );
+        assert!(attempt(false, now + Duration::from_secs(2), || panic!(
+            "backoff must not reinstall"
+        ))
+        .is_err());
+        assert_eq!(
+            state.snapshot.lock().unwrap()["details"]["code"],
+            "runtime_install_exit_1"
+        );
+        assert_eq!(
+            attempt(false, now + Duration::from_secs(31), || Ok(())).unwrap(),
+            Some(())
+        );
+        assert_eq!(state.snapshot.lock().unwrap()["phase"], "ready");
+        assert_eq!(
+            attempt(true, now + Duration::from_secs(32), || panic!(
+                "matching runtime must not reinstall"
+            ))
+            .unwrap(),
+            Some(())
+        );
+        assert_eq!(state.snapshot.lock().unwrap()["phase"], "ready");
+    }
+
+    #[test]
+    fn automatic_install_is_bounded_but_external_repair_is_still_observed() {
+        let state = Maintenance::default();
+        let now = Instant::now();
+        for seconds in [0, 31, 62] {
+            assert!(state
+                .prepare_runtime(false, false, now + Duration::from_secs(seconds), || Err(
+                    "runtime_install_exit_1".into()
+                ))
+                .is_err());
+        }
+        assert!(state
+            .prepare_runtime(false, false, now + Duration::from_secs(1000), || panic!(
+                "retry budget exhausted"
+            ))
+            .is_err());
+        assert!(state
+            .prepare_runtime(true, false, now + Duration::from_secs(1001), || panic!(
+                "external correction needs no install"
+            ))
+            .is_ok());
+    }
+
+    #[test]
+    fn explicit_runtime_override_is_never_replaced_automatically() {
+        let state = Maintenance::default();
+        assert_eq!(
+            state
+                .prepare_runtime(false, true, Instant::now(), || panic!(
+                    "explicit selection must be respected"
+                ))
+                .unwrap_err(),
+            "runtime_identity_mismatch"
+        );
+        assert!(state
+            .prepare_runtime(true, true, Instant::now(), || panic!("already matches"))
+            .is_ok());
+    }
+
     #[test]
     fn diagnostics_retain_failure_after_successful_update_check() {
         let state = Maintenance::default();

@@ -194,6 +194,26 @@ teaches a reusable control-plane lesson.
 
 ## Minimal Evidence Packet
 
+Desktop runtime preparation failures must remain inside the live startup
+supervisor. Compare the App's bundled revision, selected CLI revision and
+listener identities independently; a working terminal CLI is not proof of a
+working Finder launch. Reproduce installer validation with Finder's minimal
+PATH and isolated install/registry/runtime directories. Use a shared bounded
+tool search for installer and child services, retain exact revision checks,
+bound automatic installation retries, and prove failed preparation followed by
+repair reaches service startup without recreating the App process. Only an App
+binary replacement requires restart; runtime repair resumes the same window.
+Installation readiness must not traverse registered Goal workspaces or run
+host/provider integration checks. Use `doctor --deep --installation-only` to
+retain package/toolchain validation without waiting on user-folder consent;
+full operator diagnostics remain available through ordinary `doctor`.
+Prove HTTP readiness independently of optional integration discovery: a bound
+port may still have no serving loop. Block the snapshot reader in a real-server
+test, verify workspace/capability responses and shutdown, and fence late
+results from starting consumers or resuming queues after close. Distinguish
+silent sockets from foreign HTTP services; recovery must retain process and
+port ownership verification before restarting an unresponsive listener.
+
 For most repairs, capture:
 
 ```text
