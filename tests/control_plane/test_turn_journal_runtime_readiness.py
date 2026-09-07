@@ -48,6 +48,14 @@ def test_runtime_fingerprint_reuses_hash_until_source_snapshot_changes(
     (tmp_path / "runtime_decode.ts").write_text("export {};\n", encoding="utf-8")
     (tmp_path / "turn_transaction_contract.json").write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(effect_runtime, "_control_plane_root", lambda: tmp_path)
+    # Some filesystems preserve directory metadata across rapid entry changes.
+    # The source inventory must not rely on that metadata to discover new files.
+    monkeypatch.setattr(
+        effect_runtime,
+        "_runtime_directory_snapshot",
+        lambda *_args: (("", 0, 0),),
+        raising=False,
+    )
     original_read_bytes = Path.read_bytes
     reads: list[Path] = []
 
