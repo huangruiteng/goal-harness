@@ -807,12 +807,90 @@ def test_profile_stream_keeps_one_consumer_open_between_messages(
 
     timeout_index = captured["args"].index("--timeout")
     assert captured["args"][timeout_index + 1] == "30m"
+    assert "--quiet" not in captured["args"]
+    assert result == {
+        "ok": False,
+        "status": "stream_not_ready",
+        "event_count": 0,
+        "replied_count": 0,
+    }
+
+
+def test_profile_stream_waits_for_provider_ready_before_reporting_listening(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import stream_lark_goal_topic_profile
+
+    health: list[dict[str, Any]] = []
+    snapshot = {
+        "target_payload": {
+            "targets": {
+                "mew-product": {
+                    "name": "mew-product",
+                    "provider": "lark",
+                    "enabled": True,
+                    "channel": {"chat_id": "oc_public_fixture"},
+                    "identity": {
+                        "sender_profile": "mew",
+                        "sender_identity": "bot",
+                        "bot_app_id": "cli_public_fixture",
+                        "cli_bin": "fake-lark",
+                    },
+                }
+            }
+        },
+        "binding_payloads": {
+            "goal-alpha": {
+                "bindings": {
+                    "goal-alpha": {
+                        "goal_id": "goal-alpha",
+                        "provider": "lark",
+                        "enabled": True,
+                        "target_ref": "mew-product",
+                        "topic": {"root_message_id": "om_topic_alpha"},
+                    }
+                }
+            }
+        },
+    }
+
+    class ReadyConsumer:
+        stdout = iter(
+            (
+                "[event] local bus not found; checking remote connections...\n",
+                "[event] ready event_key=im.message.receive_v1\n",
+            )
+        )
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+        def terminate(self) -> None:
+            raise AssertionError("a completed consumer must not be terminated")
+
+        def kill(self) -> None:
+            raise AssertionError("a completed consumer must not be killed")
+
+    result = stream_lark_goal_topic_profile(
+        profile="mew",
+        snapshot_provider=lambda: snapshot,
+        stop=threading.Event(),
+        runtime_root=tmp_path,
+        answer=lambda _route, _text: "ok",
+        process_factory=lambda _args: ReadyConsumer(),
+        health_sink=lambda update: health.append(dict(update)),
+    )
+
     assert result == {
         "ok": True,
         "status": "stream_ended",
         "event_count": 0,
         "replied_count": 0,
     }
+    assert [item["status"] for item in health] == ["starting", "listening"]
 
 
 def test_profile_poll_routes_provider_event_through_existing_reply_path(

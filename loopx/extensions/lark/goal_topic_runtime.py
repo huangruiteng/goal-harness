@@ -26,12 +26,9 @@ from .event_inbox import (
     ingest_lark_event_inbox,
     inspect_lark_event_inbox,
 )
-from .goal_channel_contracts import bindings_for_goal
+from .goal_channel_contracts import LarkTopicEventDecisionReason, bindings_for_goal
 from .goal_channel_targets import goal_channel_target_for_name
-from .goal_topic_connections import (
-    LarkTopicEventDecisionReason,
-    decide_lark_topic_event,
-)
+from .goal_topic_connections import decide_lark_topic_event
 from .inbox_reply import CommandRunner, reply_lark_event_inbox
 
 Answer = Callable[[Mapping[str, Any], str], str | Mapping[str, Any]]
@@ -55,6 +52,9 @@ _EVENT_PROJECTION = (
     "thread_id:(.thread_id // .message.thread_id // .event.message.thread_id),"
     "mentions:(.mentions // .message.mentions // .event.message.mentions // [])}"
 )
+
+_EVENT_READY_PREFIX = "[event] ready "
+_EVENT_DIAGNOSTIC_PREFIX = "[event] "
 
 
 def _opaque_digest(*values: Any) -> str:
@@ -358,11 +358,13 @@ def stream_lark_goal_topic_profile(
             "0",
             "--jq",
             _EVENT_PROJECTION,
-            "--quiet",
         ]
     )
     if health_sink is not None:
-        health_sink({"status": "listening", "error_code": None})
+        # A live child process is not proof that lark-cli registered a consumer
+        # with its local event bus.  Keep the connection non-ready until the
+        # provider emits its explicit ready marker (or a real event arrives).
+        health_sink({"status": "starting", "error_code": None})
     watcher_done = threading.Event()
 
     def stop_consumer() -> None:
@@ -380,6 +382,7 @@ def stream_lark_goal_topic_profile(
     watcher.start()
     event_count = 0
     replied_count = 0
+    provider_ready = False
     try:
         stdout = process.stdout
         if stdout is None:
@@ -392,6 +395,14 @@ def stream_lark_goal_topic_profile(
         for line in stdout:
             if stop.is_set():
                 break
+            stripped = line.strip()
+            if stripped.startswith(_EVENT_READY_PREFIX):
+                provider_ready = True
+                if health_sink is not None:
+                    health_sink({"status": "listening", "error_code": None})
+                continue
+            if stripped.startswith(_EVENT_DIAGNOSTIC_PREFIX):
+                continue
             result = poll_lark_goal_topic_profile_once(
                 profile=profile,
                 snapshot=snapshot_provider(),
@@ -405,6 +416,13 @@ def stream_lark_goal_topic_profile(
                 provider_runner=provider_runner,
                 reply_runner=reply_runner,
             )
+            if int(result.get("event_count") or 0) and not provider_ready:
+                # A provider event is stronger readiness evidence than a
+                # diagnostic marker and protects compatibility with providers
+                # that omit the marker while still emitting the typed stream.
+                provider_ready = True
+                if health_sink is not None:
+                    health_sink({"status": "listening", "error_code": None})
             event_count += int(result.get("event_count") or 0)
             replied_count += int(result.get("replied_count") or 0)
             if health_sink is not None and int(result.get("event_count") or 0):
@@ -446,9 +464,16 @@ def stream_lark_goal_topic_profile(
             process.kill()
             returncode = process.wait(timeout=3)
         watcher.join(timeout=1)
+    stopped = stop.is_set()
     return {
-        "ok": returncode == 0 or stop.is_set(),
-        "status": "stopped" if stop.is_set() else "stream_ended",
+        "ok": stopped or (returncode == 0 and provider_ready),
+        "status": (
+            "stopped"
+            if stopped
+            else "stream_ended"
+            if provider_ready
+            else "stream_not_ready"
+        ),
         "event_count": event_count,
         "replied_count": replied_count,
     }
