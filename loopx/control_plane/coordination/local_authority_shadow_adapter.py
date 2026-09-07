@@ -624,8 +624,7 @@ class _PartitionDrainer:
                 or anchor.get("operation_id") != cursor["last_entry_id"]
                 or anchor.get("cursor") != cursor["last_cursor"]
                 or anchor.get("provider_revision") != cursor["last_provider_revision"]
-                or partition_digest(self._projection(anchor))
-                != cursor["last_partition_digest"]
+                or self._cursor_digest(anchor) != cursor["last_partition_digest"]
             ):
                 raise outbox.OutboxError(
                     "outbox_cursor_unproved", "cursor has no exact history anchor"
@@ -688,7 +687,7 @@ class _PartitionDrainer:
                     raise outbox.OutboxError(
                         "outbox_file_changed", "outbox changed during proof"
                     )
-                digest = partition_digest(self._projection(last))
+                digest = self._cursor_digest(last)
                 if cursor is None or cursor["last_seq"] != len(history):
                     outbox.write_cursor(
                         self._directory,
@@ -722,11 +721,11 @@ class _PartitionDrainer:
                     self._budget.consumed += 1
         return [entry for entry in entries if entry.seq not in history]
 
-    def _projection(self, transaction: dict[str, Any]) -> dict[str, Any]:
-        head = transaction["projection"]
-        if self._partition == TODO_PARTITION:
-            return {"handoff_mode": head["handoff_mode"], "todos": head["todos"]}
-        return {"leases": head["leases"]}
+    def _cursor_digest(self, transaction: dict[str, Any]) -> str | None:
+        # The native history validator owns this applied-mutation marker.
+        # Settled no-ops advance position but never synthesize a baseline digest.
+        marker = transaction["projection"]["partitions"][self._partition]
+        return None if marker is None else marker["partition_digest"]
 
     def _resolve(
         self, entry: outbox.OutboxEntry, pending: list[outbox.OutboxEntry]

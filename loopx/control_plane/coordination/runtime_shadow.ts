@@ -232,8 +232,9 @@ async function pendingOutbox(root: string, goal: string,
     if (anchor === undefined || anchor.operation_id !== cursor.last_entry_id ||
       anchor.receipts[0]?.seq !== cursor.last_seq || anchor.cursor !== cursor.last_cursor ||
       anchor.provider_revision !== cursor.last_provider_revision) throw new ShadowLineageError("outbox_cursor_unproved");
-    const applied = settled.filter((transaction) => transaction.receipts[0]?.no_op === false).at(-1);
-    if ((applied?.receipts[0]?.partition_digest ?? null) !== cursor.last_partition_digest) throw new ShadowLineageError("outbox_cursor_unproved");
+    const marker = (anchor.projection.partitions as JsonObject)[partition];
+    const digest = marker === null ? null : (marker as JsonObject).partition_digest;
+    if (digest !== cursor.last_partition_digest) throw new ShadowLineageError("outbox_cursor_unproved");
   }
   return false;
 }

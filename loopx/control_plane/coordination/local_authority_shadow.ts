@@ -700,6 +700,9 @@ function todoReadModel(todos: readonly JsonObject[]): JsonObject {
 /**
  * Fold one partition into the candidate head. A v0 head (whole-snapshot
  * observation) is accepted as the starting point with no partition markers.
+ * Markers describe the last actual mutation, not the last settled entry. Both
+ * drain and qualification read this verified marker for the cursor digest;
+ * bootstrap and no-op prefixes retain null, even with a nonempty baseline.
  */
 export function composeLocalAuthorityShadowHead(
   current: JsonObject | null,
