@@ -505,6 +505,9 @@ for (const expiresAt of [
 }
 
 for (const { expiresAt, active } of [
+  { expiresAt: "2020-01-01", active: false },
+  { expiresAt: "2030-01-01", active: true },
+  { expiresAt: "0099-01-01T00:00:00Z", active: false },
   { expiresAt: "2026-08-27T02:59:59.123456", active: false },
   { expiresAt: "2026-08-27T02:59:59.123456+00:00", active: false },
   { expiresAt: "2026-08-27T03:00:00.123456", active: true },
