@@ -573,12 +573,35 @@ export function leaseEpoch(lease: LeaseRecord | null): number {
 }
 
 export function parseLeaseTimestamp(value: string): Date | null {
-  let text = value.trim().replace(/z$/u, "Z");
-  if (!text) return null;
-  const hasTime = /[T ]\d{2}:\d{2}/u.test(text);
-  if (hasTime) text = text.replace(/([+-]\d{2})$/u, "$1:00");
-  const hasTimezone = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/u.test(text);
-  const parsed = new Date(hasTime && !hasTimezone ? `${text}Z` : text);
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?(Z|z|[+-]\d{2}(?::?\d{2})?)?)?$/u.exec(
+    value.trim(),
+  );
+  if (match === null) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction, timezone] = match;
+  const [year, month, day, hour, minute, second, millisecond] = [
+    yearText,
+    monthText,
+    dayText,
+    hourText ?? "0",
+    minuteText ?? "0",
+    secondText ?? "0",
+    (fraction ?? "").slice(0, 3).padEnd(3, "0") || "0",
+  ].map(Number);
+  const calendar = new Date(0);
+  calendar.setUTCHours(hour, minute, second, millisecond);
+  calendar.setUTCFullYear(year, month - 1, day);
+  if (
+    calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day || calendar.getUTCHours() !== hour ||
+    calendar.getUTCMinutes() !== minute || calendar.getUTCSeconds() !== second ||
+    calendar.getUTCMilliseconds() !== millisecond
+  ) return null;
+  if (hourText === undefined) return calendar;
+  let text = value.trim().replace(" ", "T").replace(/z$/u, "Z");
+  if (fraction !== undefined) text = text.replace(`.${fraction}`, `.${fraction.slice(0, 3)}`);
+  if (timezone === undefined) text += "Z";
+  else text = text.replace(/([+-]\d{2})$/u, "$1:00");
+  const parsed = new Date(text);
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
@@ -589,9 +612,22 @@ export function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
   ) {
     return false;
   }
-  if (typeof lease.expires_at !== "string") return false;
+  if (typeof lease.expires_at !== "string") {
+    throw new TaskLeaseAcquireError(
+      "active lease expires_at must be a valid timestamp",
+      "corrupt_lease",
+      { expires_at: lease.expires_at ?? null },
+    );
+  }
   const expiresAt = parseLeaseTimestamp(lease.expires_at);
-  return expiresAt !== null && expiresAt.valueOf() > at.valueOf();
+  if (expiresAt === null) {
+    throw new TaskLeaseAcquireError(
+      "active lease expires_at must be a valid timestamp",
+      "corrupt_lease",
+      { expires_at: lease.expires_at },
+    );
+  }
+  return expiresAt.valueOf() > at.valueOf();
 }
 
 export function utcIsoformat(value: Date): string {

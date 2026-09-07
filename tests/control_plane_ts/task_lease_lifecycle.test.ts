@@ -369,6 +369,26 @@ test("lifecycle rejects stale versions and expired leases before writeback", asy
   assert.equal((await lease(root)).version, 1);
 });
 
+test("lifecycle accepts active leases with six-digit fractional seconds", async (t) => {
+  const root = await workspace(t);
+  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
+  const existing = await lease(root);
+  existing.expires_at = "2026-09-01T03:10:00.123456Z";
+  await writeFile(
+    join(root, "runtime", "goals", "goal-a", "task-leases", "todo_target.json"),
+    JSON.stringify(existing),
+    "utf8",
+  );
+
+  const renewed = await executeTaskLeaseLifecycle(
+    await lifecycleRequest(root, "renew"),
+    { now: () => new Date("2026-09-01T03:01:00.000Z") },
+  );
+
+  assert.equal(renewed.ok, true);
+  assert.equal(renewed.renewed, true);
+});
+
 test("holder verification is hard-lease-only and fence close releases only its verified lease", async (t) => {
   const root = await workspace(t);
   const hardAuthority = await authority(root, {
