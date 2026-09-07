@@ -57,21 +57,77 @@ pub fn record_pending(app: &AppHandle, version: &str, channel: &str) -> Result<(
     Ok(())
 }
 
-pub fn resume_pending(app: &AppHandle) -> Result<(), String> {
+/// Outcome of resolving the persisted update journal against the running App.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Resume {
+    /// No journal existed; nothing was resumed.
+    Absent,
+    /// The approved journal was applied and the bundled runtime installed.
+    Applied,
+    /// A journal naming another App version was discarded. The on-disk
+    /// runtime was not touched; the caller must re-run the App/runtime
+    /// pairing gate on this same start before any service connects.
+    StaleDiscarded,
+}
+
+pub fn resume_pending(app: &AppHandle) -> Result<Resume, String> {
     let path = journal(app)?;
+    match resolve_journal(&path, &app.package_info().version.to_string())? {
+        JournalResolution::Absent => Ok(Resume::Absent),
+        JournalResolution::StaleDiscarded => Ok(Resume::StaleDiscarded),
+        JournalResolution::Approved => {
+            install(app)?;
+            fs::remove_file(&path).map_err(|_| "update_state_unavailable")?;
+            Ok(Resume::Applied)
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum JournalResolution {
+    Absent,
+    Approved,
+    StaleDiscarded,
+}
+
+// Path-level journal decision shared by the release startup entrance and the
+// repair action, and directly testable without an AppHandle. Never install
+// runtime code from an App other than the approved target.
+fn resolve_journal(path: &Path, running_version: &str) -> Result<JournalResolution, String> {
     if !path.exists() {
-        return Ok(());
+        return Ok(JournalResolution::Absent);
     }
     let state: Value =
-        serde_json::from_slice(&fs::read(&path).map_err(|_| "update_state_unavailable")?)
+        serde_json::from_slice(&fs::read(path).map_err(|_| "update_state_invalid")?)
             .map_err(|_| "update_state_invalid")?;
-    // Never install runtime code from an App other than the approved target.
-    if state["version"] != app.package_info().version.to_string() {
-        return Err("app_update_incomplete".into());
+    if state["version"] != running_version {
+        // A journal naming a different version means the approved installation
+        // never completed: the app update failed before replacing the app, or
+        // the app was rolled back. Discard the stale journal instead of
+        // locking the next start into the recovery panel -- and report it as
+        // discarded so this start itself must clear the pairing gate the
+        // no-journal entrance enforces; a deleted file alone proves nothing
+        // about the runtime that is still on disk.
+        discard_journal_at(path)?;
+        return Ok(JournalResolution::StaleDiscarded);
     }
-    install(app)?;
-    fs::remove_file(path).map_err(|_| "update_state_unavailable")?;
-    Ok(())
+    Ok(JournalResolution::Approved)
+}
+
+/// Remove a journal that names a runtime the on-disk app never became. Used
+/// when an app update fails after the journal was recorded: keeping it would
+/// wedge the next start into the recovery panel for an update that never
+/// shipped. Returns whether a journal file existed.
+pub fn discard_journal(app: &AppHandle) -> Result<bool, String> {
+    discard_journal_at(&journal(app)?)
+}
+
+fn discard_journal_at(path: &Path) -> Result<bool, String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err("update_state_unavailable".into()),
+    }
 }
 
 pub fn install(app: &AppHandle) -> Result<(), String> {
@@ -245,5 +301,58 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(extract(&bytes, dir.path()).is_err());
         assert!(!dir.path().join("escape").exists());
+    }
+    #[test]
+    fn discarding_journal_reports_existence_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join("desktop-update.json");
+        fs::write(&journal, "{\"version\":\"1.2.3\"}").unwrap();
+        assert_eq!(discard_journal_at(&journal), Ok(true));
+        assert!(!journal.exists());
+        assert_eq!(discard_journal_at(&journal), Ok(false));
+    }
+    #[test]
+    fn undiscardable_journal_surfaces_state_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory cannot be removed as a file, standing in for any
+        // filesystem-level failure to clear the journal.
+        let path = dir.path().join("occupied");
+        fs::create_dir(&path).unwrap();
+        assert_eq!(
+            discard_journal_at(&path),
+            Err("update_state_unavailable".into())
+        );
+    }
+    #[test]
+    fn stale_journal_is_discarded_durably_and_reports_the_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join("desktop-update.json");
+        fs::write(&journal, "{\"version\":\"9.9.9\",\"channel\":\"stable\"}").unwrap();
+        assert_eq!(
+            resolve_journal(&journal, "1.2.3"),
+            Ok(JournalResolution::StaleDiscarded)
+        );
+        // Independent read-back: the discard is durable before the caller
+        // gates pairing, so no later start can resume the stale journal.
+        assert!(!journal.exists());
+    }
+    #[test]
+    fn journal_naming_the_running_app_is_approved_for_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join("desktop-update.json");
+        fs::write(&journal, "{\"version\":\"1.2.3\",\"channel\":\"stable\"}").unwrap();
+        assert_eq!(
+            resolve_journal(&journal, "1.2.3"),
+            Ok(JournalResolution::Approved)
+        );
+        assert!(journal.exists(), "approved journals resume, not vanish");
+    }
+    #[test]
+    fn absent_journal_resumes_without_installing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_journal(&dir.path().join("desktop-update.json"), "1.2.3"),
+            Ok(JournalResolution::Absent)
+        );
     }
 }

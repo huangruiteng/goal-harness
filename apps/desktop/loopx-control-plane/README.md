@@ -47,10 +47,24 @@ are retained; an override that still selects another revision fails identity
 verification instead of reporting success.
 
 An update journal resumes an approved runtime installation after restart.
-Concurrent transactions and additional installs before a required restart are
-rejected. Service readiness is distinct from installer completion. macOS keeps
-a verified previous App for **Restore previous version**; restart restores its
-matching runtime too. Goal state is neither deleted nor migrated backwards by
+If the app replacement fails with the previous App verified still in place
+(the installed bundle's layout and `codesign` signature both verify on the
+actual installed target, and the installed runtime still pairs with the
+bundled snapshot),
+the journal is discarded instead of resuming and the App keeps starting
+normally; a failure that cannot verify the previous App keeps the journal and
+surfaces the distinct `app_install_incomplete` recovery state, because the
+macOS installer moves the old App away before installing the new one and an
+error alone does not prove the original location is intact. A journal naming a
+version that never shipped is likewise discarded on resume, but that same
+start must then re-run the App/runtime pairing check the no-journal startup
+path enforces before services connect. Concurrent transactions and additional
+installs before a required restart are rejected. Service readiness is distinct
+from installer completion. macOS keeps
+a verified previous App for **Restore previous version**; the backup copy is
+signature-verified before anything is swapped, while the damaged installation
+being repaired is only located, never required to be intact — that is the
+state rollback exists to fix. Restart restores its matching runtime too. Goal state is neither deleted nor migrated backwards by
 this action, so data-schema compatibility still governs rollback suitability.
 Older backup directories are retained for manual recovery and can consume disk.
 
