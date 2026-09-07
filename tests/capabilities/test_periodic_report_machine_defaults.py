@@ -574,6 +574,33 @@ def test_goal_delivery_plan_cli_diagnoses_incomplete_explicit_override_read_only
         ),
         "mutation_performed": False,
     }
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
+                "--format",
+                "markdown",
+                "periodic-report",
+                "plan-goal-delivery",
+                "--request-json",
+                str(request_path),
+            ]
+        )
+        == 1
+    )
+    assert capsys.readouterr().out == (
+        "# Periodic Report Configuration Error\n\n"
+        "- error: goal periodic_report.route_ref is required\n"
+        "- configuration_source: `goal_override`\n"
+        "- invalid_fields: `route_ref`\n"
+        "- mutation_performed: `False`\n\n"
+        "## Remediation\n\n"
+        "Provide a complete explicit periodic_report override, or clear the "
+        "override to restore live machine-default inheritance.\n\n"
+    )
     assert registry_path.read_bytes() == before["registry"]
     assert request_path.read_bytes() == before["request"]
     assert store_path.read_bytes() == before["machine_configuration"]

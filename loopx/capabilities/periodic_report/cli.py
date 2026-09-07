@@ -6,7 +6,7 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ...extensions.runtime import (
     execute_extension_runtime_binding,
@@ -46,10 +46,16 @@ PrintPayload = Callable[
 ]
 FormatSelector = Callable[..., str]
 AddFormat = Callable[[argparse.ArgumentParser], None]
-ProviderCommandRegistrar = Callable[
-    [argparse._SubParsersAction, AddFormat],
-    None,
-]
+
+
+class ProviderCommandRegistrar(Protocol):
+    def __call__(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+        add_subcommand_format: AddFormat,
+    ) -> None: ...
+
+
 ProviderCommandHandler = Callable[..., int | None]
 
 
@@ -310,6 +316,31 @@ def _archive_openviking(
 
 def render_periodic_report_markdown(payload: dict[str, object]) -> str:
     if not payload.get("ok"):
+        if payload.get("schema_version") == SUBSCRIPTION_ERROR_SCHEMA:
+            invalid_fields = payload.get("invalid_fields")
+            normalized_invalid_fields = (
+                [str(field) for field in invalid_fields]
+                if isinstance(invalid_fields, list)
+                else []
+            )
+            rendered_invalid_fields = ", ".join(
+                f"`{field}`" for field in normalized_invalid_fields
+            )
+            return "\n".join(
+                [
+                    "# Periodic Report Configuration Error",
+                    "",
+                    f"- error: {payload.get('error')}",
+                    f"- configuration_source: `{payload.get('configuration_source')}`",
+                    f"- invalid_fields: {rendered_invalid_fields}",
+                    f"- mutation_performed: `{payload.get('mutation_performed')}`",
+                    "",
+                    "## Remediation",
+                    "",
+                    str(payload.get("remediation") or ""),
+                    "",
+                ]
+            )
         return f"# Periodic Report Error\n\n- error: {payload.get('error')}\n"
     if payload.get("schema_version") == "periodic_report_activation_v0":
         profile = payload.get("profile")
