@@ -46,6 +46,39 @@ class Case:
 
 
 CASES = [
+    Case('rollout_cwd_root', (('loopx/cli_rollout.py', replacement(
+        'resolve_runtime_root(registry, runtime_root_arg, registry_path=registry_path)',
+        'resolve_runtime_root(registry, runtime_root_arg)')),),
+         'tests/control_plane/test_shadow_observable_e2e.py::test_registry_relative_root_does_not_depend_on_callers_cwd[disabled]'),
+    Case('native_note_dropped', ((COORDINATION + 'todo_update.ts', replacement(
+        '  const next: JsonObject = {...todo, ...input.patch};',
+        '  const next: JsonObject = {...todo, ...input.patch};\n  if ("note" in input.patch) next.note = todo.note;')),),
+         'tests/control_plane/test_shadow_observable_native_e2e.py::test_native_unclaimed_edit_and_explicit_note_clear[disabled]'),
+    Case('native_unclaimed_edit_rejected', ((COORDINATION + 'todo_update.ts', replacement(
+        '  if (todo.claimed_by && todo.claimed_by !== input.actor_agent_id) {',
+        '  if (!todo.claimed_by || todo.claimed_by !== input.actor_agent_id) {')),),
+         'tests/control_plane/test_shadow_observable_native_e2e.py::test_native_unclaimed_edit_and_explicit_note_clear[disabled]'),
+    Case('native_diagnostic_truncated', ((COORDINATION + 'todo_update.ts', replacement(
+        'return failure("update_owner_mismatch", "Todo update cannot edit another claim owner\'s work");',
+        'return failure("update_owner_mismatch", "Update rejected");')),),
+         'tests/control_plane/test_shadow_observable_native_e2e.py::test_canonical_argument_intent_and_atomic_claim[disabled]'),
+    Case('cursor_baseline_digest', ((COORDINATION + 'local_authority_shadow_adapter.py', replacement(
+        '        return None if marker is None else marker["partition_digest"]',
+        '''        head = transaction["projection"]
+        return partition_digest({"handoff_mode": head["handoff_mode"], "todos": head["todos"]}
+            if self._partition == TODO_PARTITION else {"leases": head["leases"]})''')),),
+         'tests/control_plane/test_shadow_cursor_recovery_e2e.py::test_abandoned_cursor_survives_all_consumers[2-0-todos]'),
+    Case('qualification_baseline_digest', ((COORDINATION + 'runtime_shadow.ts', replacement(
+        'const digest = marker === null ? null : (marker as JsonObject).partition_digest;',
+        'const digest = marker === null ? localAuthorityShadowHeadDigest(anchor.projection) : (marker as JsonObject).partition_digest;')),),
+         'tests/control_plane/test_shadow_cursor_recovery_e2e.py::test_abandoned_cursor_survives_all_consumers[2-0-leases]'),
+    Case('cursor_digest_unchecked', (
+        (COORDINATION + 'runtime_shadow.ts', replacement(
+            'if (digest !== cursor.last_partition_digest) throw new ShadowLineageError("outbox_cursor_unproved");',
+            '// DELIBERATE MUTANT: accept any syntactically valid cursor digest.')),
+        (COORDINATION + 'local_authority_shadow_adapter.py', replacement(
+            '                or self._cursor_digest(anchor) != cursor["last_partition_digest"]\n', ''))),
+         'tests/control_plane/test_shadow_cursor_recovery_e2e.py::test_forged_applied_digest_holds_every_consumer_without_rewriting_bytes[True-todos]'),
     Case('lineage', ((COORDINATION + 'local_authority_shadow.ts', replacement('  requireLineage(entry.capture_lineage_id === binding.capture_lineage_id, "stale_generation");', '  // DELIBERATE MUTANT: omit active lineage validation.')),),
          'tests/control_plane_ts/local_authority_shadow_outbox.test.ts', 'self-consistent foreign'),
     Case('previous_partition', ((COORDINATION + 'local_authority_shadow.ts', replacement('  requireLineage(request.entry.source.previous_partition_digest === digest, "source_partition_continuity_unproved");', '  // DELIBERATE MUTANT: omit previous partition proof.')),),

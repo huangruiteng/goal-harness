@@ -67,7 +67,7 @@ def test_canonical_argument_intent_and_atomic_claim(caller: Caller) -> None:
     assert stored['leases'][0]['owner'] == 'agent-a' and stored['leases'][0]['write_scopes'] == ['src/**']
     before = native(w, 'read', {})
     rejected = w.call('todo', 'update', '--todo-id', todo, '--agent-id', 'agent-b', '--note', 'Foreign owner edit')
-    assert rejected['error_code'] == 'update_owner_mismatch'
+    assert rejected.get('error_code') == 'update_owner_mismatch', rejected
     assert rejected['error'] == rejected['reason'] == "Todo update cannot edit another claim owner's work"
     assert native(w, 'read', {}) == before
     assert not w.state.exists()
@@ -171,4 +171,4 @@ print(json.dumps({'events':len(store.load())}))
     assert len(log.read_text().splitlines()) > 1
     if w.mode == 'enabled':
         result = w.call('coordination-shadow', 'qualify')
-        assert result['ok'] is False and result['error'] == 'event_log_writer_not_bound', result
+        assert result['ok'] is False and result.get('error') == 'event_log_writer_not_bound', result

@@ -173,7 +173,7 @@ def test_forged_applied_digest_holds_every_consumer_without_rewriting_bytes(
     for command, key in [('inspect', 'inspection'), ('qualify', 'qualification'), ('read-candidate', 'read_candidate')]:
         args = ('--todo-id', todo) if command == 'read-candidate' else ()
         result = w.cli('coordination-shadow', command, *args, success=False)[key]
-        assert result['reason_code'] == 'outbox_cursor_unproved', result
+        assert result.get('reason_code') == 'outbox_cursor_unproved', result
     result = w.drain()
     assert result['ok'] is False and result['reason_code'] == 'outbox_cursor_unproved', result
     after = {p.relative_to(w.runtime): p.read_bytes() for p in w.runtime.rglob('*')

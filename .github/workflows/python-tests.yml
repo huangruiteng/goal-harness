@@ -216,6 +216,8 @@ jobs:
           # Remove the generated source copy before pytest's normal discovery.
           python -c "import shutil; shutil.rmtree('build')"
       - name: Qualify real CLI, mixed writers, process death, and recovery
+        env:
+          LOOPX_SHADOW_COMPARISON_OUTPUT: .local/stage2c-observables
         run: python -m pytest -q -m stage2c_e2e --junitxml=stage2c-e2e.xml
       - name: Reject deliberate correctness regressions
         run: python examples/shared-goal-authority-e2e/mutants.py --output .local/stage2c-mutants
@@ -233,6 +235,7 @@ jobs:
           include-hidden-files: true
           path: |
             stage2c-e2e.xml
+            .local/stage2c-observables/
             installed-wheel.json
             installed-sdist.json
             .local/stage2c-mutants/
