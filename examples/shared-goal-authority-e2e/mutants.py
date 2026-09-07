@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -299,7 +300,10 @@ def main() -> int:
                     shutil.rmtree(cache)
                 mutant = run(case, frozen, output / (case.name + "-RED.log"))
                 log = mutant.stdout + mutant.stderr
-                killed = (mutant.returncode == 1 and "AssertionError" in log
+                # Pytest assertion rewriting can render rich comparisons as
+                # "E   assert ..." without spelling the exception class.
+                assertion = "AssertionError" in log or re.search(r"^E\s+assert ", log, re.MULTILINE) is not None
+                killed = (mutant.returncode == 1 and assertion
                           and any(token in log for token in ("1 failed", "fail 1"))
                           and not any(token in log for token in ("SyntaxError", "ImportError", "ModuleNotFoundError")))
             finally:
