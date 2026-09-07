@@ -300,10 +300,13 @@ def _claim_registry(tmp_path: Path) -> Path:
     return registry
 
 
-def _seed_promoted_store(runtime_root: Path) -> None:
+def _seed_promoted_store(
+    runtime_root: Path, *, handoff_mode: str | None = None
+) -> None:
     """Promote one open agent Todo through the real TypeScript runtime."""
 
     projection = build_todo_runtime_shadow_projection(
+        handoff_mode=handoff_mode,
         goal_id="goal-a",
         todos=[
             {
@@ -1102,39 +1105,27 @@ def test_protocol_failure_kind_absent_means_unavailable(
 
 
 def test_hard_lease_eligibility_rejection_is_valueerror(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A hard-lease eligibility rejection rejects like the legacy kernel.
+    """A real hard-lease Todo without a lease rejects with a usable repair path.
 
-    The unpromoted path raises TaskLeaseError (a ValueError) with a repair
-    hint when a hard-lease Todo has no matching active lease; the promoted
-    path must keep that caller contract instead of reporting an outage.
+    The unpromoted path raises TaskLeaseError (a ValueError) pointing at
+    ``loopx task-lease acquire``; the promoted path must keep that caller
+    contract and carry the same actionable recovery guidance, while leaving
+    the canonical state untouched.
     """
 
-    _engage_fence(tmp_path)
-
-    def _lease_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
-        return {
-            "schema_version": "loopx_coordination_todo_claim_result_v0",
-            "status": "failed",
-            "failure_kind": "decision_rejection",
-            "reason_code": "handoff_mode_requires_lease",
-            "reason": (
-                "hard_lease Todo claim requires an active canonical lease "
-                "held by the claiming agent"
-            ),
-            "todo_id": "todo_a",
-            "actor_agent_id": "agent-a",
-        }
-
-    monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority.effect_runtime_result",
-        _lease_failure,
+    _seed_promoted_store(tmp_path, handoff_mode="hard_lease")
+    registry_path = _claim_registry(tmp_path)
+    store_head = json.loads(
+        (
+            tmp_path / "authority" / "file-v0" / "authority-store-bf21e67b01a351a1.json"
+        ).read_text(encoding="utf-8")
     )
+    head_before = json.dumps(store_head.get("head", {}), sort_keys=True)
     with pytest.raises(ValueError) as exc_info:
         claim_canonical_todo_if_promoted(
-            registry_path=_claim_registry(tmp_path),
+            registry_path=registry_path,
             runtime_root=tmp_path,
             goal_id="goal-a",
             todo_id="todo_a",
@@ -1145,4 +1136,10 @@ def test_hard_lease_eligibility_rejection_is_valueerror(
         )
     assert isinstance(exc_info.value, LocalCoordinationAuthorityRejection)
     assert exc_info.value.code == "handoff_mode_requires_lease"
-    assert "loopx task-lease acquire" not in str(exc_info.value) or True
+    assert "loopx task-lease acquire" in str(exc_info.value)
+    store_after = json.loads(
+        (
+            tmp_path / "authority" / "file-v0" / "authority-store-bf21e67b01a351a1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert json.dumps(store_after.get("head", {}), sort_keys=True) == head_before

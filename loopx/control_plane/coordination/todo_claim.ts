@@ -379,7 +379,9 @@ export async function executeCoordinationTodoClaim(
       !leaseIsActiveForOwner(projection.leases.get(input.todo_id), authority.owner, input.now)) {
     return failure(
       "handoff_mode_requires_lease",
-      "hard_lease Todo claim requires an active canonical lease held by the claiming agent",
+      "hard_lease Todo claim requires an active canonical lease held by the claiming agent; " +
+        "acquire one with `loopx task-lease acquire` for this Todo, which routes through " +
+        "the canonical coordination owner in both promoted and unpromoted modes",
       { todo_id: input.todo_id, actor_agent_id: authority.owner },
       "decision_rejection",
     );

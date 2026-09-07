@@ -122,6 +122,7 @@ def build_todo_runtime_shadow_projection(
     goal_id: str,
     todos: object,
     leases: object = None,
+    handoff_mode: str | None = None,
 ) -> dict[str, object]:
     """Persist the complete canonical Todo consumer record for provider cutover."""
 
@@ -166,7 +167,7 @@ def build_todo_runtime_shadow_projection(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    return {
+    projection: dict[str, object] = {
         "schema_version": LOCAL_AUTHORITY_SHADOW_TRANSACTION_PROJECTION_SCHEMA,
         "goal_id": goal_id,
         "source_authority": "legacy_markdown_and_task_lease",
@@ -179,6 +180,9 @@ def build_todo_runtime_shadow_projection(
             "contract_fields": list(TODO_CANONICAL_READ_RECORD_FIELDS),
         },
     }
+    if handoff_mode is not None:
+        projection["handoff_mode"] = str(handoff_mode)
+    return projection
 
 
 def dispatch_coordination_runtime_shadow(
