@@ -294,16 +294,36 @@ async fn perform(
 // A safe-restart promise after a failed app replacement requires the running
 // App's bundle to still be present -- the pinned macOS updater's install_inner
 // performs rename(old App -> temporary) before rename(new App -> original), so
-// the second rename failing leaves the original location empty -- and the
-// installed runtime to still pair with this App's bundled snapshot. Reuses the
-// rollback boundary's bundle verification instead of a second layout rule.
+// the second rename failing leaves the original location empty -- its actual
+// installed target to pass the same signature/integrity verification the
+// backup boundary uses (a surviving Info.plist and executable do not prove
+// sealed resources are intact), and the installed runtime to still pair with
+// this App's bundled snapshot. A verified backup copy can never substitute for
+// verifying the current installation.
 fn failed_install_left_previous_app_usable(app: &AppHandle) -> bool {
-    crate::update_backup::app_bundle().is_ok()
-        && runtime_revisions_pair(
-            bundled_runtime::identity(app).ok().as_ref(),
-            crate::services::runtime_identity_for_executable(&crate::services::loopx_executable())
-                .as_ref(),
-        )
+    let Ok(executable) = std::env::current_exe() else {
+        return false;
+    };
+    previous_installation_is_usable(
+        &executable,
+        bundled_runtime::identity(app).ok().as_ref(),
+        crate::services::runtime_identity_for_executable(&crate::services::loopx_executable())
+            .as_ref(),
+    )
+}
+
+// Path-level safe-restart predicate shared by the release failure path and
+// tests: the actual installed target (located from the executable, never a
+// caller path) must verify layout AND codesign integrity, and the installed
+// runtime must still pair with the bundled snapshot. Unverified keeps the
+// journal and the `app_install_incomplete` recovery state.
+fn previous_installation_is_usable(
+    executable: &std::path::Path,
+    bundled: Option<&Value>,
+    installed: Option<&Value>,
+) -> bool {
+    crate::update_backup::installed_bundle_verifies(executable)
+        && runtime_revisions_pair(bundled, installed)
 }
 
 // Recovery classification for a failed app replacement: only a verified
@@ -645,6 +665,67 @@ mod tests {
         assert!(!usable);
         assert_eq!(
             install_failure_recovery(usable),
+            ("app_install_incomplete", false)
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn safe_restart_promise_requires_a_signature_verified_paired_installation() {
+        // Review round 4: drive the production safe-restart predicate
+        // (previous_installation_is_usable — the same function the failed
+        // install path calls) over a real ad-hoc signed synthetic
+        // installation. Layout-only evidence accepted a bundle whose sealed
+        // resource was deleted; the shared codesign gate must reject it, and
+        // only a signature-intact, runtime-paired installation may discard
+        // the journal and carry the "可直接重启" (safe restart) promise.
+        use crate::update_backup::signed_app_test_support as support;
+
+        let dir = tempfile::tempdir().unwrap();
+        let bundled = |revision: &str| json!({"source_revision": revision});
+
+        // Complete signed installation + pairing runtime: safe restart, the
+        // journal may be discarded.
+        let intact = support::ad_hoc_signed_synthetic_app(dir.path(), "Intact.app");
+        let usable = previous_installation_is_usable(
+            &support::synthetic_executable(&intact),
+            Some(&bundled("a")),
+            Some(&bundled("a")),
+        );
+        assert!(usable);
+        assert_eq!(install_failure_recovery(usable), ("app_install_failed", true));
+
+        // Missing sealed resource (executable + Info.plist intact): layout
+        // passes, only the signature gate rejects. The journal is retained:
+        // may_discard_journal stays false, so `perform` never reaches
+        // discard_journal and the recovery panel keeps the rollback path.
+        let sealed_missing =
+            support::ad_hoc_signed_synthetic_app(dir.path(), "SealedMissing.app");
+        std::fs::remove_file(
+            sealed_missing.join("Contents/Resources/sealed-resource.txt"),
+        )
+        .unwrap();
+        let damaged = previous_installation_is_usable(
+            &support::synthetic_executable(&sealed_missing),
+            Some(&bundled("a")),
+            Some(&bundled("a")),
+        );
+        assert!(!damaged);
+        assert_eq!(
+            install_failure_recovery(damaged),
+            ("app_install_incomplete", false)
+        );
+
+        // Identity mismatch: the installation's signature is intact but the
+        // installed runtime no longer pairs with the bundled snapshot.
+        let mismatched = previous_installation_is_usable(
+            &support::synthetic_executable(&intact),
+            Some(&bundled("a")),
+            Some(&bundled("b")),
+        );
+        assert!(!mismatched);
+        assert_eq!(
+            install_failure_recovery(mismatched),
             ("app_install_incomplete", false)
         );
     }
