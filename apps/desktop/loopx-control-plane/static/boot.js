@@ -8,7 +8,7 @@ window.loopxBootFailed = (message) => {
 window.loopxBootRetrying = () => {
   panel.dataset.state = "loading";
   panel.setAttribute("aria-busy", "true");
-  status.textContent = "正在重新连接本地控制面…";
+  status.textContent = "正在重新连接本地控制面";
 };
 const update = document.querySelector("#update");
 const channel = document.querySelector("#channel");

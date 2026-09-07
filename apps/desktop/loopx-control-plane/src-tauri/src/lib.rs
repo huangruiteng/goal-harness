@@ -189,11 +189,17 @@ mod tests {
     #[test]
     fn startup_surface_is_visible_and_names_automatic_recovery() {
         let html = include_str!("../../static/index.html");
+        let style = include_str!("../../static/boot.css");
         let script = include_str!("../../static/boot.js");
 
         assert!(html.contains("正在启动本地控制面"));
         assert!(html.contains("aria-busy=\"true\""));
         assert!(html.contains("aria-live=\"polite\""));
+        assert!(html.contains("class=\"status-dots\""));
+        assert!(style.contains("@keyframes boot-progress"));
+        assert!(style.contains("@keyframes mark-breathe"));
+        assert!(style.contains("prefers-reduced-motion: reduce"));
+        assert!(style.contains("main[data-state=\"error\"] .progress::after"));
         assert!(script.contains("desktop_update_status"));
         assert!(script.contains("window.loopxBootRetrying"));
     }
